@@ -37,9 +37,12 @@ compatibility_date = "2025-01-01"
 # ─── PROD (default, branch: prod) ────────────────────────────────────────────
 [vars]
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
+# ALLOW_LOCALHOST is deliberately unset in prod (AC-25.9). A localhost origin
+# on the prod Worker is either a misconfigured embedder or an attacker using
+# us as a free Congress.gov gateway — either way, deny.
 
 [[r2_buckets]]
-binding = "ASSETS"
+binding = "R2_ASSETS"
 bucket_name = "voter-info-widget-assets"
 
 [observability]
@@ -52,11 +55,16 @@ enabled = true
 name = "voter-info-widget-proxy-dev"
 
 [env.dev.vars]
-# Dev is wide-open CORS so we can point any local host at it for smoke tests.
-ALLOWED_ORIGINS = "*"
+# Dev intentionally widens the CORS origin set AND permits localhost so
+# developers can point any local harness at the dev Worker for smoke tests.
+# The "*" value is parsed by our worker as a single whitelist entry that
+# never matches any real Origin header, so actual access requires a real
+# Origin to be on the list or ALLOW_LOCALHOST=true. In dev we want the latter.
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080,http://localhost:4173"
+ALLOW_LOCALHOST = "true"
 
 [[env.dev.r2_buckets]]
-binding = "ASSETS"
+binding = "R2_ASSETS"
 bucket_name = "voter-info-widget-assets-dev"
 
 [env.dev.observability]
@@ -73,7 +81,7 @@ name = "voter-info-widget-proxy-uat"
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080"
 
 [[env.uat.r2_buckets]]
-binding = "ASSETS"
+binding = "R2_ASSETS"
 bucket_name = "voter-info-widget-assets-uat"
 
 [env.uat.observability]
@@ -90,7 +98,7 @@ name = "voter-info-widget-proxy-stg"
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 
 [[env.stg.r2_buckets]]
-binding = "ASSETS"
+binding = "R2_ASSETS"
 bucket_name = "voter-info-widget-assets-stg"
 
 [env.stg.observability]
@@ -104,7 +112,8 @@ name = "voter-info-widget-proxy-preview"
 
 [env.preview.vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173"
+ALLOW_LOCALHOST = "true"
 
 [[env.preview.r2_buckets]]
-binding = "ASSETS"
+binding = "R2_ASSETS"
 bucket_name = "voter-info-widget-assets-dev"

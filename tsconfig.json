@@ -19,6 +19,6 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "tests", "scripts"],
-  "exclude": ["proxy", "node_modules", "dist"]
+  "include": ["src", "tests", "scripts", "proxy/lib.ts"],
+  "exclude": ["proxy/worker.ts", "node_modules", "dist"]
 }
