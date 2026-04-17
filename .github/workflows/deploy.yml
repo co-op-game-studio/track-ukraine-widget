@@ -141,3 +141,69 @@ jobs:
           # CONGRESS_API_KEY is set once per-env via `wrangler secret put` —
           # not rotated on every deploy.
           command: deploy ${{ env.WRANGLER_ENV && format('--env {0}', env.WRANGLER_ENV) || '' }}
+
+      # Post-deploy smoke test — hits the real edge to confirm the Worker
+      # actually responds. Non-prod is gated by Cloudflare Access (FR-29 /
+      # ADR-008), so we carry service-token headers for dev/uat/stg and
+      # hit prod without auth.
+      #
+      # Expressed as a single bash block so the auth-header composition
+      # is visible at a glance.
+      - name: Post-deploy smoke
+        env:
+          ENV_NAME: ${{ needs.resolve.outputs.env_name }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          case "$ENV_NAME" in
+            prod) HOST="https://vote.cogs.it.com"; AUTH_HEADERS=() ;;
+            dev)  HOST="https://dev.vote.cogs.it.com"
+                  AUTH_HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+            uat)  HOST="https://uat.vote.cogs.it.com"
+                  AUTH_HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+            stg)  HOST="https://stg.vote.cogs.it.com"
+                  AUTH_HEADERS=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+            *) echo "Unknown ENV_NAME=$ENV_NAME"; exit 1 ;;
+          esac
+
+          # Fail loud if non-prod deploy but secrets missing.
+          if [[ "$ENV_NAME" != "prod" && -z "$CF_ACCESS_CLIENT_ID" ]]; then
+            echo "::error::CF_ACCESS_CLIENT_ID not set — non-prod smoke will hit Access challenge"
+            exit 1
+          fi
+
+          echo "Smoking $HOST"
+
+          # 1. Static bundle shipped.
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" "$HOST/voter-info-widget.iife.js")
+          if [[ "$STATUS" != "200" ]]; then
+            echo "::error::Bundle fetch returned $STATUS (expected 200)"; exit 1
+          fi
+
+          # 2. API proxies with allowed Origin.
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
+            -H "Origin: https://trackukraine.com" \
+            "$HOST/api/census/geocoder/geographies/onelineaddress?address=1600+Pennsylvania+Ave+NW+Washington+DC+20500&benchmark=Public_AR_Current&vintage=Current_Current&format=json")
+          if [[ "$STATUS" != "200" ]]; then
+            echo "::error::Census API returned $STATUS (expected 200)"; exit 1
+          fi
+
+          # 3. Origin enforcement — disallowed origin should 403.
+          #    Only run against prod/stg/uat (dev has permissive CORS).
+          if [[ "$ENV_NAME" != "dev" ]]; then
+            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
+              -H "Origin: https://evil.example.com" "$HOST/api/census/x")
+            if [[ "$STATUS" != "403" ]]; then
+              echo "::error::Disallowed origin returned $STATUS (expected 403)"; exit 1
+            fi
+          fi
+
+          # 4. Non-v3 congress path must 400 (AC-27.6) and NOT send our key upstream.
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
+            -H "Origin: https://trackukraine.com" "$HOST/api/congress/admin")
+          if [[ "$STATUS" != "400" ]]; then
+            echo "::error::Non-v3 congress path returned $STATUS (expected 400)"; exit 1
+          fi
+
+          echo "Smoke passed for $ENV_NAME @ $HOST"
