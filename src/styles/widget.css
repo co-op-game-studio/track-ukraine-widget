@@ -1,0 +1,970 @@
+/**
+ * Widget Styles — v2.2.0 (Track Ukraine visual identity)
+ *
+ * Design language observed live on trackukraine.com (Fourthwall host):
+ *   - Background: sky cyan ≈ #00B4E6 (host-owned — widget stays transparent)
+ *   - Typography: Hanken Grotesk 500 / 700 / 900; italic 900 for hero
+ *   - Headings: UPPERCASE ITALIC with hard 1px/1px black drop shadow
+ *   - Primary CTA: yellow #fff100 bg + black text + uppercase bold
+ *   - Flat design: 0px border-radius everywhere. No box shadows except hero text.
+ *   - Colors: yellow #fff100, black #000000, white #ffffff — minimal third colors.
+ *   - Grid: chip overview → single full-width detail panel on open.
+ *
+ * Traces to: US-7/8/9, spec AC-9.*
+ */
+
+/* Hanken Grotesk from Google Fonts (Fourthwall loads it locally; we mirror). */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,500;0,700;0,900;1,700;1,900&display=swap');
+
+:host,
+.viw-root {
+  /* ── Palette ── */
+  --viw-yellow: #fff100;
+  --viw-yellow-dark: #e6d600;
+  --viw-black: #000000;
+  --viw-white: #ffffff;
+  --viw-off: #f5f5f5;
+  --viw-border: #000000;
+  --viw-border-soft: #d4d4d4;
+  --viw-muted: #555555;
+  --viw-subtle: #777777;
+
+  /* Party colors — kept functional but flattened (square, no gradient) */
+  --viw-dem: #1d4ed8;
+  --viw-rep: #b91c1c;
+  --viw-ind: #555555;
+
+  /* Obstruction / valence */
+  --viw-valence-sponsor-pro:  #146c2e;
+  --viw-valence-voted-pro:    #1e8a3c;
+  --viw-valence-unstated:     #777777;
+  --viw-valence-voted-anti:   #b91c1c;
+  --viw-valence-sponsor-anti: #7f1d1d;
+  --viw-valence-sponsor-pro-bg:  #dcfce7;
+  --viw-valence-voted-pro-bg:    #ecfdf5;
+  --viw-valence-unstated-bg:     transparent;
+  --viw-valence-voted-anti-bg:   #fff1f2;
+  --viw-valence-sponsor-anti-bg: #fee2e2;
+
+  /* Type */
+  --viw-font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --viw-hero-shadow: 1px 1px 0 var(--viw-black), 2px 2px 0 var(--viw-black);
+}
+
+.viw-root {
+  font-family: var(--viw-font);
+  color: var(--viw-black);
+  background: transparent; /* AC-9.8 — let host bg show through */
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 3rem;
+  line-height: 1.5;
+  box-sizing: border-box;
+  font-weight: 500;
+}
+.viw-root *,
+.viw-root *::before,
+.viw-root *::after { box-sizing: border-box; }
+
+/* ── Hero header ── */
+
+.viw-root-header {
+  text-align: center;
+  margin-bottom: 2.25rem;
+  padding: 0.5rem 0;
+}
+
+.viw-root-title {
+  font-family: var(--viw-font);
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: -0.01em;
+  line-height: 1;
+  margin: 0 0 0.75rem;
+  color: var(--viw-white);
+  text-shadow: var(--viw-hero-shadow);
+}
+
+.viw-root-subtitle {
+  color: var(--viw-white);
+  text-shadow: 1px 1px 0 var(--viw-black);
+  font-weight: 700;
+  font-size: 1.05rem;
+  margin: 0 auto;
+  max-width: 680px;
+}
+
+/* If the widget is on a light-background host, the subtitle would disappear.
+   Add a fallback: if the widget's own bg is set by the host via inheritance,
+   you can wrap the widget in a cyan band. For embedders that want dark text
+   on light, override .viw-root-title { color: black; text-shadow: none; }  */
+
+.viw-root-footer {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255,255,255,0.3);
+  color: var(--viw-white);
+  font-size: 0.78rem;
+  text-align: center;
+  text-shadow: 1px 1px 0 rgba(0,0,0,0.6);
+}
+
+/* ── AddressInput ── */
+
+.viw-address-form {
+  margin-bottom: 2rem;
+  max-width: 680px;
+  margin-inline: auto;
+}
+
+.viw-address-label {
+  display: block;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+  color: var(--viw-white);
+  text-shadow: 1px 1px 0 var(--viw-black);
+  margin-bottom: 0.5rem;
+}
+
+.viw-address-row {
+  display: flex;
+  gap: 0;
+  flex-wrap: wrap;
+}
+
+.viw-address-input {
+  flex: 1 1 300px;
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  border: 2px solid var(--viw-black);
+  border-radius: 0;
+  font-size: 1rem;
+  font-family: inherit;
+  color: inherit;
+  background: var(--viw-white);
+}
+.viw-address-input:focus {
+  outline: 3px solid var(--viw-yellow);
+  outline-offset: -3px;
+}
+
+.viw-address-submit {
+  padding: 0.85rem 1.5rem;
+  border: 2px solid var(--viw-black);
+  border-left-width: 0; /* flush with input */
+  border-radius: 0;
+  background: var(--viw-yellow);
+  color: var(--viw-black);
+  font-size: 1rem;
+  font-weight: 900;
+  font-style: italic;
+  font-family: inherit;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: background-color 0.1s linear;
+}
+.viw-address-submit:hover:not(:disabled) { background: var(--viw-yellow-dark); }
+.viw-address-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.viw-address-error {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-rep);
+  color: var(--viw-rep);
+  font-weight: 700;
+  font-size: 0.875rem;
+}
+
+/* ── ErrorBanner ── */
+
+.viw-error-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin: 0 auto 1rem;
+  max-width: 680px;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-rep);
+  color: var(--viw-rep);
+  font-weight: 700;
+}
+.viw-error-banner-close {
+  background: none; border: none; font-size: 1.1rem; cursor: pointer;
+  color: inherit; font-family: inherit;
+}
+
+/* ── Results state heading ── */
+
+.viw-results { margin-top: 0.5rem; }
+
+.viw-results-heading {
+  text-align: center;
+  margin: 1rem 0 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.viw-results-heading-state {
+  font-family: var(--viw-font);
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--viw-white);
+  text-shadow: var(--viw-hero-shadow);
+  line-height: 1;
+}
+
+.viw-results-heading-district {
+  font-size: 0.88rem;
+  color: var(--viw-white);
+  text-shadow: 1px 1px 0 var(--viw-black);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.viw-results-empty {
+  padding: 1.5rem;
+  text-align: center;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  color: var(--viw-black);
+  font-weight: 700;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+/* ── Chip grid ── */
+
+.viw-chipgrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (min-width: 720px) {
+  .viw-chipgrid {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.viw-chipgrid-col {
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  padding: 1rem;
+}
+
+.viw-chipgrid-colhead {
+  font-family: var(--viw-font);
+  font-size: 0.78rem;
+  font-weight: 900;
+  font-style: italic;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  background: var(--viw-black);
+  color: var(--viw-yellow);
+  display: inline-block;
+  margin-bottom: 0.75rem;
+}
+
+.viw-chipgrid-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+/* ── Individual chip ── */
+
+.viw-chip {
+  appearance: none;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  border-radius: 0;
+  padding: 0.85rem 0.75rem;
+  width: 160px;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.4rem;
+  transition: transform 0.1s ease, background-color 0.12s ease;
+}
+
+.viw-chip:hover { background: var(--viw-off); }
+.viw-chip:active { transform: translate(1px, 1px); }
+.viw-chip:focus-visible {
+  outline: 3px solid var(--viw-yellow);
+  outline-offset: -3px;
+}
+
+.viw-chip-selected {
+  background: var(--viw-yellow);
+  border-color: var(--viw-black);
+}
+.viw-chip-selected:hover { background: var(--viw-yellow); }
+
+.viw-chip-vacant {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.viw-chip-photo-wrap {
+  width: 88px;
+  height: 88px;
+  border: 2px solid var(--viw-black);
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--viw-off);
+  position: relative;
+}
+
+.viw-chip-photo,
+.viw-chip-photo-placeholder {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center top;
+  display: block;
+}
+
+.viw-chip-photo-placeholder {
+  background: linear-gradient(135deg, #ddd 25%, #eee 25%, #eee 50%, #ddd 50%, #ddd 75%, #eee 75%);
+  background-size: 12px 12px;
+}
+
+.viw-chip-name {
+  font-weight: 900;
+  font-style: italic;
+  font-size: 0.95rem;
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: -0.005em;
+  color: var(--viw-black);
+}
+
+.viw-chip-subtitle {
+  font-size: 0.72rem;
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+.viw-chip-party {
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  padding: 0.12rem 0.5rem;
+  color: var(--viw-white);
+  text-transform: uppercase;
+}
+.viw-chip-party-dem { background: var(--viw-dem); }
+.viw-chip-party-rep { background: var(--viw-rep); }
+.viw-chip-party-ind { background: var(--viw-ind); }
+
+/* ── Detail slot (full-width panel beneath chip grid) ── */
+
+.viw-detail-slot {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.28s ease-out;
+  overflow: hidden;
+}
+.viw-detail-slot > * {
+  min-height: 0;
+  overflow: hidden;
+}
+.viw-detail-slot-open { grid-template-rows: 1fr; }
+.viw-detail-slot-open > * { overflow: visible; }
+
+.viw-detail {
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  color: var(--viw-black);
+  animation: viw-detail-in 0.28s ease-out both;
+}
+@keyframes viw-detail-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.viw-detail-dem { border-top: 8px solid var(--viw-dem); }
+.viw-detail-rep { border-top: 8px solid var(--viw-rep); }
+.viw-detail-ind { border-top: 8px solid var(--viw-ind); }
+
+.viw-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 2px solid var(--viw-black);
+}
+
+.viw-detail-identity {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.viw-detail-photo {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  object-position: center top;
+  border: 2px solid var(--viw-black);
+  background: var(--viw-off);
+  border-radius: 0; /* AC-9.2 flat */
+}
+
+.viw-detail-photo-placeholder {
+  background: linear-gradient(135deg, #ddd 25%, #eee 25%, #eee 50%, #ddd 50%, #ddd 75%, #eee 75%);
+  background-size: 12px 12px;
+}
+
+.viw-detail-name {
+  margin: 0 0 0.35rem;
+  font-family: var(--viw-font);
+  font-size: 1.6rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  line-height: 1.05;
+  letter-spacing: -0.005em;
+}
+
+.viw-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.6rem;
+  align-items: center;
+  font-size: 0.85rem;
+  margin-bottom: 0.35rem;
+}
+
+.viw-detail-party {
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  padding: 0.15rem 0.55rem;
+  color: var(--viw-white);
+  text-transform: uppercase;
+  font-style: italic;
+}
+.viw-detail-party-dem { background: var(--viw-dem); }
+.viw-detail-party-rep { background: var(--viw-rep); }
+.viw-detail-party-ind { background: var(--viw-ind); }
+
+.viw-detail-state,
+.viw-detail-chamber {
+  color: var(--viw-muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+}
+
+.viw-detail-link {
+  color: var(--viw-black);
+  background: var(--viw-yellow);
+  padding: 0.2rem 0.5rem;
+  text-decoration: none;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
+  display: inline-block;
+}
+.viw-detail-link:hover { background: var(--viw-yellow-dark); }
+
+.viw-detail-close {
+  background: none;
+  border: 2px solid var(--viw-black);
+  color: var(--viw-black);
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 900;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-family: inherit;
+  flex-shrink: 0;
+  transition: background-color 0.1s linear;
+}
+.viw-detail-close:hover { background: var(--viw-black); color: var(--viw-yellow); }
+
+/* Tabs */
+.viw-detail-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 1.25rem;
+  border-bottom: 2px solid var(--viw-black);
+  background: var(--viw-off);
+}
+
+.viw-detail-tab {
+  background: transparent;
+  border: 2px solid transparent;
+  border-bottom: none;
+  padding: 0.75rem 1rem;
+  font-family: inherit;
+  font-weight: 900;
+  font-style: italic;
+  font-size: 0.88rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--viw-muted);
+  cursor: pointer;
+  margin-bottom: -2px;
+}
+.viw-detail-tab:hover { color: var(--viw-black); }
+.viw-detail-tab.active {
+  background: var(--viw-white);
+  border-color: var(--viw-black);
+  border-bottom-color: var(--viw-white);
+  color: var(--viw-black);
+}
+.viw-detail-tab:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.viw-detail-body { padding: 1rem 1.25rem 1.25rem; }
+.viw-detail-nonvoting {
+  padding: 1rem;
+  color: var(--viw-muted);
+  font-style: italic;
+}
+
+/* ── UkraineScoreBadge ── */
+
+.viw-score {
+  padding: 1rem 1.25rem;
+  background: var(--viw-off);
+  border-top: 2px solid var(--viw-black);
+  border-bottom: 2px solid var(--viw-black);
+}
+
+.viw-score-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.viw-score-title {
+  font-family: var(--viw-font);
+  font-size: 0.75rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--viw-black);
+}
+
+.viw-score-value {
+  font-family: var(--viw-font);
+  font-weight: 900;
+  font-style: italic;
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+  color: var(--viw-black);
+}
+
+.viw-score-bar { margin: 0.6rem 0 0.4rem; }
+
+.viw-score-bar-track {
+  position: relative;
+  height: 14px;
+  background: linear-gradient(to right,
+    hsl(0 75% 45%) 0%, hsl(30 80% 50%) 25%, hsl(60 90% 48%) 50%,
+    hsl(90 75% 40%) 75%, hsl(120 75% 35%) 100%);
+  border: 2px solid var(--viw-black);
+}
+.viw-score-bar-marker {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 18px; height: 18px;
+  border: 2px solid var(--viw-black);
+  background: var(--viw-white);
+}
+.viw-score-bar-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.65rem;
+  color: var(--viw-muted);
+  margin-top: 0.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+.viw-score-context {
+  font-size: 0.8rem;
+  color: var(--viw-muted);
+  line-height: 1.35;
+}
+.viw-score-context strong {
+  color: var(--viw-black);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+}
+
+.viw-score-obstruction-note {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-valence-voted-anti);
+  color: var(--viw-valence-sponsor-anti);
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.viw-score-abstention-note {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-yellow);
+  color: #5c4900;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.viw-score-na {
+  color: var(--viw-muted);
+  font-style: italic;
+}
+.viw-score-na .viw-score-bar,
+.viw-score-loading .viw-score-bar {
+  background: var(--viw-border-soft);
+  height: 14px;
+  border: 2px solid var(--viw-black);
+}
+
+/* ── Valence row backgrounds ── */
+
+.viw-valence-sponsor-pro   { background-color: var(--viw-valence-sponsor-pro-bg); }
+.viw-valence-voted-pro     { background-color: var(--viw-valence-voted-pro-bg); }
+.viw-valence-unstated      { }
+.viw-valence-voted-anti    { background-color: var(--viw-valence-voted-anti-bg); }
+.viw-valence-sponsor-anti  { background-color: var(--viw-valence-sponsor-anti-bg); }
+
+/* Vote/bill tables */
+.viw-votelist-scroll { overflow-x: auto; }
+
+.viw-votelist,
+.viw-billlist {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.viw-votelist th,
+.viw-billlist th,
+.viw-votelist td,
+.viw-billlist td {
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--viw-border-soft);
+}
+
+.viw-votelist thead th,
+.viw-billlist thead th {
+  font-family: var(--viw-font);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  color: var(--viw-white);
+  background: var(--viw-black);
+  border: none;
+}
+
+.viw-votelist-bill .viw-votelist-billnum {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.viw-votelist-bill .viw-votelist-billtitle {
+  color: var(--viw-muted);
+  font-size: 0.82rem;
+  margin-top: 0.15rem;
+  line-height: 1.35;
+  font-style: normal;
+  font-weight: 500;
+  text-transform: none;
+}
+
+.viw-votelist-date {
+  color: var(--viw-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.viw-vote {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 900;
+  font-style: italic;
+  color: var(--viw-white);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.viw-vote-aye { background: var(--viw-valence-voted-pro); }
+.viw-vote-nay { background: var(--viw-valence-voted-anti); }
+.viw-vote-abstain { background: var(--viw-valence-unstated); }
+.viw-vote.viw-vote-valence-sponsor-pro   { background: var(--viw-valence-sponsor-pro); }
+.viw-vote.viw-vote-valence-voted-pro     { background: var(--viw-valence-voted-pro); }
+.viw-vote.viw-vote-valence-unstated      { background: var(--viw-valence-unstated); }
+.viw-vote.viw-vote-valence-voted-anti    { background: var(--viw-valence-voted-anti); }
+.viw-vote.viw-vote-valence-sponsor-anti  { background: var(--viw-valence-sponsor-anti); }
+
+/* Procedural rows */
+.viw-vote-row-procedural { background: rgba(0,0,0,0.015); }
+.viw-vote-row-procedural td {
+  font-size: 0.82rem;
+  color: var(--viw-muted);
+}
+
+.viw-vote-chamber-tag,
+.viw-vote-weight-tag {
+  display: inline-block;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--viw-off);
+  color: var(--viw-muted);
+  border: 1px solid var(--viw-border-soft);
+}
+
+.viw-vote-cluster-toggle {
+  display: inline-block;
+  margin-top: 0.35rem;
+  background: none;
+  border: 1px solid var(--viw-black);
+  color: var(--viw-black);
+  font-family: inherit;
+  font-size: 0.72rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+.viw-vote-cluster-toggle:hover { background: var(--viw-black); color: var(--viw-yellow); }
+
+.viw-vote-outcome {
+  color: var(--viw-muted);
+  font-size: 0.82rem;
+}
+
+.viw-votelist-empty,
+.viw-billlist-empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--viw-muted);
+  font-weight: 700;
+  background: var(--viw-off);
+  border: 1px solid var(--viw-border-soft);
+  font-size: 0.88rem;
+}
+.viw-votelist-error,
+.viw-billlist-error {
+  padding: 0.75rem;
+  background: var(--viw-white);
+  color: var(--viw-rep);
+  border: 2px solid var(--viw-rep);
+  font-weight: 700;
+  font-size: 0.875rem;
+}
+
+/* BillList */
+
+.viw-billlist-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0.85rem;
+  border: 2px solid var(--viw-black);
+}
+.viw-billlist-tab {
+  flex: 1;
+  background: var(--viw-white);
+  border: none;
+  padding: 0.55rem 0.75rem;
+  font-family: inherit;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--viw-muted);
+  cursor: pointer;
+  border-right: 2px solid var(--viw-black);
+}
+.viw-billlist-tab:last-child { border-right: none; }
+.viw-billlist-tab:hover { color: var(--viw-black); }
+.viw-billlist-tab.active {
+  background: var(--viw-black);
+  color: var(--viw-yellow);
+}
+
+.viw-billlist-link {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  color: var(--viw-black);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
+  white-space: nowrap;
+}
+.viw-billlist-link:hover {
+  background: var(--viw-yellow);
+  text-decoration: none;
+}
+
+.viw-billlist-featured {
+  color: var(--viw-black);
+  background: var(--viw-yellow);
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.viw-billlist-title { font-size: 0.88rem; line-height: 1.35; }
+.viw-billlist-action { font-size: 0.8rem; color: var(--viw-muted); max-width: 380px; }
+
+.viw-billlist-row-featured td {
+  background: linear-gradient(to right,
+    rgba(255, 241, 0, 0.1), rgba(255, 241, 0, 0.0) 45%);
+}
+
+.viw-billlist-row-clickable { cursor: pointer; }
+.viw-billlist-row-clickable:hover td {
+  background-color: rgba(0, 180, 230, 0.06);
+}
+.viw-billlist-expand-hint { color: var(--viw-subtle); margin-left: 0.25rem; font-weight: 900; }
+
+.viw-billlist-summary-row td {
+  padding: 0 !important;
+  border-bottom: 2px solid var(--viw-black);
+  background: var(--viw-off);
+}
+.viw-billlist-summary { padding: 0.85rem 1rem; }
+.viw-billlist-summary-title {
+  font-family: var(--viw-font);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  color: var(--viw-black);
+  margin-bottom: 0.4rem;
+}
+.viw-billlist-summary-meta {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.72rem;
+  color: var(--viw-muted);
+  font-style: normal;
+}
+.viw-billlist-summary-text p {
+  margin: 0 0 0.55rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--viw-black);
+}
+.viw-billlist-summary-text p:last-child { margin: 0; }
+.viw-billlist-summary-na {
+  color: var(--viw-muted);
+  font-style: italic;
+  font-size: 0.88rem;
+}
+
+/* Pagination */
+.viw-billlist-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--viw-border-soft);
+}
+.viw-billlist-pager {
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  color: var(--viw-black);
+  padding: 0.4rem 0.9rem;
+  font-family: inherit;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.viw-billlist-pager:hover:not(:disabled) {
+  background: var(--viw-black);
+  color: var(--viw-yellow);
+}
+.viw-billlist-pager:disabled { opacity: 0.35; cursor: not-allowed; }
+.viw-billlist-pageinfo {
+  color: var(--viw-muted);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Obstruction markers */
+.viw-obstruction-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.6rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  font-style: italic;
+  color: var(--viw-white);
+  background: var(--viw-valence-voted-anti);
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+.viw-vote-row-obstruction td:first-child,
+.viw-billlist-row-obstruction td:first-child {
+  box-shadow: inset 4px 0 0 var(--viw-valence-voted-anti);
+}

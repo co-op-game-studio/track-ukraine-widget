@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voter Info Widget — Dev</title>
+    <style>
+      /* Dev-only: mimic the trackukraine.com cyan background so we can see how
+         the widget looks when embedded on the host. The production widget
+         stays transparent (AC-9.8). */
+      html, body { margin: 0; padding: 0; min-height: 100vh; }
+      body {
+        background: #00b4e6;
+        font-family: "Hanken Grotesk", system-ui, sans-serif;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

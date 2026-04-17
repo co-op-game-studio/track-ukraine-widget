@@ -1,0 +1,51 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches: [main]
+  # Also run on pushes directly to main so a bypassed merge still gets checked
+  push:
+    branches: [main]
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-typecheck-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (widget + worker)
+        run: npm run typecheck
+
+      - name: Unit + integration tests
+        run: npm test
+
+      - name: Build widget bundle
+        run: npm run build:lib
+
+      - name: Bundle size check (< 400 KB gzipped)
+        run: |
+          SIZE=$(gzip -c dist/voter-info-widget.iife.js | wc -c)
+          echo "Gzipped bundle size: $SIZE bytes"
+          # NFR-4 revised: 400 KB ceiling covers React runtime + inlined bill
+          # metadata. The larger roster dataset is served separately via R2
+          # (AC-24.6). Current measured bundle: ~310 KB gzipped.
+          if [ $SIZE -gt 409600 ]; then
+            echo "❌ Bundle exceeds 400 KB gzipped (spec NFR-4)"
+            exit 1
+          fi
+          echo "✅ Bundle under 400 KB gzipped"

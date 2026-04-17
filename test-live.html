@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Voter Info Widget — Live Test</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #00b4e6;
+        font-family: "Hanken Grotesk", system-ui, sans-serif;
+      }
+      .host-banner {
+        max-width: 960px;
+        margin: 2rem auto;
+        padding: 1rem;
+        background: rgba(255, 255, 255, 0.1);
+        color: white;
+        font-weight: 700;
+        text-align: center;
+        border: 2px dashed rgba(255, 255, 255, 0.4);
+      }
+      .host-banner small { display: block; font-weight: 400; opacity: 0.85; margin-top: 0.35rem; }
+    </style>
+  </head>
+  <body>
+    <div class="host-banner">
+      HOST PAGE (simulating trackukraine.com)
+      <small>
+        Everything below this banner is served by the Cloudflare Worker at
+        voter-info-widget-proxy.kody-manharth.workers.dev
+      </small>
+    </div>
+
+    <!-- The production embed snippet: -->
+    <script src="https://voter-info-widget-proxy.kody-manharth.workers.dev/voter-info-widget.iife.js"></script>
+    <voter-info-widget
+      api-base="https://voter-info-widget-proxy.kody-manharth.workers.dev">
+    </voter-info-widget>
+  </body>
+</html>

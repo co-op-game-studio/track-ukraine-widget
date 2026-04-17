@@ -1,0 +1,90 @@
+name: Refresh Curated Data
+
+on:
+  # Weekly on Sunday at 08:00 UTC
+  schedule:
+    - cron: '0 8 * * 0'
+  # Allow manual trigger from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run curator (bills + rosters)
+        env:
+          VITE_CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+        run: npm run curate
+
+      - name: Check for changes
+        id: check
+        run: |
+          if git diff --quiet src/data/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No changes in src/data/ — nothing to PR."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Changes detected in src/data/. Preparing PR..."
+          fi
+
+      - name: Stats for PR body
+        if: steps.check.outputs.changed == 'true'
+        id: stats
+        run: |
+          {
+            echo "bills_diff<<EOF"
+            git diff --stat src/data/ukraineBills.json
+            echo "EOF"
+            echo "votes_diff<<EOF"
+            git diff --stat src/data/ukraineVotes.json
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open PR with refreshed data
+        if: steps.check.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: |
+            chore(data): weekly refresh of curated Ukraine data
+
+            Re-ran the curator and roster builder. See files changed for diffs.
+          title: 'chore(data): weekly refresh of curated Ukraine data'
+          body: |
+            Automated weekly refresh of `src/data/ukraineBills.json` and `src/data/ukraineVotes.json`.
+
+            **Bills diff:**
+            ```
+            ${{ steps.stats.outputs.bills_diff }}
+            ```
+
+            **Rosters diff:**
+            ```
+            ${{ steps.stats.outputs.votes_diff }}
+            ```
+
+            Review the JSON diffs; if the changes look sensible (new votes on
+            existing curated bills, or a curator output that matches real API
+            data), merge this PR. Deploy runs on push to `main`.
+
+            See spec FR-24, FR-26 and docs/deployment.md for context.
+          branch: chore/refresh-curated-data
+          delete-branch: true
+          labels: |
+            data-refresh
+            automated

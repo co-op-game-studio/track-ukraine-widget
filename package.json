@@ -1,0 +1,41 @@
+{
+  "name": "voter-info-widget",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "build:lib": "tsc && vite build --mode lib",
+    "build:all": "npm run build && npm run build:lib",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p proxy/tsconfig.json",
+    "spec:refresh": "node scripts/extract-openapi.mjs",
+    "curate": "tsx scripts/build-curated-bills.ts && tsx scripts/build-vote-rosters.ts",
+    "curate:bills": "tsx scripts/build-curated-bills.ts",
+    "curate:rosters": "tsx scripts/build-vote-rosters.ts"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260417.1",
+    "@testing-library/jest-dom": "^6.6.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "jsdom": "^25.0.0",
+    "linkedom": "^0.18.12",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.83.0"
+  }
+}

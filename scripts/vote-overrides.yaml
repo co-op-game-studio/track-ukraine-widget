@@ -1,0 +1,80 @@
+# Per-roll-call overrides to the curator's regex-based vote classifier.
+# See spec FR-22 and docs/design.md §4.7b.
+#
+# Each entry keys on (chamber, congress, session, rollCall) — that tuple
+# uniquely identifies a vote. Any of (weight, directionMultiplier, kind, note)
+# may be set; unset fields inherit from the regex classifier.
+#
+# Rules of thumb for assigning weights:
+#   1.0 = final passage / became law
+#   0.9 = concur, conference report, resolving differences
+#   0.7 = substantive floor amendment (e.g., strip-funding)
+#   0.45 = cloture on a version that ultimately became law
+#   0.3 = motion to proceed on a version that ultimately became law
+#   0.25 = budget-discipline waiver
+#   0   = everything whose direction depends on context we can't parse
+#         (motion-to-table, motion-to-reconsider, cloture on a failed
+#         earlier iteration of a bill that later passed in a different form)
+#
+# directionMultiplier:
+#   +1 = vote direction matches bill direction (Aye on pro-UA = pro-UA)
+#   -1 = inverse (motion-to-recommit: Aye = attempt to kill)
+#    0 = ambiguous / exclude from scoring even if weight is non-zero
+#
+# When in doubt, prefer weight: 0 over guessing direction.
+
+overrides:
+
+  # ────────────────────────────────────────────────────────────────────
+  # HR 815 (118th Congress, Session 2) — the $95B security supplemental.
+  #
+  # This bill went through MULTIPLE legislative iterations. The Feb 2024
+  # roll calls are on an earlier form that the Senate ultimately killed
+  # to force the House to produce a better version. Ukraine-hawk senators
+  # (Schumer D-NY, McConnell R-KY, Risch R-ID) voted NAY on these Feb 2024
+  # procedurals as part of the maneuver to get Ukraine funding restored.
+  #
+  # The final bill — passed in April 2024 — had the full $61B Ukraine
+  # package. The Feb votes are unscorable without context the regex
+  # classifier lacks, so we zero them out.
+  # ────────────────────────────────────────────────────────────────────
+
+  - chamber: Senate
+    congress: 118
+    session: 2
+    rollCall: 39
+    bill: HR815
+    weight: 0
+    note: >
+      Feb 7 2024 "third cloture motion on motion to proceed — not invoked."
+      Part of the maneuver to kill the border-only version of HR 815.
+      Voting Nay here is context-dependent: Ukraine-hawk senators voted Nay
+      to force a better bill. The April 2024 version with Ukraine funding
+      DID pass. Unscorable without that context.
+
+  - chamber: Senate
+    congress: 118
+    session: 2
+    rollCall: 41
+    bill: HR815
+    weight: 0
+    note: >
+      Feb 8 2024 reconsideration of the cloture vote. Same contextual
+      ambiguity as rollCall 39.
+
+  - chamber: Senate
+    congress: 118
+    session: 1
+    rollCall: 332
+    bill: HR815
+    weight: 0
+    note: >
+      Dec 6 2023 second cloture motion — not invoked (49-51).
+      This is an EARLIER iteration of HR 815 from session 1 (2023), before
+      the Feb 2024 border-deal version and before the April 2024 version
+      that ultimately became law. Same iteration-context ambiguity.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Future overrides go here. Keep entries sorted roughly by
+  # (chamber, congress, session, rollCall) for readability.
+  # ────────────────────────────────────────────────────────────────────

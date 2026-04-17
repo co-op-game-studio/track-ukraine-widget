@@ -1,0 +1,19 @@
+{
+  // Separate tsconfig for the Cloudflare Worker. Distinct from the widget's
+  // tsconfig because the Worker runs in the Workers runtime (not the browser
+  // or Node) and has different global types.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["worker.ts"]
+}

@@ -1,0 +1,142 @@
+name: Deploy
+
+# Branch → environment mapping (FR-26):
+#   develop → dev   (auto)
+#   uat     → uat   (auto)
+#   stg     → stg   (auto)
+#   main    → prod  (auto, but gated by required reviewers on the `prod` GH environment)
+#
+# Everything flows the same pipeline: typecheck → test → build → upload R2 → deploy Worker.
+# Only the `wrangler-env`, `bucket-suffix`, and `github-env` matrix values differ.
+
+on:
+  push:
+    branches: [main, stg, uat, develop]
+  workflow_dispatch:
+    inputs:
+      env:
+        description: "Which environment to deploy"
+        required: true
+        type: choice
+        options: [dev, uat, stg, prod]
+
+concurrency:
+  # One deploy per env at a time; queue, don't cancel in-flight.
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    # Map the triggering branch (or workflow_dispatch input) to an env set.
+    runs-on: ubuntu-latest
+    outputs:
+      env_name: ${{ steps.pick.outputs.env_name }}
+      wrangler_env: ${{ steps.pick.outputs.wrangler_env }}
+      bucket: ${{ steps.pick.outputs.bucket }}
+    steps:
+      - id: pick
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            E="${{ inputs.env }}"
+          else
+            case "${{ github.ref_name }}" in
+              main)    E=prod ;;
+              stg)     E=stg  ;;
+              uat)     E=uat  ;;
+              develop) E=dev  ;;
+              *) echo "No env mapping for branch ${{ github.ref_name }}"; exit 1 ;;
+            esac
+          fi
+
+          case "$E" in
+            prod) WRANGLER_ENV=""    BUCKET="voter-info-widget-assets"     ;;
+            stg)  WRANGLER_ENV="stg" BUCKET="voter-info-widget-assets-stg" ;;
+            uat)  WRANGLER_ENV="uat" BUCKET="voter-info-widget-assets-uat" ;;
+            dev)  WRANGLER_ENV="dev" BUCKET="voter-info-widget-assets-dev" ;;
+          esac
+
+          echo "env_name=$E"               >> "$GITHUB_OUTPUT"
+          echo "wrangler_env=$WRANGLER_ENV" >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET"            >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ needs.resolve.outputs.env_name }}
+    env:
+      WRANGLER_ENV: ${{ needs.resolve.outputs.wrangler_env }}
+      BUCKET: ${{ needs.resolve.outputs.bucket }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build widget bundle
+        run: npm run build:lib
+
+      - name: Check build outputs
+        run: |
+          test -f dist/voter-info-widget.iife.js || (echo "widget bundle missing" && exit 1)
+          test -f src/data/ukraineBills.json     || (echo "ukraineBills.json missing" && exit 1)
+          test -f src/data/ukraineVotes.json     || (echo "ukraineVotes.json missing" && exit 1)
+
+      - name: Upload widget bundle to R2
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            r2 object put ${{ env.BUCKET }}/voter-info-widget.iife.js
+            --file dist/voter-info-widget.iife.js
+            --content-type "application/javascript; charset=utf-8"
+            --cache-control "public, max-age=600"
+            --remote
+
+      - name: Upload ukraineBills.json to R2
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            r2 object put ${{ env.BUCKET }}/ukraineBills.json
+            --file src/data/ukraineBills.json
+            --content-type "application/json; charset=utf-8"
+            --cache-control "public, max-age=600"
+            --remote
+
+      - name: Upload ukraineVotes.json to R2
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            r2 object put ${{ env.BUCKET }}/ukraineVotes.json
+            --file src/data/ukraineVotes.json
+            --content-type "application/json; charset=utf-8"
+            --cache-control "public, max-age=600"
+            --remote
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # CONGRESS_API_KEY is set once per-env via `wrangler secret put` —
+          # not rotated on every deploy.
+          command: deploy ${{ env.WRANGLER_ENV && format('--env {0}', env.WRANGLER_ENV) || '' }}

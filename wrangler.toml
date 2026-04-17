@@ -1,0 +1,107 @@
+# wrangler.toml — Cloudflare Worker deployment config
+#
+# Four-environment layout (FR-26):
+#   dev   → dev.vote.cogs.it.com   (branch: develop)
+#   uat   → uat.vote.cogs.it.com   (branch: uat)
+#   stg   → stg.vote.cogs.it.com   (branch: stg)
+#   prod  → vote.cogs.it.com       (branch: main)
+#
+# Each env has its own Worker + R2 bucket. The top-level block is prod
+# (no env flag → `wrangler deploy` targets prod). Non-prod envs deploy with
+# `wrangler deploy --env <dev|uat|stg>`.
+#
+# Per-env routes (identical across envs — only origin CORS and bucket differ):
+#     /api/census/*       → proxies to geocoding.geo.census.gov
+#     /api/congress/*     → proxies to api.congress.gov  (with API key injected)
+#     /api/senate/*       → proxies to www.senate.gov
+#     /voter-info-widget.iife.js
+#     /ukraineBills.json
+#     /ukraineVotes.json  → served from R2 via the ASSETS binding
+#     else                → 404
+#
+# CONGRESS_API_KEY is set per-env via `wrangler secret put CONGRESS_API_KEY --env <name>`.
+# DO NOT put it here.
+#
+# Custom domains are bound in the Cloudflare dashboard:
+#   Workers & Pages → <worker name> → Settings → Domains & Routes → Add
+#
+# See docs/deployment.md for the full setup playbook.
+
+name = "voter-info-widget-proxy"
+main = "proxy/worker.ts"
+compatibility_date = "2025-01-01"
+
+# ─── PROD (default, branch: main) ────────────────────────────────────────────
+[vars]
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "voter-info-widget-assets"
+
+[observability]
+enabled = true
+
+# Custom domain vote.cogs.it.com is already bound in the Cloudflare dashboard.
+
+# ─── DEV (branch: develop) ───────────────────────────────────────────────────
+[env.dev]
+name = "voter-info-widget-proxy-dev"
+
+[env.dev.vars]
+# Dev is wide-open CORS so we can point any local host at it for smoke tests.
+ALLOWED_ORIGINS = "*"
+
+[[env.dev.r2_buckets]]
+binding = "ASSETS"
+bucket_name = "voter-info-widget-assets-dev"
+
+[env.dev.observability]
+enabled = true
+
+# Custom domain: bind dev.vote.cogs.it.com in the CF dashboard.
+
+# ─── UAT (branch: uat) ───────────────────────────────────────────────────────
+[env.uat]
+name = "voter-info-widget-proxy-uat"
+
+[env.uat.vars]
+# UAT mirrors prod origins + a couple of localhost entries for reviewer smoke tests.
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080"
+
+[[env.uat.r2_buckets]]
+binding = "ASSETS"
+bucket_name = "voter-info-widget-assets-uat"
+
+[env.uat.observability]
+enabled = true
+
+# Custom domain: bind uat.vote.cogs.it.com in the CF dashboard.
+
+# ─── STG (branch: stg) ───────────────────────────────────────────────────────
+[env.stg]
+name = "voter-info-widget-proxy-stg"
+
+[env.stg.vars]
+# Staging mirrors prod origins exactly — last-gate before promotion.
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
+
+[[env.stg.r2_buckets]]
+binding = "ASSETS"
+bucket_name = "voter-info-widget-assets-stg"
+
+[env.stg.observability]
+enabled = true
+
+# Custom domain: bind stg.vote.cogs.it.com in the CF dashboard.
+
+# ─── Local preview (wrangler dev) ────────────────────────────────────────────
+[env.preview]
+name = "voter-info-widget-proxy-preview"
+
+[env.preview.vars]
+ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173"
+
+[[env.preview.r2_buckets]]
+binding = "ASSETS"
+bucket_name = "voter-info-widget-assets-dev"

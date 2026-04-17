@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voter Info Widget — Example Embed</title>
+    <style>
+      body { font-family: system-ui; max-width: 1000px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { color: #111; }
+      .host-style-leak-test { color: red; font-weight: bold; }
+    </style>
+  </head>
+  <body>
+    <h1>Example Host Page</h1>
+    <p class="host-style-leak-test">
+      This red bold text proves the host's CSS doesn't leak into the widget (Shadow DOM).
+    </p>
+
+    <voter-info-widget api-base="http://localhost:8787"></voter-info-widget>
+
+    <!--
+      In production, replace this script src with the CDN URL where you host
+      dist/voter-info-widget.iife.js
+    -->
+    <script src="../dist/voter-info-widget.iife.js"></script>
+  </body>
+</html>
