@@ -320,7 +320,7 @@ Uses the browser's `DOMParser` to parse XML responses.
 
 ### 4.4 CORS Proxy Design
 
-See [ADR-002](decisions/ADR-002-cors-proxy-strategy.md) for decision rationale.
+See [ADR-002](decisions/ADR-002-cors-proxy-strategy.md) for original decision rationale. See [ADR-005](decisions/ADR-005-proxy-security-hardening.md) for the v2.4.1 security hardening.
 
 **Development**: Vite proxy configuration in `vite.config.ts`:
 ```
@@ -329,12 +329,25 @@ See [ADR-002](decisions/ADR-002-cors-proxy-strategy.md) for decision rationale.
 /api/senate/*  → https://www.senate.gov/*
 ```
 
-**Production**: Cloudflare Worker (reference implementation in `proxy/worker.js`):
-- Routes requests by path prefix
-- Injects Congress.gov API key from Worker environment variables (not in client code)
-- Census geocoder requires no API key
-- Adds `Access-Control-Allow-Origin` header to responses
-- Strips API keys from any error responses
+**Production**: Cloudflare Worker at `proxy/worker.ts`. Four concerns, layered:
+
+1. **Routing layer** — prefix-match on `url.pathname`. Static R2 files handled first (exact allow-list in `STATIC_FILES`). `/api/*` dispatched to `handleApi()`. Browser-style navigation to any other path returns a 301 to `trackukraine.com`. Everything else: 404.
+2. **Origin layer** — `/api/*` gated by `isOriginAllowed(origin, allowedOrigins, allowLocalhost)`. Exact string match (AC-25.7). Localhost bypass only when `ALLOW_LOCALHOST === "true"` (AC-25.9). Reflected allowed-origin value written to `Access-Control-Allow-Origin` + `Vary: Origin` (AC-25.8).
+3. **Upstream layer** — `upstreamPath` validated against AC-27.7 (reject `..`, `//`, `@`, control chars). For `/api/congress/*`, path must start with `v3/` (AC-27.6) or 400. `CONGRESS_API_KEY` injected as `?api_key=` query param. Cache key built from upstream URL with `api_key` stripped (so cache is shared across users but not tied to origin).
+4. **Response layer** — every response passes through `applySecurityHeaders()` which sets the AC-27.1 baseline. Error bodies normalized to JSON (AC-27.5). Sensitive/fingerprinting upstream headers stripped (AC-27.4). API key defense-in-depth redacted from any body that still contains it.
+
+**Environment-variable surface (Worker env):**
+- `CONGRESS_API_KEY` — Worker secret. Required in prod; the Worker returns 500 if unset at request time.
+- `ALLOWED_ORIGINS` — comma-separated exact `scheme://host[:port]` values. Defaults to `https://trackukraine.com,https://www.trackukraine.com` if unset (matches prod intent; defense-in-depth if misconfigured).
+- `ALLOW_LOCALHOST` — exact string `"true"` permits `http://localhost[:port]` and `http://127.0.0.1[:port]`. Default unset = denied.
+
+**Testability.** The Worker module SHALL export (in addition to the default `fetch` handler) the pure helper functions (`isOriginAllowed`, `isValidUpstreamPath`, `normalizeUpstreamErrorBody`, `applySecurityHeaders`, `stripFingerprintingHeaders`) so unit tests can assert each concern independently without needing a Worker runtime. The default export is also testable by constructing a `Request` and a fake `Env` object; `caches.default` is mocked via a `Cache`-compatible stub injected at test time.
+
+**What is deliberately NOT in the Worker:**
+- No auth (the widget is a public embed).
+- No rate-limiting (Cloudflare zone defaults; edge cache absorbs the common case).
+- No request logging (stateless; no observability sink would change behavior, and AC-27.8 locks that down for future changes).
+- No cookies / sessions / CSRF (no state; every request is independent).
 
 ### 4.4b Ukraine Bill Filter & Curated Data (v2)
 
