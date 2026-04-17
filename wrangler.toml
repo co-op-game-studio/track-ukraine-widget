@@ -4,7 +4,10 @@
 #   dev   → dev.vote.cogs.it.com   (branch: develop)
 #   uat   → uat.vote.cogs.it.com   (branch: uat)
 #   stg   → stg.vote.cogs.it.com   (branch: stg)
-#   prod  → vote.cogs.it.com       (branch: main)
+#   prod  → vote.cogs.it.com       (branch: prod)
+#
+# Feature branches must be named feature/* and never deploy — they merge
+# into develop via PR, and the dev deploy fires on merge (with approval).
 #
 # Each env has its own Worker + R2 bucket. The top-level block is prod
 # (no env flag → `wrangler deploy` targets prod). Non-prod envs deploy with
@@ -31,7 +34,7 @@ name = "voter-info-widget-proxy"
 main = "proxy/worker.ts"
 compatibility_date = "2025-01-01"
 
-# ─── PROD (default, branch: main) ────────────────────────────────────────────
+# ─── PROD (default, branch: prod) ────────────────────────────────────────────
 [vars]
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 

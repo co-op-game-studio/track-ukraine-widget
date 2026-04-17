@@ -1,17 +1,18 @@
 name: Deploy
 
 # Branch → environment mapping (FR-26):
-#   develop → dev   (auto)
-#   uat     → uat   (auto)
-#   stg     → stg   (auto)
-#   main    → prod  (auto, but gated by required reviewers on the `prod` GH environment)
+#   develop → dev    (gated — manual approval)
+#   uat     → uat    (gated — manual approval)
+#   stg     → stg    (gated — manual approval)
+#   prod    → prod   (gated — manual approval)
 #
+# Feature work lives on feature/* branches — no deploy workflow fires for those.
 # Everything flows the same pipeline: typecheck → test → build → upload R2 → deploy Worker.
 # Only the `wrangler-env`, `bucket-suffix`, and `github-env` matrix values differ.
 
 on:
   push:
-    branches: [main, stg, uat, develop]
+    branches: [prod, stg, uat, develop]
   workflow_dispatch:
     inputs:
       env:
@@ -41,7 +42,7 @@ jobs:
             E="${{ inputs.env }}"
           else
             case "${{ github.ref_name }}" in
-              main)    E=prod ;;
+              prod)    E=prod ;;
               stg)     E=stg  ;;
               uat)     E=uat  ;;
               develop) E=dev  ;;
