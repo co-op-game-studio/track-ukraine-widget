@@ -135,9 +135,21 @@ Census geocoder requires no authentication.
 
 ## 5. Branch Strategy
 
-- `main`: Production-ready code. Protected branch — requires passing CI + PR review.
-- Feature branches: `feature/{description}` — develop and test before PR to main.
-- Release tags: `v{major}.{minor}.{patch}` — trigger deployment.
+- `main`: Trunk — source of truth. Protected branch: requires PR, 1 review,
+  passing `lint-typecheck-test` check, no force-push, no deletion. Not a
+  deploy target; pushing to `main` runs `pr.yml` only.
+- Deploy ladder: `develop → uat → stg → prod`. Each branch maps 1:1 to an
+  environment. Push to any rung triggers `.github/workflows/deploy.yml` for
+  that env. Promotion direction is top-to-bottom — `ladder-guard.yml`
+  enforces that PRs into `develop/uat/stg/prod` come from the preceding
+  rung (or `hotfix/*`).
+- Feature branches: `feature/{description}` — develop and test before PR
+  into `main`.
+- Hotfix branches: `hotfix/{description}` — can PR directly into any rung
+  (including `prod`) to bypass the ladder; still require review via branch
+  protection.
+- Release tags: `v{major}.{minor}.{patch}` — cut from `prod` after a clean
+  deploy.
 
 ---
 
