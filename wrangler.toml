@@ -42,16 +42,16 @@ ENV_NAME = "prod"
 binding = "KV_VOTER_INFO"
 id = "72d3dbce1a1d4ea4aec74b305d7995e6"
 
-# AC-27.21 — in-Worker per-IP rate limit. Prod is tight: the widget's intended
-# use is one address lookup per visitor (~8 upstream calls after fan-out).
-# 10 requests / 60 s / IP gives ~25% headroom over a single completed lookup;
-# anything beyond is hostile or a stuck client. Defense-in-depth with the
-# zone-level rule in AC-28.3. See ADR-010.
+# AC-27.21 — in-Worker per-IP rate limit. The widget fans out to ~8 upstream
+# calls per address lookup, so the prior 10/60s ceiling was below a single
+# completed page view and produced 429s on first use. 120/60s gives genuine
+# headroom (~15 page views/min/IP) while still gating abuse. Zone-level rule
+# in AC-28.3 provides defense-in-depth. See ADR-010.
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 10, period = 60 }
+simple = { limit = 120, period = 60 }
 
 [observability]
 enabled = true
