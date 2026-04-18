@@ -142,7 +142,7 @@ async function loadHouseRecord(
       const memberVote = normalizeVoteCast(mine.voteCast) as VoteForMember['memberVote'];
       return { bill, vote, memberVote, inRoster: true };
     } catch {
-      return { bill, vote, memberVote: 'Not Voting' as const, inRoster: true };
+      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
     }
   });
 
@@ -197,7 +197,7 @@ async function loadSenateRecord(
       const memberVote = normalizeVoteCast(mine.voteCast) as VoteForMember['memberVote'];
       return { bill, vote, memberVote, inRoster: true };
     } catch {
-      return { bill, vote, memberVote: 'Not Voting' as const, inRoster: true };
+      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
     }
   });
 
