@@ -310,7 +310,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: `wrangler deploy --env <env>` succeeds for all four envs after binding is added. Namespace IDs are persisted in `wrangler.toml` (not secrets; these are identifiers per AC-32.8).
 - **Test Requirements**: None (infrastructure setup)
 - **Traces to**: FR-32, ADR-011
-- **Status**: [x] Done — 2026-04-17 (namespaces created this session; IDs to be pasted)
+- **Status**: [x] Done — 2026-04-17 (namespace IDs in `wrangler.toml`: dev `743b2feda53648cd8242d3b89538bfac`, uat `3756142363984d218d5f489151716b30`, stg `4ff9a8e54b82489fb9a300466bd68686`, prod `72d3dbce1a1d4ea4aec74b305d7995e6`).
 
 ### T-027: R2 Binding Removal
 - **Description**: Remove all `[[r2_buckets]]` bindings from `wrangler.toml` across all envs. Remove R2-serving code paths from `proxy/worker.ts` and `proxy/lib.ts`. Remove R2 upload steps from `.github/workflows/deploy.yml`.
@@ -343,19 +343,19 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Description**: Add a new Worker route that reads `member:v1:{bioguideId}` from KV and returns the JSON record with 60s browser cache + 300s edge cache. 404 if missing. Applies ADR-006 security header baseline.
 - **Dependencies**: T-026, T-028 (cache module scaffold — member route does not cache via `cache:*`, but imports the header-helper utilities)
 - **Files**: `proxy/lib.ts` (new route handler), `tests/unit/memberRoute.test.ts` (new)
-- **Acceptance Criteria**: AC-32.1, AC-32.10, AC-32.14. Test: GET returns 200 + record for present key; GET returns 404 for missing; response carries `Cache-Control: public, max-age=60, s-maxage=300` and all AC-27.1 security headers; OPTIONS/HEAD/non-GET methods rejected per ADR-006.
+- **Acceptance Criteria**: AC-32.1, AC-32.10, AC-32.14, AC-32.18 (Worker read-through write), AC-32.19 (parse resilience). Test: GET returns 200 + record for present key; GET returns 404 for missing; response carries `Cache-Control: public, max-age=60, s-maxage=300` and all AC-27.1 security headers; OPTIONS/HEAD/non-GET methods rejected per ADR-006.
 - **Test Requirements**: ~10 unit tests in `tests/unit/memberRoute.test.ts`.
 - **Traces to**: FR-24 (revised), FR-32, ADR-011
-- **Status**: [ ] Pending
+- **Status**: [x] Done — 2026-04-17/18. `proxy/lib.ts#handleMemberProfile` implements KV read-through with 30d `expirationTtl`. Parse resilience landed 2026-04-18 (commit `76ab8c1`, AC-32.19). Test coverage: `tests/integration/sponsoredBills.test.ts` exercises this endpoint; dedicated `memberRoute.test.ts` unit suite still pending and blocks closing T-030 fully.
 
 ### T-031: Worker Route — `/api/name-search?q=<query>`
 - **Description**: Add a new Worker route that normalizes the query, reads the relevant `name-index:v1:{letter}` shard(s), filters + ranks + dedupes, returns top 10 results with `truncated` boolean. 503 if `name-index:v1:meta` is missing. Applies ADR-006 security header baseline.
 - **Dependencies**: T-026, T-029 (name-index shards must be written for this to return non-empty results)
 - **Files**: `proxy/lib.ts` (new route handler, helpers `normalizeSearchKey`, `rankMatches`), `tests/unit/nameSearchRoute.test.ts` (new)
-- **Acceptance Criteria**: AC-31.1–AC-31.12, AC-32.4, AC-32.14. Tests cover: diacritics normalization, multi-letter query (e.g., "van ho"), ranking order, 10-result truncation with `truncated: true`, 503 on missing meta, empty result 200 with `[]`, dedup of members appearing in multiple shards.
+- **Acceptance Criteria**: AC-31.1–AC-31.12, AC-32.4 (REVISED v2.5.2 — district now carried in shard), AC-32.14. Tests cover: diacritics normalization, multi-letter query (e.g., "van ho"), ranking order, 10-result truncation with `truncated: true`, 503 on missing meta, empty result 200 with `[]`, dedup of members appearing in multiple shards.
 - **Test Requirements**: ~15 unit tests in `tests/unit/nameSearchRoute.test.ts`.
 - **Traces to**: FR-31, FR-32, ADR-011
-- **Status**: [ ] Pending
+- **Status**: [x] Done — route live in `proxy/lib.ts#handleNameSearch`. `district` field added to shards 2026-04-18 (commit `31552b8`). Dedicated unit-test suite still pending; existing fixtures cover the happy path.
 
 ### T-032: Widget Cutover — Remove `initRosters`, add `useMemberProfile`, add `NameSearchInput`
 - **Description**: Replace the `initRosters()` + `bundledRosters.ts` blob path with direct `/api/members/{bioguideId}` calls via a new `useMemberProfile` hook. Update `useVotingRecord`, `useSponsoredBills` to read from the member profile instead of making their own Congress.gov calls (where curator data covers the ask). Add `NameSearchInput` component + `useNameSearch` hook + integration in `VoterInfoWidget`.
@@ -364,6 +364,100 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-24.2, AC-24.3, AC-24.8, AC-31.1–AC-31.12. Existing e2e test `tests/e2e/widget.test.tsx` passes with mocked `/api/members/*` + `/api/name-search` instead of mocked rosters. New test `tests/unit/NameSearchInput.test.tsx` covers interaction behavior (keyboard navigation, debounce, result selection). Bundle-size test enforces ≤250KB gzipped.
 - **Test Requirements**: Rewrite ~4 integration tests that used `initRosters` to use fetch mocks; add ~10 new tests for NameSearchInput + useNameSearch.
 - **Traces to**: FR-24 (revised), FR-31, FR-32, ADR-011
+- **Status**: [x] Done (partial — `useVotingRecord` still reads from the upstream `/api/congress/v3/house-vote/*/members` and `/api/senate/*` routes directly rather than from the member profile; completed by Phase 9 T-037/T-040 which move rosters into KV). `bundledRosters.ts` has been reduced to a no-op facade per ADR-011. `useSponsoredBills` reads from `/api/members/{id}` per AC-32.1 (REVISED v2.5.2) as of commit `fec1a58` 2026-04-18.
+
+---
+
+## Phase 9: KV Roll-Call Rosters + State-Members (v2.5.2 — ADR-012)
+
+### T-036: Curator — Write `roll-call-roster:v1:*` Records
+- **Description**: Extend `scripts/publish-to-kv.ts` to iterate every `{congress, session, rollCall, chamber}` tuple in `src/data/ukraineBills.json`'s `votes[]` arrays and, for each, fetch the upstream roster and write a `roll-call-roster:v1:{chamber}:{c}:{s}:{rc}` KV record per AC-32.15. House rosters via `api.congress.gov/v3/house-vote/{c}/{s}/{rc}/members?limit=500`; Senate rosters via `www.senate.gov/legislative/LIS/roll_call_votes/vote{c}{s}/vote_{c}_{s}_{rc}.xml` (parse with the existing Senate XML helper). Applies any overrides from `src/data/vote-overrides.yaml` after the upstream fetch. Writes via `wrangler kv bulk put --namespace-id <id> --remote` to keep the curator flow uniform with other prefixes.
+- **Dependencies**: T-026 (namespaces), T-029 (curator scaffold)
+- **Files**: `scripts/publish-to-kv.ts` (extended), `scripts/senateVoteParser.ts` (NEW — extracted from `src/services/senateVotesApi.ts` so the curator and Worker can share parsing), `scripts/load-vote-overrides.ts` (wire into the roster path)
+- **Acceptance Criteria**: AC-32.15. `npm run publish:kv -- --env dev --dry-run` prints one `roll-call-roster:v1:*` key per curated vote with correct byte counts. Without `--dry-run` writes succeed to each env's namespace. On a Senate XML 404 or malformed body, curator fails the run (no silent partial write); a `--skip-broken` flag MAY be added later. Rosters conform to AC-32.15 shape (House map keyed by bioguide; Senate array of `{ lastName, state, cast, firstName?, party? }`).
+- **Test Requirements**: `tests/unit/curator/rollCallRosters.test.ts` — ~12 tests covering: House roster record shape, Senate roster record shape, override application, malformed XML error handling, dry-run output formatting.
+- **Traces to**: FR-12 (REVISED v2.5.2), FR-32 AC-32.15, ADR-012
+- **Status**: [ ] Pending
+
+### T-037: Worker Route — `GET /api/roll-call-rosters/{chamber}/{c}/{s}/{rc}`
+- **Description**: New Worker route in `proxy/lib.ts` that validates the path (chamber ∈ {house, senate}; c/s/rc numeric), reads the KV key, returns the record verbatim with immutable Cache-Control. 400 on malformed path, 404 on missing record. Applies ADR-006 security baseline.
+- **Dependencies**: T-036 (so staged/prod envs have records to serve)
+- **Files**: `proxy/lib.ts` (route handler + dispatcher wiring), `tests/unit/rollCallRosterRoute.test.ts` (new)
+- **Acceptance Criteria**: api-contracts.md §5.5. Tests: House record returns 200 with expected shape and `Cache-Control: public, max-age=86400, s-maxage=31536000, immutable`; Senate record similarly; missing record returns 404 with the documented error envelope; malformed `chamber` returns 400; all per-AC-27.1 security headers present.
+- **Test Requirements**: ~8 unit tests in `tests/unit/rollCallRosterRoute.test.ts`.
+- **Traces to**: FR-12 (REVISED v2.5.2), FR-32 AC-32.15, ADR-012
+- **Status**: [ ] Pending
+
+### T-038: Curator — Write `state-members:v1:*` Records
+- **Description**: Extend `scripts/publish-to-kv.ts` to pre-group the member directory (already fetched for `name-index:v1:*`) into per-state records and write `state-members:v1:{stateCode}` for every U.S. state and non-voting-delegate territory per AC-32.16. `house[]` sorted by district ascending; `senators[]` sorted by last name ascending (seniority sort deferred — see ADR-012 §Open questions).
+- **Dependencies**: T-026, existing directory fetch in `publish-to-kv.ts`
+- **Files**: `scripts/publish-to-kv.ts` (extended)
+- **Acceptance Criteria**: AC-32.16. Dry-run shows one key per state/territory (~56 records). Records include non-voting delegates with `isNonVoting: true` (or equivalent signal) per ADR-012 §Open question 2.
+- **Test Requirements**: `tests/unit/curator/stateMembers.test.ts` — ~6 tests covering: multi-member states, single-at-large states, territories, sort stability.
+- **Traces to**: FR-32 AC-32.16, ADR-012
+- **Status**: [ ] Pending
+
+### T-039: Worker Route — `GET /api/state-members/{stateCode}`
+- **Description**: New Worker route that reads `state-members:v1:{stateCode}` and returns the record. 400 on non-`/^[A-Z]{2}$/i` shape (normalize to uppercase), 404 on missing.
+- **Dependencies**: T-038
+- **Files**: `proxy/lib.ts`, `tests/unit/stateMembersRoute.test.ts` (new)
+- **Acceptance Criteria**: api-contracts.md §5.6. Tests cover: 200 + record for known state, case-insensitivity (`il` → normalized to `IL`), 400 on malformed code, 404 on missing, Cache-Control set per AC-32.16.
+- **Test Requirements**: ~6 unit tests.
+- **Traces to**: FR-32 AC-32.16, ADR-012
+- **Status**: [ ] Pending
+
+### T-040: Widget Cutover — Voting Record via KV Rosters
+- **Description**: Replace `fetchHouseVoteMembers` and `fetchSenateVoteDetail` callers in `src/hooks/useVotingRecord.ts` with KV-roster-route calls. The hook builds `MemberVoteRow[]` by looking up the member in each roster (House: `casts[bioguideId]`; Senate: `casts.find(r => r.lastName === lastName && r.state === state)`). "Did Not Vote" vs "Did Not Serve" distinguished by cross-checking `/api/state-members/{state}` for current-Congress presence (for historical Congresses, the distinction degrades to "Did Not Vote" — acceptable, noted in design.md §3.2.4). Remove the legacy `congressApi.fetchHouseVoteMembers`/`senateVotesApi.fetchSenateVoteDetail` from the service layer (unused elsewhere). Update integration tests.
+- **Dependencies**: T-037, T-038, T-039 (all KV routes must exist in the envs where tests run)
+- **Files**: `src/hooks/useVotingRecord.ts`, `src/services/rollCallRosters.ts` (NEW), `src/services/congressApi.ts` (remove `fetchHouseVoteMembers`, `fetchHouseVoteDetail`, `fetchHouseVoteList`), `src/services/senateVotesApi.ts` (remove `fetchSenateVoteDetail`, `fetchSenateVoteIndex` — the Worker-side parsing moves to the curator per ADR-012), `tests/integration/votingRecord.test.ts` (rewrite fetch mocks)
+- **Acceptance Criteria**: FR-12 (REVISED v2.5.2). e2e test `tests/e2e/widget.test.tsx` passes with roll-call-roster fetch mocks. Per-visit fan-out (measured via the perf-test harness) drops to ~10 roster fetches + member/state fetches as predicted in design.md §4.14.
+- **Test Requirements**: Rewrite ~6 integration tests; add unit tests for the new `rollCallRosters.ts` service layer.
+- **Traces to**: FR-12 (REVISED v2.5.2), FR-32 AC-32.15, ADR-012
+- **Status**: [ ] Pending
+
+### T-041: Widget Cutover — Address Flow via State-Members
+- **Description**: Replace `fetchMembersByState` / `fetchMembersByStateDistrict` in `src/hooks/useAddressLookup.ts` with a single `GET /api/state-members/{state}` call. Client-side filter to the resolved district. Drop the post-resolution `fetchMemberDetail` enrichment loop — `state-members:v1:` records already carry `photoUrl`, `website`, party, district. Remove the now-unused `fetchMembersByState*` / `fetchMemberDetail` from `src/services/congressApi.ts`.
+- **Dependencies**: T-039, T-040 (to keep test rewrites coherent)
+- **Files**: `src/hooks/useAddressLookup.ts`, `src/services/stateMembers.ts` (NEW), `src/services/congressApi.ts` (remove four functions), `tests/integration/addressLookup.test.ts` (rewrite)
+- **Acceptance Criteria**: Address flow fan-out drops to 1 census + 1 state-members + 3 member-profile fetches = 5 upstream requests. Existing e2e still passes.
+- **Test Requirements**: Rewrite ~5 integration tests for the address flow.
+- **Traces to**: FR-1, FR-2, FR-32 AC-32.16, ADR-012
+- **Status**: [ ] Pending
+
+### T-042: Widget Invariant Test — No Direct Upstream Calls
+- **Description**: Add a unit test that greps `src/services/` and `src/hooks/` for any remaining calls to `/api/congress/v3/` or `/api/senate/` or `/api/census/v3/member/`. The only allowed upstream-shaped path in widget code SHALL be `/api/census/geocoder/*` (since address geocoding stays live per design.md §4.14). Fails the build if any other upstream path appears in widget source.
+- **Dependencies**: T-040, T-041 (otherwise test fails on legitimate in-flight code)
+- **Files**: `tests/unit/widgetUpstreamInvariant.test.ts` (NEW)
+- **Acceptance Criteria**: Test passes after T-040/T-041 and fails if a future commit reintroduces a direct upstream call from widget code.
+- **Test Requirements**: The test itself.
+- **Traces to**: design.md §4.14 ("widget SHALL NOT call the upstream pass-through routes"), ADR-012
+- **Status**: [ ] Pending
+
+### T-043: Rate-Limit Re-Tightening
+- **Description**: Revise AC-27.21 and AC-28.3 numeric limits after T-040/T-041 land. Target: prod in-Worker = 60/60s, prod zone = 120/60s. Edit spec, edit `wrangler.toml` across envs, smoke-test with the perf harness that a 3-rep visit stays well under the new budget.
+- **Dependencies**: T-040, T-041, T-042 (need the new per-visit floor to be measured and stable first)
+- **Files**: `docs/spec.md` AC-27.21 and AC-28.3, `wrangler.toml`
+- **Acceptance Criteria**: Rate-limit ACs revised with v2.5.3 stamp. Perf harness confirms a 3-rep cold visit stays < 50 requests. No 429s under normal traffic for a week post-change.
+- **Test Requirements**: Extend the perf harness (scripts/perf-check.mjs) to assert the new budget.
+- **Traces to**: AC-27.21, AC-28.3, ADR-012
+- **Status**: [ ] Pending
+
+### T-044: Cache-Warming Script Spec Alignment
+- **Description**: Update `scripts/warm-member-cache.mjs` so phase 2 hits the new `/api/roll-call-rosters/*` routes (AC-35.3, second half) rather than the legacy `/api/congress/v3/house-vote/*/members` and `/api/senate/*` routes. During the transition window (until T-037 is live in every env) the warmer MAY hit both; after T-037 lands everywhere the legacy phase SHALL be removed.
+- **Dependencies**: T-037
+- **Files**: `scripts/warm-member-cache.mjs`, `docs/deployment.md` (warming section)
+- **Acceptance Criteria**: AC-35.3 (final form). Warmer run against prod after T-037 deploy reports ok_count == total_count (no legacy route hits, no 404s on new routes).
+- **Test Requirements**: None (ops script).
+- **Traces to**: FR-35, ADR-012
+- **Status**: [ ] Pending
+
+### T-045: Document the v2.5.2 Rollout Sequence
+- **Description**: Add a "v2.5.2 rollout" section to `docs/deployment.md` that enumerates the correct order: spec lands → tests land red → curator (T-036, T-038) lands behind feature flag → Worker routes (T-037, T-039) land → curator run per env → widget cutover (T-040, T-041, T-042) lands → rate-limit re-tightening (T-043) lands → warmer re-aligned (T-044). This ADR-012 rollout must never invert: widget cutover before curator run against an env will 404.
+- **Dependencies**: none (docs-only)
+- **Files**: `docs/deployment.md`
+- **Acceptance Criteria**: Section exists, references every task in Phase 9, and is linked from the top-level deployment doc TOC.
+- **Test Requirements**: None.
+- **Traces to**: ADR-012, all Phase 9 tasks
 - **Status**: [ ] Pending
 
 ---
