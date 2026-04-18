@@ -82,9 +82,36 @@ interface CongressMemberListEntry {
   partyName: string;
   state: string;
   district?: number;
-  terms: { item: { chamber: 'House of Representatives' | 'Senate'; startYear: number; endYear?: number }[] };
+  terms: {
+    item: {
+      chamber: 'House of Representatives' | 'Senate';
+      startYear: number;
+      endYear?: number;
+      stateCode?: string;
+    }[];
+  };
   depiction?: { imageUrl?: string };
 }
+
+// Fallback state-name → state-code map (used when Congress.gov doesn't
+// emit stateCode on the terms item — rare but happens).
+const STATE_NAME_TO_CODE: Record<string, string> = {
+  'Alabama': 'AL', 'Alaska': 'AK', 'Arizona': 'AZ', 'Arkansas': 'AR',
+  'California': 'CA', 'Colorado': 'CO', 'Connecticut': 'CT', 'Delaware': 'DE',
+  'District of Columbia': 'DC', 'Florida': 'FL', 'Georgia': 'GA', 'Hawaii': 'HI',
+  'Idaho': 'ID', 'Illinois': 'IL', 'Indiana': 'IN', 'Iowa': 'IA',
+  'Kansas': 'KS', 'Kentucky': 'KY', 'Louisiana': 'LA', 'Maine': 'ME',
+  'Maryland': 'MD', 'Massachusetts': 'MA', 'Michigan': 'MI', 'Minnesota': 'MN',
+  'Mississippi': 'MS', 'Missouri': 'MO', 'Montana': 'MT', 'Nebraska': 'NE',
+  'Nevada': 'NV', 'New Hampshire': 'NH', 'New Jersey': 'NJ', 'New Mexico': 'NM',
+  'New York': 'NY', 'North Carolina': 'NC', 'North Dakota': 'ND', 'Ohio': 'OH',
+  'Oklahoma': 'OK', 'Oregon': 'OR', 'Pennsylvania': 'PA', 'Rhode Island': 'RI',
+  'South Carolina': 'SC', 'South Dakota': 'SD', 'Tennessee': 'TN', 'Texas': 'TX',
+  'Utah': 'UT', 'Vermont': 'VT', 'Virginia': 'VA', 'Washington': 'WA',
+  'West Virginia': 'WV', 'Wisconsin': 'WI', 'Wyoming': 'WY',
+  'American Samoa': 'AS', 'Guam': 'GU', 'Northern Mariana Islands': 'MP',
+  'Puerto Rico': 'PR', 'Virgin Islands': 'VI',
+};
 
 interface CuratedVote {
   chamber: 'House' | 'Senate';
@@ -120,6 +147,7 @@ interface NameIndexEntry {
   state: string;
   chamber: 'Senate' | 'House';
   party: string;
+  photoUrl: string | null;
   searchKeys: string[];
 }
 
@@ -225,14 +253,21 @@ function splitName(full: string): { first: string; last: string } {
     const firstKey = normalizeSearchKey(first);
     const lastKey = normalizeSearchKey(last);
     const searchKeys = [firstKey, lastKey].filter(Boolean);
+    // Prefer the term's stateCode when present; fall back to mapping the
+    // full state name via STATE_NAME_TO_CODE.
+    const stateCode =
+      latestTerm?.stateCode ??
+      STATE_NAME_TO_CODE[m.state] ??
+      m.state;
     const entry: NameIndexEntry = {
       bioguideId: m.bioguideId,
       displayName: `${first} ${last}`,
       first,
       last,
-      state: m.state,
+      state: stateCode,
       chamber,
       party: partyLetter(m.partyName),
+      photoUrl: m.depiction?.imageUrl ?? null,
       searchKeys,
     };
 

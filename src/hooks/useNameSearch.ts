@@ -13,6 +13,7 @@ export interface NameSearchResult {
   state: string;
   chamber: 'Senate' | 'House';
   party: string;
+  photoUrl?: string | null;
   searchKeys: string[];
 }
 

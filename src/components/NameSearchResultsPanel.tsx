@@ -16,7 +16,11 @@ import { RepDetail } from './RepDetail';
 function resultToRepresentative(r: NameSearchResult): Representative {
   return {
     bioguideId: r.bioguideId,
-    name: r.displayName,
+    // useVotingRecord parses name as "Last, First" to pull a last-name key
+    // for Senate roster matching (senateVotesApi matches on last+state).
+    // The display pipeline (RepDetail, MemberChip) also renders this string
+    // as-is in headers — "Durbin, Richard" is the canonical Congress.gov form.
+    name: `${r.last}, ${r.first}`,
     party:
       r.party === 'D' ? 'Democratic' :
       r.party === 'R' ? 'Republican' :
@@ -25,7 +29,7 @@ function resultToRepresentative(r: NameSearchResult): Representative {
     state: r.state,
     district: null,
     chamber: r.chamber.toLowerCase() as 'house' | 'senate',
-    photoUrl: null,
+    photoUrl: r.photoUrl ?? null,
     isNonVoting: false,
     officialWebsiteUrl: null,
   };

@@ -515,8 +515,9 @@
   display: flex;
   gap: 0;
   padding: 0 1.25rem;
+  margin-top: 0.75rem;
   border-bottom: 2px solid var(--viw-black);
-  background: var(--viw-off);
+  background: transparent;
 }
 
 .viw-detail-tab {
