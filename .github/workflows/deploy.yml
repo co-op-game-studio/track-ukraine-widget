@@ -145,8 +145,9 @@ jobs:
             echo "::error::name-search returned $STATUS (expected 200)"; exit 1
           fi
 
-          # 3. Origin enforcement (not dev which has permissive CORS).
-          if [[ "$ENV_NAME" != "dev" ]]; then
+          # 3. Origin enforcement (prod only — non-prod envs rely on CF Access
+          #    as the gate and skip the Origin allowlist check).
+          if [[ "$ENV_NAME" == "prod" ]]; then
             STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
               -H "Origin: https://evil.example.com" "$HOST/api/census/x")
             if [[ "$STATUS" != "403" ]]; then
