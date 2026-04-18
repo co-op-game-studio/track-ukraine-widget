@@ -21,9 +21,15 @@ run from a domain **we** control on **our** Cloudflare account.
   │  Cloudflare Worker @ vote.cogs.it.com             │
   │  (single origin for everything)                   │
   │                                                   │
-  │  /voter-info-widget.iife.js   ┐                   │
-  │  /ukraineBills.json           ├─► R2 bucket (private, bound to Worker)
-  │  /ukraineVotes.json           ┘                   │
+  │  /voter-info-widget.iife.js       ┐               │
+  │  /voter-info-widget.iife.js.sri   ├─► Worker Sites
+  │  /ukraineBills.json               │  ASSETS binding
+  │  /ukraineVotes.json               ┘  (./dist in repo)
+  │                                                   │
+  │  /api/members/{id}       ─►┐                      │
+  │  /api/bills/{id}           │  KV_VOTER_INFO      │
+  │  /api/roll-calls/{key}     │  (read-through to   │
+  │  /api/name-search?q=...    ┘   Congress.gov)     │
   │                                                   │
   │  /api/census/*     ─► Census Bureau geocoder      │
   │  /api/congress/*   ─► api.congress.gov (key injected)
@@ -31,11 +37,14 @@ run from a domain **we** control on **our** Cloudflare account.
   │                                                   │
   │  Edge cache on all API responses (FR-25)          │
   │  Origin whitelist for /api/* (AC-25.5)            │
+  │  In-Worker rate limit per IP (AC-27.21)           │
   └───────────────────────────────────────────────────┘
 ```
 
-One hostname. One Worker. One R2 bucket reached through the Worker's binding
-(bucket stays private). Three secrets in a Cloudflare account you own.
+One hostname. One Worker deploy bundles static assets (Worker Sites) +
+a KV namespace for curator data. Three Cloudflare secrets plus the
+Worker's per-env `CONGRESS_API_KEY` secret. No R2 — the migration to
+Worker Sites + KV happened in v2.5.0 per ADR-011.
 
 ## One-time setup
 
@@ -45,18 +54,21 @@ One hostname. One Worker. One R2 bucket reached through the Worker's binding
 2. Create an API token at https://dash.cloudflare.com/profile/api-tokens:
    - Template: **Edit Cloudflare Workers**
    - Additional permissions to add beyond the template:
-     - **Account** → **Workers R2 Storage** → Edit
+     - **Account** → **Workers KV Storage** → Edit
      - **Account** → **Workers Scripts** → Edit
    - Save the token — Cloudflare only shows it once. This is `CLOUDFLARE_API_TOKEN`.
 
-### 2. R2 bucket
+### 2. KV namespace
 
 ```bash
-npx wrangler r2 bucket create voter-info-widget-assets
+npx wrangler kv namespace create KV_VOTER_INFO
+# Copy the `id` from the output into wrangler.toml's `[[kv_namespaces]]`
+# block (one per env: prod, dev, uat, stg).
 ```
 
-The bucket stays private — no public domain bound to it. The Worker reaches it
-via the `ASSETS` binding defined in `wrangler.toml`.
+Static assets (the bundle, SRI sidecar, curated JSON) are NOT stored in
+KV — they ship as Worker Sites static assets from `./dist`, handled
+automatically by `wrangler deploy`.
 
 ### 3. Domain
 
@@ -763,17 +775,21 @@ Weekly sweep — 5 minutes:
   third-party sites cannot use our proxy as a free Congress.gov proxy.
   Static-asset routes (JS, JSON) permit any origin so the bundle can be
   embedded wherever needed.
-- **R2 stays private.** The bucket has no public domain; only the Worker
-  (with the `ASSETS` binding) can read from it. Lost secrets don't leak the
-  bucket contents; a compromised Worker is the only failure mode.
-- **Supply chain.** Our widget JS is served from our R2, not a third-party
-  CDN. Fourthwall operators can pin it with SRI if they want:
+- **Static assets ship with the Worker.** Worker Sites serves `./dist`
+  directly; no separate public R2 bucket, no separate CDN. A compromised
+  Worker deploy is the only failure mode for static content.
+- **Supply chain.** Our widget JS is served from our Worker, not a
+  third-party CDN. Fourthwall operators SHOULD pin it with SRI:
   ```html
   <script src="https://vote.cogs.it.com/voter-info-widget.iife.js"
-          integrity="sha384-..." crossorigin="anonymous"></script>
+          integrity="sha384-..." crossorigin="anonymous"
+          async></script>
   ```
-  (SRI breaks on deploy if you change the bundle; hash updates must be
-  communicated to the embedder.)
+  The current hash is published at
+  `https://vote.cogs.it.com/voter-info-widget.iife.js.sri` (FR-26 AC-26.9).
+  SRI intentionally breaks on deploy if the hash isn't updated — the
+  embedder SHOULD automate fetching the current hash at their own build
+  time.
 - **DDoS / rate-limiting**: Cloudflare's defaults. Worker auto-scales.
   Edge cache absorbs >99% of post-warmup traffic.
 
@@ -815,8 +831,13 @@ Or change the default list in `wrangler.toml`'s `[vars]` section and redeploy.
 - Run `wrangler secret put CONGRESS_API_KEY` and redeploy
 
 **Static file returns 404**:
-- Verify the R2 object exists: `wrangler r2 object get voter-info-widget-assets/voter-info-widget.iife.js --file /tmp/check.js && head -c 200 /tmp/check.js`
-- Re-upload if missing
+- The static surface is Worker Sites (`./dist` at deploy time).
+  Re-check the deploy: `ls dist/` locally before `wrangler deploy`, and
+  confirm the workflow's "Stage static assets" / "Check build outputs"
+  steps succeeded. `wrangler deploy` re-ships every file in `./dist`.
+- For curated JSON specifically: `scripts/publish-to-kv.ts` populates
+  KV; the *static* `/ukraineBills.json` and `/ukraineVotes.json` paths
+  are served from Worker Sites, not KV.
 
 **`X-Proxy-Cache: MISS` on every request**:
 - Cache API writes happen in the background; first few requests per URL are

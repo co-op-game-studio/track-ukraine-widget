@@ -14,6 +14,7 @@ import { useUkraineScore } from '../hooks/useUkraineScore';
 import { VoteList } from './VoteList';
 import { BillList } from './BillList';
 import { UkraineScoreBadge } from './UkraineScoreBadge';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 export interface RepDetailProps {
   representative: Representative;
@@ -55,10 +56,15 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
         officialName?: string;
       } | null) => {
         if (!p || cancelled) return;
+        // AC-31.1: every URL sourced from /api/members/{id} passes through
+        // sanitizeUrl before entering state. Blocks javascript:, data:, etc.
+        // at the API boundary so downstream render sites can trust the field.
+        const safePhoto = sanitizeUrl(p.photoUrl);
+        const safeWebsite = sanitizeUrl(p.website);
         setEnriched((curr) => ({
           ...curr,
-          photoUrl: curr.photoUrl ?? p.photoUrl ?? null,
-          officialWebsiteUrl: curr.officialWebsiteUrl ?? p.website ?? null,
+          photoUrl: curr.photoUrl ?? safePhoto ?? null,
+          officialWebsiteUrl: curr.officialWebsiteUrl ?? safeWebsite ?? null,
           district: curr.district ?? p.district ?? null,
           name: curr.name || p.officialName || curr.name,
         }));
@@ -96,8 +102,8 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
     >
       <header className="viw-detail-header">
         <div className="viw-detail-identity">
-          {enriched.photoUrl ? (
-            <img src={enriched.photoUrl} alt="" className="viw-detail-photo" loading="lazy" />
+          {sanitizeUrl(enriched.photoUrl) ? (
+            <img src={sanitizeUrl(enriched.photoUrl)!} alt="" className="viw-detail-photo" loading="lazy" />
           ) : (
             <div className="viw-detail-photo viw-detail-photo-placeholder" aria-hidden />
           )}
@@ -112,9 +118,9 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
               <span className="viw-detail-state">{stateName}</span>
               <span className="viw-detail-chamber">{chamberLabel(enriched)}</span>
             </div>
-            {enriched.officialWebsiteUrl && (
+            {sanitizeUrl(enriched.officialWebsiteUrl) && (
               <a
-                href={enriched.officialWebsiteUrl}
+                href={sanitizeUrl(enriched.officialWebsiteUrl)!}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="viw-detail-link"

@@ -17,6 +17,13 @@ export function sanitizeUrl(value: string | null | undefined): string | null {
   // into an executable href. Simplest defense: require the input to already
   // be a clean URL.
   if (value !== value.trim()) return null;
+  // Reject any ASCII control character (tab, newline, null, DEL, etc.).
+  // Browsers strip tab/LF/CR from URLs before fetching, so the string the
+  // caller gets back would not match what the browser actually requests —
+  // the mismatch is a footgun for anyone logging or comparing URLs, and
+  // `%00`-style null bytes can in principle confuse server-side parsers.
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(value)) return null;
 
   let parsed: URL;
   try {

@@ -1276,10 +1276,13 @@ describe('handleFetch — rate limit (AC-27.21, AC-27.22)', () => {
     };
   }
 
-  it('returns 429 with Retry-After when the limiter rejects (AC-27.21)', async () => {
+  it('returns 429 with Retry-After when the limiter rejects and does NOT call upstream (AC-27.21, AC-27.22)', async () => {
     const rl = makeRateLimiter(0); // reject every request
-    fakeUpstream = async () =>
-      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    let upstreamCalls = 0;
+    fakeUpstream = async () => {
+      upstreamCalls++;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const env = makeEnv({ RATE_LIMITER: rl as any });
     const r = await handleFetch(
@@ -1297,6 +1300,10 @@ describe('handleFetch — rate limit (AC-27.21, AC-27.22)', () => {
     expect(r.headers.get('Cache-Control')).toBe('no-store');
     const body = await r.json();
     expect(body.error).toBe('rate_limited');
+    // AC-27.22 is about *upstream quota* protection: a 429 MUST NOT burn
+    // a Congress.gov call. This was the gap flagged in the PR review —
+    // the original test only asserted the response status.
+    expect(upstreamCalls).toBe(0);
   });
 
   it('does not consume the rate-limit budget for a missing-Origin request (AC-27.22)', async () => {
@@ -1384,6 +1391,284 @@ describe('handleFetch — rate limit (AC-27.21, AC-27.22)', () => {
       makeEnv(), // RATE_LIMITER not set
       makeFakeCache(),
     );
+    expect(r.status).toBe(200);
+  });
+});
+
+describe('handleFetch — buildProfileFromUpstream optional-leg timeout (AC-27.18 follow-up)', () => {
+  // Fake upstream helper: returns different responses per URL substring.
+  function routeFetch(map: Record<string, () => Promise<Response>>) {
+    return async (u: string) => {
+      for (const frag of Object.keys(map)) {
+        if (u.includes(frag)) return map[frag]!();
+      }
+      return new Response('unrouted', { status: 599 });
+    };
+  }
+
+  it('returns the profile (200) even when sponsored-legislation times out', async () => {
+    fakeUpstream = routeFetch({
+      // Detail — fast, OK.
+      '/v3/member/A000360?': async () =>
+        new Response(
+          JSON.stringify({
+            member: {
+              bioguideId: 'A000360',
+              firstName: 'First',
+              lastName: 'Last',
+              state: 'IL',
+              partyHistory: [{ partyName: 'Democratic' }],
+              terms: [],
+              depiction: { imageUrl: 'https://bioguide-cloudfront.house.gov/photo.jpg' },
+              officialWebsiteUrl: 'https://senate.gov/last',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      // Sponsored — simulate timeout (what AbortSignal.timeout throws).
+      '/sponsored-legislation': async () => {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+      // Cosponsored — OK-but-empty.
+      '/cosponsored-legislation': async () =>
+        new Response(JSON.stringify({ cosponsoredLegislation: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    const env = makeEnv();
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/A000360', {
+        headers: { Origin: 'https://trackukraine.com', 'CF-Connecting-IP': '203.0.113.20' },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = await r.json() as { photoUrl?: string; website?: string; sponsored?: unknown[] };
+    expect(body.photoUrl).toBe('https://bioguide-cloudfront.house.gov/photo.jpg');
+    expect(body.website).toBe('https://senate.gov/last');
+    expect(body.sponsored).toEqual([]); // timeout → empty, not failure
+  });
+
+  it('sanitizes photoUrl and website at Worker write-time (AC-31.1 defense-in-depth)', async () => {
+    fakeUpstream = routeFetch({
+      '/v3/member/A000360?': async () =>
+        new Response(
+          JSON.stringify({
+            member: {
+              bioguideId: 'A000360',
+              firstName: 'A',
+              lastName: 'B',
+              state: 'IL',
+              partyHistory: [{ partyName: 'Democratic' }],
+              terms: [],
+              // ATTACKER-controlled URLs — must be stripped to null.
+              depiction: { imageUrl: 'javascript:alert(1)' },
+              officialWebsiteUrl: 'data:text/html,<script>alert(1)</script>',
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      '/sponsored-legislation': async () =>
+        new Response(JSON.stringify({ sponsoredLegislation: [] }), { status: 200 }),
+      '/cosponsored-legislation': async () =>
+        new Response(JSON.stringify({ cosponsoredLegislation: [] }), { status: 200 }),
+    });
+    const env = makeEnv();
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/A000360', {
+        headers: { Origin: 'https://trackukraine.com', 'CF-Connecting-IP': '203.0.113.21' },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = await r.json() as { photoUrl: string | null; website: string | null };
+    expect(body.photoUrl).toBeNull();
+    expect(body.website).toBeNull();
+  });
+
+  it('returns 504 upstream_timeout when the REQUIRED detail fetch times out (AC-27.18)', async () => {
+    fakeUpstream = routeFetch({
+      '/v3/member/A000360?': async () => {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+      '/sponsored-legislation': async () =>
+        new Response(JSON.stringify({ sponsoredLegislation: [] }), { status: 200 }),
+      '/cosponsored-legislation': async () =>
+        new Response(JSON.stringify({ cosponsoredLegislation: [] }), { status: 200 }),
+    });
+    const env = makeEnv();
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/A000360', {
+        headers: { Origin: 'https://trackukraine.com', 'CF-Connecting-IP': '203.0.113.22' },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(504);
+    const body = await r.json() as { error: string };
+    expect(body.error).toBe('upstream_timeout');
+    expect(r.headers.get('Cache-Control')).toBe('no-store');
+  });
+});
+
+describe('handleFetch — rate limit covers KV routes (AC-27.21 follow-up)', () => {
+  function makeCountingRateLimiter(limit: number) {
+    let seen = 0;
+    return {
+      limiter: {
+        async limit({ key: _k }: { key: string }): Promise<{ success: boolean }> {
+          seen++;
+          return { success: seen <= limit };
+        },
+      },
+      calls: () => seen,
+    };
+  }
+
+  it('rate-limits /api/members/{id} (reject → 429, no upstream call)', async () => {
+    const { limiter } = makeCountingRateLimiter(0);
+    let upstreamCalls = 0;
+    fakeUpstream = async () => {
+      upstreamCalls++;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: limiter as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/A000360', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.10',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(429);
+    expect(upstreamCalls).toBe(0);
+  });
+
+  it('rate-limits /api/bills/{id}', async () => {
+    const { limiter } = makeCountingRateLimiter(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: limiter as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/bills/119:hr:1', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.11',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(429);
+  });
+
+  it('rate-limits /api/roll-calls/{key}', async () => {
+    const { limiter } = makeCountingRateLimiter(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: limiter as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-calls/119/h/1/42', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.12',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(429);
+  });
+
+  it('rate-limits /api/name-search', async () => {
+    const { limiter } = makeCountingRateLimiter(0);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: limiter as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/name-search?q=smith', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.13',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(429);
+  });
+
+  it('does NOT rate-limit cheap rejection on KV routes (bad origin → 403, budget untouched)', async () => {
+    const { limiter, calls } = makeCountingRateLimiter(100);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: limiter as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/A000360', {
+        headers: { Origin: 'https://evil.example.com', 'CF-Connecting-IP': '203.0.113.14' },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(403);
+    expect(calls()).toBe(0);
+  });
+});
+
+describe('handleFetch — prod hard-block when CF-Connecting-IP is absent (AC-27.21 defense)', () => {
+  it('returns 429 no_client_ip when ENV_NAME=prod and CF-Connecting-IP missing', async () => {
+    let upstreamCalls = 0;
+    fakeUpstream = async () => {
+      upstreamCalls++;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    const rl = {
+      async limit({ key: _k }: { key: string }) {
+        return { success: true };
+      },
+    };
+    const env = makeEnv({
+      ENV_NAME: 'prod',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      RATE_LIMITER: rl as any,
+    });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: { Origin: 'https://trackukraine.com' }, // no CF-Connecting-IP
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(429);
+    const body = await r.json();
+    expect(body.reason).toBe('no_client_ip');
+    expect(upstreamCalls).toBe(0);
+  });
+
+  it('falls back to path-keyed bucket on non-prod when CF-Connecting-IP missing', async () => {
+    fakeUpstream = async () =>
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    const rl = {
+      async limit({ key: _k }: { key: string }) {
+        return { success: true };
+      },
+    };
+    const env = makeEnv({
+      ENV_NAME: 'dev',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      RATE_LIMITER: rl as any,
+    });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: { Origin: 'https://trackukraine.com' },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    // Non-prod: limiter succeeds, upstream is called.
     expect(r.status).toBe(200);
   });
 });

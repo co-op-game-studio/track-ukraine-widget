@@ -436,14 +436,16 @@ export function buildUpstreamUrl(
 }
 
 /**
- * Derive a rate-limit key from the incoming request. Uses
- * `CF-Connecting-IP` — Cloudflare's authoritative client-IP header — and
- * falls back to a per-URL stub in tests so the limiter branch still
- * exercises.
+ * Derive a rate-limit key from the incoming request. Returns `null` when
+ * `CF-Connecting-IP` is absent — in prod that should never happen (CF sets
+ * it on every request), so `null` signals a misconfiguration and the
+ * caller hard-blocks. Non-prod envs (ENV_NAME != 'prod') fall back to a
+ * per-URL stub so tests and localhost dev still exercise the limiter.
  */
-function rateLimitKey(request: Request, url: URL): string {
+function rateLimitKey(request: Request, url: URL, env: ProxyEnv): string | null {
   const ip = request.headers.get('CF-Connecting-IP');
   if (ip) return ip;
+  if (env.ENV_NAME === 'prod') return null;
   return `no-ip:${url.pathname}`;
 }
 
@@ -452,6 +454,12 @@ function rateLimitKey(request: Request, url: URL): string {
  * with a 429, or `null` to continue processing. Fail-open if the binding is
  * absent (AC-27.21 note) or if the binding itself errors — the zone-level
  * limit (AC-28.3) still applies in prod.
+ *
+ * `retrySeconds` is sourced from the binding's period when known. The
+ * Cloudflare Rate Limiting API's `limit()` outcome does not include a
+ * reset-time; 60s mirrors the configured `period` for every env in
+ * wrangler.toml. If the period ever diverges per env, pull it from an
+ * env var.
  */
 async function applyRateLimit(
   request: Request,
@@ -460,7 +468,24 @@ async function applyRateLimit(
   origin: string | null,
 ): Promise<DispatchResult | null> {
   if (!env.RATE_LIMITER) return null;
-  const key = rateLimitKey(request, url);
+  const key = rateLimitKey(request, url, env);
+  // Prod with no CF-Connecting-IP is a misconfiguration (CF always sets
+  // this header at the edge). Hard-block rather than bucket everyone
+  // together into `no-ip:${path}`.
+  if (key === null) {
+    return {
+      response: jsonResponse(
+        429,
+        { error: 'rate_limited', reason: 'no_client_ip' },
+        {
+          ...corsHeaders(origin),
+          'Retry-After': '60',
+          'Cache-Control': 'no-store',
+        },
+      ),
+      shape: 'worker-emitted',
+    };
+  }
   let result: { success: boolean };
   try {
     result = await env.RATE_LIMITER.limit({ key });
@@ -468,13 +493,14 @@ async function applyRateLimit(
     return null;
   }
   if (result.success) return null;
+  const retrySeconds = 60; // matches wrangler.toml `period`; see note above.
   return {
     response: jsonResponse(
       429,
-      { error: 'rate_limited', retry_after: 60 },
+      { error: 'rate_limited', retry_after: retrySeconds },
       {
         ...corsHeaders(origin),
-        'Retry-After': '60',
+        'Retry-After': String(retrySeconds),
         'Cache-Control': 'no-store',
       },
     ),
@@ -597,6 +623,28 @@ export interface MemberProfile {
 
 const PROFILE_TTL_SECONDS = 30 * 24 * 3600; // 30d per ADR-009 member-detail class
 
+/**
+ * Lightweight URL sanitizer for Worker code — mirrors `src/utils/sanitizeUrl`
+ * but lives here so the Worker doesn't import from `src/`. Returns the
+ * input verbatim if it parses as http(s); returns null otherwise.
+ *
+ * AC-31.1 defense-in-depth at the Worker write path: KV records persist
+ * what upstream Congress.gov returns; if upstream is ever compromised or
+ * misdata lands, we still want the stored field to be safe.
+ */
+function sanitizeHttpUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (typeof value !== 'string') return null;
+  if (value !== value.trim() || value === '') return null;
+  try {
+    const u = new URL(value);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
 async function buildProfileFromUpstream(
   bioguideId: string,
   env: ProxyEnv,
@@ -604,24 +652,34 @@ async function buildProfileFromUpstream(
   if (!env.CONGRESS_API_KEY) return null;
   const keyQS = `api_key=${env.CONGRESS_API_KEY}`;
 
-  // AC-27.18: 15 s timeout on each upstream fetch. Three parallel requests —
-  // a slow upstream must not tie up Worker concurrency until Cloudflare's
-  // 30 s platform limit cuts it.
+  // AC-27.18: 15 s timeout on every upstream fetch. Each fetch is
+  // independently-wrapped so a timeout on the optional sponsored /
+  // cosponsored legs does NOT fail the whole profile (AC-27.18 intent:
+  // slow upstream shouldn't tie up Worker concurrency, but also shouldn't
+  // make every profile 502 if only the ancillary data is slow).
+  async function fetchOrNull(url: string): Promise<Response | null> {
+    try {
+      return await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      return null;
+    }
+  }
+
   const [detailRes, sponsoredRes, cosponsoredRes] = await Promise.all([
-    fetch(`https://api.congress.gov/v3/member/${bioguideId}?format=json&${keyQS}`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(15_000),
-    }),
-    fetch(
+    fetchOrNull(`https://api.congress.gov/v3/member/${bioguideId}?format=json&${keyQS}`),
+    fetchOrNull(
       `https://api.congress.gov/v3/member/${bioguideId}/sponsored-legislation?limit=250&format=json&${keyQS}`,
-      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
     ),
-    fetch(
+    fetchOrNull(
       `https://api.congress.gov/v3/member/${bioguideId}/cosponsored-legislation?limit=250&format=json&${keyQS}`,
-      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
     ),
   ]);
 
+  // Detail is REQUIRED — sponsored/cosponsored are optional.
+  if (!detailRes) throw new Error('member detail upstream_timeout');
   if (detailRes.status === 404) return null;
   if (!detailRes.ok) throw new Error(`member detail ${detailRes.status}`);
 
@@ -666,10 +724,12 @@ async function buildProfileFromUpstream(
         ? 'I'
         : partyName.charAt(0).toUpperCase();
 
-  const sponsored = sponsoredRes.ok
+  // sponsored / cosponsored are optional: a timeout (null) or non-OK upstream
+  // yields an empty list rather than failing the whole profile.
+  const sponsored = sponsoredRes && sponsoredRes.ok
     ? ((await sponsoredRes.json()) as { sponsoredLegislation?: unknown[] }).sponsoredLegislation ?? []
     : [];
-  const cosponsored = cosponsoredRes.ok
+  const cosponsored = cosponsoredRes && cosponsoredRes.ok
     ? ((await cosponsoredRes.json()) as { cosponsoredLegislation?: unknown[] }).cosponsoredLegislation ?? []
     : [];
 
@@ -685,8 +745,11 @@ async function buildProfileFromUpstream(
     district: currentTerm?.district ?? m.district ?? null,
     chamber,
     party,
-    photoUrl: m.depiction?.imageUrl ?? null,
-    website: m.officialWebsiteUrl ?? null,
+    // AC-31.1 defense-in-depth at the Worker write path: URLs written to
+    // KV are sanitized here so a future reader who forgets to sanitize at
+    // render doesn't surface a `javascript:` href from a stale profile.
+    photoUrl: sanitizeHttpUrl(m.depiction?.imageUrl),
+    website: sanitizeHttpUrl(m.officialWebsiteUrl),
     searchKey: normalizeSearchKey(`${first} ${last}`),
     sponsored,
     cosponsored,
@@ -730,11 +793,17 @@ async function handleMemberProfile(
   try {
     profile = await buildProfileFromUpstream(bioguideId, env);
   } catch (e) {
+    // AC-27.18: timeout returns 504, non-timeout upstream errors return 502.
+    const msg = (e as Error).message;
+    const isTimeout = msg.includes('upstream_timeout');
     return {
       response: jsonResponse(
-        502,
-        { error: 'upstream_error', detail: (e as Error).message },
-        corsHeaders(origin),
+        isTimeout ? 504 : 502,
+        {
+          error: isTimeout ? 'upstream_timeout' : 'upstream_error',
+          detail: msg,
+        },
+        { ...corsHeaders(origin), 'Cache-Control': 'no-store' },
       ),
       shape: 'worker-emitted',
     };
@@ -1165,6 +1234,14 @@ async function dispatch(
         shape: 'worker-emitted',
       };
     }
+
+    // AC-27.21 + AC-27.22: rate-limit AFTER cheap rejections (origin/method)
+    // and BEFORE KV reads / potential read-through to Congress.gov. Applies
+    // to every KV route: /api/members, /api/bills, /api/roll-calls,
+    // /api/name-search. Previously these bypassed the limiter entirely.
+    const kvRlResult = await applyRateLimit(request, url, env, origin);
+    if (kvRlResult) return kvRlResult;
+
     const [, kind, rest] = kvRouteMatch;
     if (kind === 'members') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };

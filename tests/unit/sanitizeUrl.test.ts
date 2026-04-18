@@ -93,6 +93,28 @@ describe('sanitizeUrl (AC-31.1, AC-31.2)', () => {
     });
   });
 
+  describe('embedded control characters', () => {
+    it('rejects a URL containing a tab', () => {
+      expect(sanitizeUrl('https://example.com/a\tb')).toBeNull();
+    });
+
+    it('rejects a URL containing a newline', () => {
+      expect(sanitizeUrl('https://example.com/a\nb')).toBeNull();
+    });
+
+    it('rejects a URL containing a carriage return', () => {
+      expect(sanitizeUrl('https://example.com/a\rb')).toBeNull();
+    });
+
+    it('rejects a URL containing a null byte', () => {
+      expect(sanitizeUrl('https://example.com/a\x00b')).toBeNull();
+    });
+
+    it('rejects a URL containing DEL (0x7f)', () => {
+      expect(sanitizeUrl('https://example.com/a\x7fb')).toBeNull();
+    });
+  });
+
   describe('leading/trailing whitespace', () => {
     it('rejects URLs with leading whitespace that hides a dangerous scheme', () => {
       // Some historical browsers tolerated leading whitespace before the

@@ -345,7 +345,7 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
   - `Permissions-Policy: accelerometer=(), autoplay=(), camera=(), cross-origin-isolated=(), display-capture=(), encrypted-media=(), fullscreen=(), geolocation=(), gyroscope=(), interest-cohort=(), keyboard-map=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(), screen-wake-lock=(), sync-xhr=(), usb=(), web-share=(), xr-spatial-tracking=()`
   - `Cross-Origin-Resource-Policy: same-origin` — Worker-emitted content is not meant to be read cross-origin (errors / redirects).
   - `Cache-Control: no-store` on all 4xx/5xx responses.
-- AC-27.1b: Static-file responses from R2 (`/voter-info-widget.iife.js`, `/ukraineBills.json`, `/ukraineVotes.json`) SHALL carry `Cross-Origin-Resource-Policy: cross-origin` (so the bundle is embeddable from any host) and `Access-Control-Allow-Origin: *`. CSP and Permissions-Policy SHALL NOT be set on static responses (they apply to documents, not subresources, and would confuse static analyzers).
+- AC-27.1b (revised 2026-04-18): Static-file responses served via Worker Sites `ASSETS` binding (`/voter-info-widget.iife.js`, `/voter-info-widget.iife.js.sri`, `/ukraineBills.json`, `/ukraineVotes.json`) SHALL carry `Cross-Origin-Resource-Policy: cross-origin` (so the bundle is embeddable from any host) and `Access-Control-Allow-Origin: *`. CSP and Permissions-Policy SHALL NOT be set on static responses (they apply to documents, not subresources, and would confuse static analyzers). **Historical note:** original v2.5.1 wording referenced "R2"; the ADR-011 migration replaced R2 with Worker Sites before this AC landed.
 - AC-27.1c: Successful `/api/*` responses SHALL carry `Cross-Origin-Resource-Policy: cross-origin` so browser fetch from allowed embedder origins can read them. CSP and Permissions-Policy SHALL NOT be set on API responses (non-document content).
 - AC-27.2: `/api/*` responses SHALL additionally carry the headers in AC-25.8 (CORS reflection + `Vary: Origin`).
 - AC-27.3: The Worker SHALL strip the following upstream-provided response headers before responding: `Set-Cookie`, `Access-Control-Allow-Credentials`, `Server`, `Via`, `Link`, `Report-To`, `NEL`, `Reporting-Endpoints`, `P3P`, `X-Powered-By`, `X-AspNet-Version`, `X-AspNetMvc-Version`, and any header matching `/^x-(vcap|api-umbrella|amz|azure|appengine|request-id|correlation-id|trace-id|b3)/i`. Rationale: these fingerprint the upstream provider, leak internal routing metadata, or (in the case of `Report-To`/`NEL`) tell the browser to beacon user data to an endpoint we do not control.
@@ -356,7 +356,7 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 - AC-27.8: The Worker SHALL NOT log request URLs, response bodies, or any header value to any observability sink without first redacting `CONGRESS_API_KEY`. (Current code has no logging; this AC pins the invariant for future changes.)
 - AC-27.9: The Worker SHALL return `405 Method Not Allowed` with an `Allow` response header for any request whose method is not supported on that route. The Worker SHALL accept the following methods:
   - **`/api/*`** — `GET`, `HEAD` (HEAD SHALL be treated identically to GET except the body is omitted, per RFC 7231 §4.3.2), `OPTIONS` (preflight). 405 Allow: `GET, HEAD, OPTIONS`.
-  - **Static R2 files** — `GET`, `HEAD`, `OPTIONS`. 405 Allow: `GET, HEAD, OPTIONS`.
+  - **Static files (Worker Sites `ASSETS`)** — `GET`, `HEAD`, `OPTIONS`. 405 Allow: `GET, HEAD, OPTIONS`.
   - **Unknown paths** — fall through to dispatch's text/html redirect or 404; no method-specific 405.
   - OPTIONS responses from the Worker — whether 204 preflight-success, 403 disallowed-origin, or any other OPTIONS-generated response — SHALL include `Allow` per above when the response status is 4xx. (Previously the 405 response omitted `Allow`, which violates RFC 7231 §7.4.1.)
 - AC-27.10: The `ALLOW_LOCALHOST` and `ALLOWED_ORIGINS` environment variables SHALL be parsed exactly once per request (no dynamic reload, no module-scope memoization that could leak across isolates). This keeps the Worker stateless and makes `wrangler deploy --env <name>` the single source of truth for the whitelist.
@@ -580,18 +580,20 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 
 **Problem.** The widget has no defined production deployment. Spec and code exist but "where does this actually live" is undefined. Since the widget must be embeddable on trackukraine.com (Fourthwall) and the stated goal is to host infrastructure on Cloudflare for security, the deployment architecture needs to be explicit.
 
-**Solution.** Two Cloudflare services, both deployed from this repo via `wrangler` invoked from GitHub Actions:
+**Solution (revised 2026-04-18 — ADR-011 migration).** Two Cloudflare services, both deployed from this repo via `wrangler` invoked from GitHub Actions:
 
-1. **Cloudflare R2 bucket** serving static assets: `voter-info-widget.iife.js`, `ukraineBills.json`, `ukraineVotes.json`. Accessed via custom domain (e.g., `cdn.trackukraine.com`).
-2. **Cloudflare Worker** serving the CORS proxy with edge caching (FR-25). Accessed via custom domain (e.g., `api.trackukraine.com`). Holds `CONGRESS_API_KEY` as a secret.
+1. **Cloudflare Worker (Worker Sites)** serving the widget bundle + curated JSON as static assets from the bundled `./dist` directory via the `[assets] binding = "ASSETS"` in `wrangler.toml`. No separate R2 bucket for static content. (Historical: v2.4.x used R2; see FR-32 / ADR-011 for the migration.)
+2. **Cloudflare Worker KV (`KV_VOTER_INFO`)** holding curator records (member profiles, bill records, roll calls, name index) + an optional response cache per ADR-009. Populated by `scripts/publish-to-kv.ts`.
+
+Both surfaces ship together with `wrangler deploy`. `CONGRESS_API_KEY` is a per-env Worker secret.
 
 See `docs/deployment.md` for the concrete setup playbook.
 
 **Acceptance criteria:**
-- AC-26.1: The repo SHALL contain a `wrangler.toml` at the project root defining the Worker and the R2 bucket bindings.
+- AC-26.1 (revised 2026-04-18): The repo SHALL contain a `wrangler.toml` at the project root defining the Worker, the `[assets]` static-file binding (`./dist`), the `KV_VOTER_INFO` KV namespace binding, and the `RATE_LIMITER` rate-limiting binding. Historical: prior R2 bindings removed in ADR-011 migration.
 - AC-26.2: The Worker source SHALL be TypeScript (`proxy/worker.ts`) consistent with the rest of the codebase.
 - AC-26.3: The repo SHALL contain `.github/workflows/pr.yml` running lint, typecheck, and tests on every PR to `main`. No deployment.
-- AC-26.4: The repo SHALL contain `.github/workflows/deploy.yml` running on push to `main`: build widget bundle, deploy to R2, deploy Worker via `wrangler deploy`.
+- AC-26.4 (revised 2026-04-18): The repo SHALL contain `.github/workflows/deploy.yml` running on rung-branch push: build widget bundle, compute SRI sidecar, stage curated JSON into `./dist`, publish curator records to KV via `scripts/publish-to-kv.ts`, deploy Worker via `wrangler deploy` (which ships `./dist` as static assets with the Worker). Historical: v2.4.x had an R2 upload step; removed in ADR-011.
 - AC-26.5: The repo SHALL contain `.github/workflows/refresh-data.yml` running weekly: run the curator, check for diffs, open a PR with the updated JSON files and a summary of added/changed votes.
 - AC-26.6: Secrets (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CONGRESS_API_KEY`) SHALL be documented in `docs/deployment.md` and set via `gh secret set` or the GitHub Actions UI.
 - AC-26.7: The embed snippet documented in `README.md` SHALL reference the final Cloudflare URLs (placeholders acceptable until the actual domains are provisioned).
