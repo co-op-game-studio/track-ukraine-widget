@@ -54,6 +54,12 @@ export interface ProxyEnv {
   ENV_NAME?: string;
   /** KV namespace for curator records (member:, bill:, roll-call:, name-index:) + response cache (cache:). */
   KV_VOTER_INFO: KVLike;
+  /**
+   * Worker Sites assets binding. Serves static files from ./dist (the
+   * widget IIFE bundle etc.). The Worker explicitly calls env.ASSETS.fetch
+   * for unknown paths so assets serve after Worker route matching fails.
+   */
+  ASSETS?: { fetch: (req: Request) => Promise<Response> };
 }
 
 interface ApiRouteRule {
@@ -1010,25 +1016,45 @@ async function dispatch(
   //    - Any other text/html GET: 301 → trackukraine.com.
   const accept = request.headers.get('Accept') ?? '';
   if (request.method === 'GET' && accept.includes('text/html')) {
-    if (env.PREVIEW_MODE === 'true' && url.pathname === '/') {
+    // Non-prod (PREVIEW_MODE='true'): serve widget preview at any HTML request.
+    // Worker-level Access gate is already upstream; if we're here, the user is
+    // authenticated or on localhost. Always render the preview — never redirect
+    // to trackukraine.com on a lower env.
+    if (env.PREVIEW_MODE === 'true') {
       return {
         response: new Response(buildPreviewHtml(env.ENV_NAME ?? 'non-prod'), {
           status: 200,
           headers: {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-store',
+            'X-Preview-Mode': 'served',
           },
         }),
         shape: 'worker-emitted',
       };
     }
+    // Prod only: bounce voters to the embed host.
+    const resp = Response.redirect('https://trackukraine.com/', 301);
+    const headers = new Headers(resp.headers);
+    headers.set('X-Preview-Mode', `skipped (prod)`);
     return {
-      response: Response.redirect('https://trackukraine.com/', 301),
+      response: new Response(resp.body, { status: resp.status, headers }),
       shape: 'worker-emitted',
     };
   }
 
-  // 4. Anything else — 404.
+  // 4. Unknown path: delegate to Worker Sites assets (serves dist/ files
+  //    like /voter-info-widget.iife.js). 404 if assets don't have it either.
+  if (env.ASSETS) {
+    try {
+      const assetResp = await env.ASSETS.fetch(request);
+      if (assetResp.status !== 404) {
+        return { response: assetResp, shape: 'static-asset' };
+      }
+    } catch {
+      /* fall through */
+    }
+  }
   return { response: new Response('Not Found', { status: 404 }), shape: 'worker-emitted' };
 }
 
