@@ -30,7 +30,7 @@ jobs:
       - run: npm ci
 
       - name: Sync prod KV → stg KV
-        run: node scripts/sync-stg-data.mjs
+        run: npx tsx scripts/sync-stg-data.ts
 
       - name: Deploy stg Worker
         uses: cloudflare/wrangler-action@v3

@@ -94,7 +94,9 @@ jobs:
           test -f src/data/ukraineVotes.json     || (echo "ukraineVotes.json missing (needed as publish-to-kv input)" && exit 1)
 
       - name: Publish atomic records to KV
-        run: node scripts/publish-to-kv.mjs --env ${{ needs.resolve.outputs.env_name }}
+        env:
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+        run: npx tsx scripts/publish-to-kv.ts --env ${{ needs.resolve.outputs.env_name }}
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3

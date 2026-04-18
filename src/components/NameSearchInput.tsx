@@ -1,113 +1,87 @@
 /**
- * NameSearchInput — live, debounced name-search UI.
+ * NameSearchInput — input + inline status indicator.
+ * Parent handles live results list and renders it as tiles.
  *
  * Traces to: FR-31, ADR-011.
  */
-import { useId, useState, useCallback, type KeyboardEvent } from 'react';
-import { useNameSearch, type NameSearchResult } from '../hooks/useNameSearch';
+import type { NameSearchStatus } from '../hooks/useNameSearch';
 
 export interface NameSearchInputProps {
-  apiBase: string;
-  onSelect: (result: NameSearchResult) => void;
+  value: string;
+  onChange: (query: string) => void;
   disabled?: boolean;
+  status?: NameSearchStatus;
+  resultCount?: number;
+  showErrorDetails?: boolean;
+  errorMessage?: string | null;
 }
 
-export function NameSearchInput({ apiBase, onSelect, disabled }: NameSearchInputProps) {
-  const listboxId = useId();
-  const { query, setQuery, results, truncated, status, error, clear } = useNameSearch(apiBase);
-  const [highlightedIndex, setHighlightedIndex] = useState(-1);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setHighlightedIndex((i) => Math.min(i + 1, results.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setHighlightedIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter' && results.length > 0) {
-        e.preventDefault();
-        const idx = highlightedIndex >= 0 ? highlightedIndex : 0;
-        const result = results[idx];
-        if (result) {
-          onSelect(result);
-          clear();
-          setHighlightedIndex(-1);
-        }
-      } else if (e.key === 'Escape') {
-        setHighlightedIndex(-1);
-        setQuery('');
+function statusGlyph(status: NameSearchStatus | undefined, resultCount: number): {
+  className: string;
+  title: string;
+  content: string;
+} | null {
+  switch (status) {
+    case 'loading':
+      return { className: 'viw-search-status-loading', title: 'Searching…', content: '' };
+    case 'error':
+      return { className: 'viw-search-status-error', title: 'Search failed', content: '!' };
+    case 'unavailable':
+      return { className: 'viw-search-status-error', title: 'Search unavailable', content: '!' };
+    case 'success':
+      if (resultCount === 0) {
+        return { className: 'viw-search-status-warn', title: 'No matches found', content: '?' };
       }
-    },
-    [results, highlightedIndex, onSelect, clear, setQuery],
-  );
+      return null;
+    default:
+      return null;
+  }
+}
 
-  const open = query.trim().length >= 2 && (results.length > 0 || status === 'unavailable' || status === 'success');
+export function NameSearchInput({
+  value,
+  onChange,
+  disabled,
+  status,
+  resultCount = 0,
+  showErrorDetails = false,
+  errorMessage,
+}: NameSearchInputProps) {
+  const glyph = statusGlyph(status, resultCount);
+  // When showErrorDetails is on AND we errored, surface the upstream message
+  // via the glyph title so hover reveals the detail. No text row.
+  const detailTitle =
+    (status === 'error' || status === 'unavailable') && showErrorDetails && errorMessage
+      ? `${glyph?.title ?? 'Error'}: ${errorMessage}`
+      : glyph?.title;
 
   return (
-    <div className="viw-name-search">
-      <label className="viw-name-search-label">
-        Or search by name:
-        <input
-          type="text"
-          role="combobox"
-          aria-expanded={open}
-          aria-controls={listboxId}
-          aria-autocomplete="list"
-          className="viw-name-search-input"
-          placeholder="e.g. Durbin or Tammy"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setHighlightedIndex(-1);
-          }}
-          onKeyDown={handleKeyDown}
-          disabled={disabled || status === 'unavailable'}
-        />
+    <div className="viw-name-search-form">
+      <label htmlFor="viw-name-search" className="viw-address-label">
+        Or search by name
       </label>
-
-      {error && status === 'unavailable' && (
-        <div className="viw-name-search-hint" role="status">{error}</div>
-      )}
-
-      {open && (
-        <ul
-          id={listboxId}
-          className="viw-name-search-listbox"
-          role="listbox"
-          aria-label="Member matches"
-        >
-          {results.length === 0 && status === 'success' && (
-            <li className="viw-name-search-empty" role="option" aria-selected={false}>
-              No members match
-            </li>
-          )}
-          {results.map((r, idx) => (
-            <li
-              key={r.bioguideId}
-              role="option"
-              aria-selected={idx === highlightedIndex}
-              className={`viw-name-search-option${idx === highlightedIndex ? ' is-highlighted' : ''}`}
-              onClick={() => {
-                onSelect(r);
-                clear();
-                setHighlightedIndex(-1);
-              }}
-              onMouseEnter={() => setHighlightedIndex(idx)}
-            >
-              <span className="viw-name-search-name">{r.displayName}</span>
-              <span className="viw-name-search-meta">
-                {r.chamber} · {r.state} · {r.party}
-              </span>
-            </li>
-          ))}
-          {truncated && (
-            <li className="viw-name-search-truncated" role="option" aria-selected={false}>
-              Showing top 10 — refine your search
-            </li>
-          )}
-        </ul>
-      )}
+      <div className="viw-address-row viw-name-search-row">
+        <input
+          id="viw-name-search"
+          type="search"
+          className="viw-address-input"
+          placeholder="e.g. Durbin or Tammy"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          autoComplete="off"
+        />
+        {glyph && (
+          <span
+            className={`viw-search-status ${glyph.className}`}
+            title={detailTitle}
+            aria-label={detailTitle}
+            role="status"
+          >
+            {glyph.content}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

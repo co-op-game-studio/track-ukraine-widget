@@ -1,53 +1,30 @@
 /**
- * VoterInfoWidget — root component that composes AddressInput, NameSearchInput,
- * ResultsPanel, ErrorBanner.
+ * VoterInfoWidget — composes AddressInput + NameSearchInput and routes to
+ * ResultsPanel (for address-based lookups) or NameSearchResultsPanel (for
+ * live name-search).
  * Traces to: T-021, FR-31, all user stories.
  */
-import { useState } from 'react';
 import { AddressInput } from './components/AddressInput';
 import { NameSearchInput } from './components/NameSearchInput';
+import { NameSearchResultsPanel } from './components/NameSearchResultsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { ResultsPanel } from './components/ResultsPanel';
 import { useAddressLookup } from './hooks/useAddressLookup';
-import type { NameSearchResult } from './hooks/useNameSearch';
-import type { LookupResult, Representative } from './types/domain';
+import { useNameSearch } from './hooks/useNameSearch';
 
 export interface VoterInfoWidgetProps {
-  /** Base URL where the proxy Worker is hosted. Empty string = same-origin (dev). */
+  /** Base URL for proxy API calls. Empty string = same-origin. */
   apiBase?: string;
+  /** When true, show detailed error messages from the search layer (dev/uat/stg).
+   *  Prod should set false — errors become generic. */
+  showErrorDetails?: boolean;
 }
 
-function nameSearchResultToLookupResult(r: NameSearchResult): LookupResult {
-  const rep: Representative = {
-    bioguideId: r.bioguideId,
-    name: r.displayName,
-    party:
-      r.party === 'D' ? 'Democratic' :
-      r.party === 'R' ? 'Republican' :
-      r.party === 'I' ? 'Independent' : r.party,
-    partyAbbreviation: r.party,
-    state: r.state,
-    district: null,
-    chamber: r.chamber.toLowerCase() as 'house' | 'senate',
-    photoUrl: null,
-    isNonVoting: false,
-    officialWebsiteUrl: null,
-  };
-  return { representatives: [rep], state: r.state, district: 0 };
-}
-
-export function VoterInfoWidget({ apiBase = '' }: VoterInfoWidgetProps) {
+export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: VoterInfoWidgetProps) {
   const lookup = useAddressLookup(apiBase);
+  const search = useNameSearch(apiBase);
   const loading = lookup.status === 'loading';
-  const [nameSelection, setNameSelection] = useState<LookupResult | null>(null);
-
-  const handleNameSelect = (r: NameSearchResult) => {
-    lookup.reset();
-    setNameSelection(nameSearchResultToLookupResult(r));
-  };
-
-  const addressResult = lookup.status === 'success' ? lookup.data : null;
-  const effectiveResult = addressResult ?? nameSelection;
+  const hasActiveSearch = search.query.trim().length >= 2;
 
   return (
     <div className="viw-root">
@@ -61,23 +38,41 @@ export function VoterInfoWidget({ apiBase = '' }: VoterInfoWidgetProps) {
 
       <AddressInput
         onSubmit={(addr) => {
-          setNameSelection(null);
+          search.clear();
           return lookup.lookup(addr);
         }}
         disabled={loading}
       />
 
-      <NameSearchInput apiBase={apiBase} onSelect={handleNameSelect} disabled={loading} />
+      <NameSearchInput
+        value={search.query}
+        onChange={(q) => {
+          if (q.trim().length > 0) lookup.reset();
+          search.setQuery(q);
+        }}
+        disabled={loading}
+        status={search.status}
+        resultCount={search.results.length}
+        showErrorDetails={showErrorDetails}
+        errorMessage={search.error}
+      />
 
-      {lookup.error && (
-        <ErrorBanner
-          message={lookup.error.message}
-          onDismiss={lookup.reset}
-        />
+      {lookup.error && !hasActiveSearch && (
+        <ErrorBanner message={lookup.error.message} onDismiss={lookup.reset} />
       )}
 
-      {effectiveResult && (
-        <ResultsPanel result={effectiveResult} apiBase={apiBase} />
+      {hasActiveSearch ? (
+        <NameSearchResultsPanel
+          query={search.query}
+          results={search.results}
+          truncated={search.truncated}
+          status={search.status}
+          error={null /* error surface lives on the input now */}
+          apiBase={apiBase}
+        />
+      ) : (
+        lookup.status === 'success' &&
+        lookup.data && <ResultsPanel result={lookup.data} apiBase={apiBase} />
       )}
 
       <footer className="viw-root-footer">

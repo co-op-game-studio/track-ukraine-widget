@@ -1,20 +1,19 @@
-#!/usr/bin/env node
+#!/usr/bin/env tsx
 /**
- * Sync prod curator data (KV) to stg. T-025e / FR-30.
+ * Sync prod curator-written KV records to stg. T-025e / FR-30.
  *
- * Copies all keys with these prefixes from prod KV → stg KV:
- *   member:v1:*, bill:v1:*, roll-call:v1:*, name-index:v1:*
+ * Copies keys with these prefixes from prod → stg:
+ *   bill:v1:*, roll-call:v1:*, name-index:v1:*
  *
- * The cache:v1:* prefix (ADR-009 response cache) is deliberately NOT synced —
- * stg has its own traffic and must not inherit prod's response caches.
+ * Does NOT copy:
+ *   - member:v1:* (filled by the Worker read-through from upstream — stg will
+ *     lazily rebuild its own profile cache against the live Congress.gov API)
+ *   - cache:v1:*  (ADR-009 response cache — env-local traffic only)
  *
- * Uses wrangler for read (prod namespace) and write (stg namespace).
- * Requires CLOUDFLARE_API_TOKEN.
+ * Usage: tsx scripts/sync-stg-data.ts [--dry-run]
  *
- * Usage:
- *   node scripts/sync-stg-data.mjs [--dry-run]
+ * Traces: FR-30, T-025e, ADR-011.
  */
-
 import { execSync } from 'node:child_process';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,32 +26,30 @@ const NAMESPACES = {
   stg: '4ff9a8e54b82489fb9a300466bd68686',
 };
 
-const PREFIXES = ['member:v1:', 'bill:v1:', 'roll-call:v1:', 'name-index:v1:'];
+const PREFIXES = ['bill:v1:', 'roll-call:v1:', 'name-index:v1:'] as const;
 
-function sh(cmd) {
+function sh(cmd: string): string {
   return execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
 }
 
 console.log('Listing prod keys...');
-const allKeys = [];
+const allKeys: string[] = [];
 for (const prefix of PREFIXES) {
   const out = sh(`npx wrangler kv key list --namespace-id ${NAMESPACES.prod} --prefix "${prefix}" --remote`);
-  const keys = JSON.parse(out);
+  const keys = JSON.parse(out) as { name: string }[];
   console.log(`  ${prefix} → ${keys.length} keys`);
   for (const k of keys) allKeys.push(k.name);
 }
 console.log(`Total: ${allKeys.length} keys to sync`);
 
 if (DRY_RUN) {
-  console.log('\n--dry-run: no writes performed');
+  console.log('--dry-run: no writes performed');
   process.exit(0);
 }
 
-// Fetch values in series (KV key get doesn't support bulk read reliably via CLI).
-// Build a bulk-put payload for stg.
-const pairs = [];
+const pairs: { key: string; value: string }[] = [];
 for (let i = 0; i < allKeys.length; i++) {
-  const key = allKeys[i];
+  const key = allKeys[i]!;
   const value = sh(`npx wrangler kv key get "${key}" --namespace-id ${NAMESPACES.prod} --remote`);
   pairs.push({ key, value });
   if ((i + 1) % 50 === 0) console.log(`  read ${i + 1}/${allKeys.length}`);
@@ -62,7 +59,7 @@ const dir = mkdtempSync(join(tmpdir(), 'stgsync-'));
 const payloadPath = join(dir, 'bulk.json');
 writeFileSync(payloadPath, JSON.stringify(pairs), 'utf8');
 
-console.log(`\nWriting to stg namespace...`);
+console.log('Writing to stg namespace...');
 sh(`npx wrangler kv bulk put --namespace-id ${NAMESPACES.stg} --remote ${payloadPath}`);
 
 console.log(`\n✓ Synced ${pairs.length} keys from prod → stg KV`);

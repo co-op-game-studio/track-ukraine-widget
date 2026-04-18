@@ -17,8 +17,8 @@
     "curate": "tsx scripts/build-curated-bills.ts && tsx scripts/build-vote-rosters.ts",
     "curate:bills": "tsx scripts/build-curated-bills.ts",
     "curate:rosters": "tsx scripts/build-vote-rosters.ts",
-    "publish:kv": "node scripts/publish-to-kv.mjs",
-    "stg:sync-data": "node scripts/sync-stg-data.mjs"
+    "publish:kv": "tsx scripts/publish-to-kv.ts",
+    "stg:sync-data": "tsx scripts/sync-stg-data.ts"
   },
   "dependencies": {
     "react": "^19.0.0",

@@ -1,23 +1,31 @@
 /**
- * Dev entry point — renders the widget directly (no Shadow DOM) for dev mode.
- * Production uses embed.tsx via the library build.
+ * Dev entry point — renders the widget with an env picker for local testing.
+ * Production embedding uses embed.tsx via the library build.
  */
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { VoterInfoWidget } from './VoterInfoWidget';
 import { initRosters } from './services/bundledRosters';
+import { EnvPicker, ENV_API_BASE, useEnvFromUrl, type EnvName } from './EnvPicker';
 import './styles/widget.css';
 
-// Dev mode: point at the local dev server, which proxies /api/* to the
-// dev Worker (see vite.config.ts). Member profiles come from KV via
-// /api/members/{bioguideId} per ADR-011.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const DEV_API_BASE: string = ((import.meta as any).env?.VITE_API_BASE as string | undefined) ?? 'https://dev.vote.cogs.it.com';
-initRosters(DEV_API_BASE);
+function Harness() {
+  const { env: initialEnv, locked } = useEnvFromUrl('dev');
+  const [env, setEnv] = useState<EnvName>(initialEnv);
+  const apiBase = ENV_API_BASE[env];
+  // Re-init the member-profile cache apiBase whenever env changes.
+  initRosters(apiBase);
+  return (
+    <>
+      <EnvPicker value={env} locked={locked} onChange={setEnv} />
+      <VoterInfoWidget key={env} apiBase={apiBase} showErrorDetails={env !== 'prod'} />
+    </>
+  );
+}
 
 const root = document.getElementById('root')!;
 createRoot(root).render(
   <StrictMode>
-    <VoterInfoWidget apiBase={DEV_API_BASE} />
+    <Harness />
   </StrictMode>,
 );

@@ -2,7 +2,7 @@
  * KV-backed route tests for /api/members, /api/name-search, /api/bills, /api/roll-calls.
  * Traces to: FR-24 (revised), FR-31, FR-32, ADR-011.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { handleFetch, type ProxyEnv, type KVLike, type CacheLike, normalizeSearchKey, rankMatches, type NameIndexEntry } from '../../proxy/lib';
 
 function makeFakeKV(store: Record<string, string> = {}): KVLike {
@@ -95,9 +95,53 @@ describe('/api/members/{bioguideId}', () => {
     expect(body.bioguideId).toBe('D000563');
   });
 
-  it('404 on miss', async () => {
-    const r = await handleFetch(new Request('https://vote.cogs.it.com/api/members/X999999', { headers: ORIGIN }), makeEnv(), makeFakeCache());
+  it('404 on miss (read-through returns upstream 404)', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{}', { status: 404, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/X999999', { headers: ORIGIN }),
+      makeEnv(),
+      makeFakeCache(),
+    );
     expect(r.status).toBe(404);
+    spy.mockRestore();
+  });
+
+  it('read-through: cache miss → upstream fetch → returns profile + X-Cache: MISS', async () => {
+    const memberDetail = {
+      member: {
+        bioguideId: 'D000563',
+        firstName: 'Richard',
+        lastName: 'Durbin',
+        directOrderName: 'Richard J. Durbin',
+        state: 'IL',
+        partyHistory: [{ partyName: 'Democratic' }],
+        terms: { item: [{ chamber: 'Senate' }] },
+      },
+    };
+    const sponsored = { sponsoredLegislation: [{ number: 'S1' }] };
+    const cosponsored = { cosponsoredLegislation: [] };
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const u = String(url);
+      if (u.includes('/sponsored-legislation')) return new Response(JSON.stringify(sponsored));
+      if (u.includes('/cosponsored-legislation')) return new Response(JSON.stringify(cosponsored));
+      return new Response(JSON.stringify(memberDetail));
+    });
+    const store: Record<string, string> = {};
+    const env = makeEnv(store);
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/D000563', { headers: ORIGIN }),
+      env,
+      makeFakeCache(),
+      { waitUntil: (p) => { void p; } },
+    );
+    expect(r.status).toBe(200);
+    expect(r.headers.get('X-Cache')).toBe('MISS');
+    const body = await r.json() as { bioguideId: string; chamber: string };
+    expect(body.bioguideId).toBe('D000563');
+    expect(body.chamber).toBe('Senate');
+    spy.mockRestore();
   });
 
   it('400 on invalid bioguide shape', async () => {

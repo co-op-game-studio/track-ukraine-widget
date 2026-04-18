@@ -390,10 +390,131 @@ export function rankMatches(query: string, entries: NameIndexEntry[]): NameIndex
 
 const API_ALLOW_METHODS = 'GET, HEAD, OPTIONS';
 
+/** Minimal shape of the ExecutionContext's waitUntil — lets tests inject. */
+export interface WaitUntilLike {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+/** Member profile — the canonical shape returned by /api/members/{bioguideId}. */
+export interface MemberProfile {
+  bioguideId: string;
+  first: string;
+  last: string;
+  officialName: string;
+  state: string;
+  district: number | null;
+  chamber: 'House' | 'Senate';
+  party: string;
+  photoUrl: string | null;
+  website: string | null;
+  searchKey: string;
+  sponsored: unknown[];
+  cosponsored: unknown[];
+  generatedAt: string;
+  schemaVersion: number;
+}
+
+const PROFILE_TTL_SECONDS = 30 * 24 * 3600; // 30d per ADR-009 member-detail class
+
+async function buildProfileFromUpstream(
+  bioguideId: string,
+  env: ProxyEnv,
+): Promise<MemberProfile | null> {
+  if (!env.CONGRESS_API_KEY) return null;
+  const keyQS = `api_key=${env.CONGRESS_API_KEY}`;
+
+  const [detailRes, sponsoredRes, cosponsoredRes] = await Promise.all([
+    fetch(`https://api.congress.gov/v3/member/${bioguideId}?format=json&${keyQS}`, {
+      headers: { Accept: 'application/json' },
+    }),
+    fetch(
+      `https://api.congress.gov/v3/member/${bioguideId}/sponsored-legislation?limit=250&format=json&${keyQS}`,
+      { headers: { Accept: 'application/json' } },
+    ),
+    fetch(
+      `https://api.congress.gov/v3/member/${bioguideId}/cosponsored-legislation?limit=250&format=json&${keyQS}`,
+      { headers: { Accept: 'application/json' } },
+    ),
+  ]);
+
+  if (detailRes.status === 404) return null;
+  if (!detailRes.ok) throw new Error(`member detail ${detailRes.status}`);
+
+  interface TermEntry {
+    chamber?: 'House of Representatives' | 'Senate';
+    congress?: number;
+    district?: number;
+    startYear?: number;
+    endYear?: number;
+  }
+  const detail = (await detailRes.json()) as {
+    member: {
+      bioguideId: string;
+      firstName?: string;
+      lastName?: string;
+      directOrderName?: string;
+      state: string;
+      district?: number;
+      partyHistory?: { partyName: string }[];
+      // /v3/member/{id} returns a flat array; /v3/member?list wraps in {item:[]}.
+      terms?: TermEntry[] | { item: TermEntry[] };
+      depiction?: { imageUrl?: string };
+      officialWebsiteUrl?: string;
+    };
+  };
+  const m = detail.member;
+  const rawTerms = m.terms;
+  const terms: TermEntry[] = Array.isArray(rawTerms) ? rawTerms : (rawTerms?.item ?? []);
+  // Current term = the one with the largest endYear (chronologically latest).
+  let currentTerm: TermEntry | undefined;
+  for (const t of terms) {
+    if (!currentTerm || (t.endYear ?? 0) >= (currentTerm.endYear ?? 0)) currentTerm = t;
+  }
+  const chamber: 'House' | 'Senate' =
+    currentTerm?.chamber === 'Senate' ? 'Senate' : 'House';
+  const partyName = m.partyHistory?.[m.partyHistory.length - 1]?.partyName ?? '';
+  const party = partyName.startsWith('Democrat')
+    ? 'D'
+    : partyName.startsWith('Republican')
+      ? 'R'
+      : partyName.startsWith('Independent')
+        ? 'I'
+        : partyName.charAt(0).toUpperCase();
+
+  const sponsored = sponsoredRes.ok
+    ? ((await sponsoredRes.json()) as { sponsoredLegislation?: unknown[] }).sponsoredLegislation ?? []
+    : [];
+  const cosponsored = cosponsoredRes.ok
+    ? ((await cosponsoredRes.json()) as { cosponsoredLegislation?: unknown[] }).cosponsoredLegislation ?? []
+    : [];
+
+  const first = m.firstName ?? '';
+  const last = m.lastName ?? '';
+  const officialName = m.directOrderName ?? `${first} ${last}`.trim();
+  return {
+    bioguideId: m.bioguideId,
+    first,
+    last,
+    officialName,
+    state: m.state,
+    district: currentTerm?.district ?? m.district ?? null,
+    chamber,
+    party,
+    photoUrl: m.depiction?.imageUrl ?? null,
+    website: m.officialWebsiteUrl ?? null,
+    searchKey: normalizeSearchKey(`${first} ${last}`),
+    sponsored,
+    cosponsored,
+    generatedAt: new Date().toISOString(),
+    schemaVersion: 1,
+  };
+}
+
 async function handleMemberProfile(
   bioguideId: string,
   request: Request,
   env: ProxyEnv,
+  ctx: WaitUntilLike,
   origin: string,
 ): Promise<DispatchResult> {
   if (!/^[A-Z][0-9]{6}$/.test(bioguideId)) {
@@ -402,18 +523,58 @@ async function handleMemberProfile(
       shape: 'worker-emitted',
     };
   }
-  const record = await env.KV_VOTER_INFO.get(KV_PREFIXES.member + bioguideId, 'text');
-  if (!record) {
+
+  // Cache read first (fast path).
+  const cached = await env.KV_VOTER_INFO.get(KV_PREFIXES.member + bioguideId, 'text');
+  if (cached) {
+    const headers = new Headers(corsHeaders(origin));
+    headers.set('Content-Type', 'application/json; charset=utf-8');
+    headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+    headers.set('X-Cache', 'HIT');
+    return {
+      response: new Response(request.method === 'HEAD' ? null : (cached as string), {
+        status: 200,
+        headers,
+      }),
+      shape: 'api-proxied',
+    };
+  }
+
+  // Read-through: fetch upstream, cache, return.
+  let profile: MemberProfile | null;
+  try {
+    profile = await buildProfileFromUpstream(bioguideId, env);
+  } catch (e) {
+    return {
+      response: jsonResponse(
+        502,
+        { error: 'upstream_error', detail: (e as Error).message },
+        corsHeaders(origin),
+      ),
+      shape: 'worker-emitted',
+    };
+  }
+
+  if (!profile) {
     return {
       response: jsonResponse(404, { error: 'member_not_found', bioguideId }, corsHeaders(origin)),
       shape: 'worker-emitted',
     };
   }
+
+  const body = JSON.stringify(profile);
+  ctx.waitUntil(
+    env.KV_VOTER_INFO.put(KV_PREFIXES.member + bioguideId, body, {
+      expirationTtl: PROFILE_TTL_SECONDS,
+    }),
+  );
+
   const headers = new Headers(corsHeaders(origin));
   headers.set('Content-Type', 'application/json; charset=utf-8');
   headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+  headers.set('X-Cache', 'MISS');
   return {
-    response: new Response(request.method === 'HEAD' ? null : (record as string), {
+    response: new Response(request.method === 'HEAD' ? null : body, {
       status: 200,
       headers,
     }),
@@ -749,8 +910,9 @@ export async function handleFetch(
   request: Request,
   env: ProxyEnv,
   cache: CacheLike,
+  ctx: WaitUntilLike = { waitUntil: () => {} },
 ): Promise<Response> {
-  const { response, shape } = await dispatch(request, env, cache);
+  const { response, shape } = await dispatch(request, env, cache, ctx);
   return applySecurityHeaders(response, shape);
 }
 
@@ -760,6 +922,7 @@ async function dispatch(
   request: Request,
   env: ProxyEnv,
   cache: CacheLike,
+  ctx: WaitUntilLike,
 ): Promise<DispatchResult> {
   const url = new URL(request.url);
   const origin = request.headers.get('Origin');
@@ -811,7 +974,7 @@ async function dispatch(
     const [, kind, rest] = kvRouteMatch;
     if (kind === 'members') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin!)), shape: 'worker-emitted' };
-      return handleMemberProfile(rest, request, env, origin!);
+      return handleMemberProfile(rest, request, env, ctx, origin!);
     }
     if (kind === 'bills') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_bill_id' }, corsHeaders(origin!)), shape: 'worker-emitted' };

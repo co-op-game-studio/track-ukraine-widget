@@ -466,14 +466,14 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 
 **Problem.** The widget currently requires a voter to know their address to see their reps. A voter who just wants to look up "how did Durbin vote on Ukraine" has no entry point. Address lookup is heavyweight (Census geocode + Congress.gov member fetch) for a question that is fundamentally a name lookup.
 
-**Solution.** Add a name-search entry point alongside address lookup. Voter types a fragment of a first or last name; a live, debounced dropdown shows matching current-Congress members. Selecting a result renders the same rep card as the address flow.
+**Solution.** Add a name-search entry point alongside address lookup. Voter types a fragment of a first or last name; a live, debounced **tile grid** (mirroring the post-address ResultsPanel layout) shows matching current-Congress members as clickable MemberChips in a single unified pane (no Senators/Representative split for search results). Selecting a chip opens the same RepDetail as the address flow.
 
 **User story (US-7)**: *As a voter, I want to type a representative's name and see their voting record directly, without providing an address.*
 
 **Acceptance criteria:**
 - AC-31.1: The widget SHALL render a **NameSearchInput** component adjacent to or inset within the AddressInput. The two inputs SHALL be visually distinct (different labels, different placeholder text) and operate independently. Submitting one SHALL NOT clear or affect the other's state.
 - AC-31.2: NameSearchInput SHALL debounce keystrokes by 150ms. After the debounce elapses, if the input value has ≥2 characters, the widget SHALL fetch `/api/name-search?q=<value>`.
-- AC-31.3: The widget SHALL render search results below the search input — in the same pane region where address-lookup results would appear. The widget SHALL NOT show address results and name-search results simultaneously. The most recent lookup's results SHALL take the pane.
+- AC-31.3: The widget SHALL render search results as a **single-pane tile grid** in the same pane region where address-lookup results would appear — using the same MemberChip + RepDetail components as the address flow, but with one unified chip row labelled "Matches" (no Senators/Representative split). The widget SHALL NOT show address results and name-search results simultaneously. While the search input has ≥2 characters, search results take the pane. Clearing the input returns to whichever address-lookup result was previously rendered (if any).
 - AC-31.4: Each result row SHALL display: member's display name (e.g., "Richard J. Durbin"), chamber ("Senate" or "House"), state (two-letter code), party (single letter). Row ordering SHALL match the Worker's ranking: exact-prefix matches first, then other substring matches, then by chamber (Senate before House), then by state ASC.
 - AC-31.5: Clicking a result row SHALL fetch `/api/members/{bioguideId}` and render that member's rep card using the same `RepCard` / `RepDetail` components as the address flow.
 - AC-31.6: The search SHALL match against **first names and last names**. Typing `"tammy"` SHALL match both Tammy Baldwin and Tammy Duckworth. Typing `"durb"` SHALL match Durbin.
@@ -518,6 +518,33 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 - AC-32.12: The publish-to-kv script SHALL support `--dry-run` which prints the key list and byte counts without executing `KV.put`. `--env <dev|uat|stg|prod>` SHALL select the target namespace.
 - AC-32.13: KV eventual consistency: a `put` is visible globally within ~60 seconds. The widget SHALL accept this bound — a user loading the widget within 60s of a curator run may receive a mix of old and new records. This is acceptable for nightly curator cadence. `docs/deployment.md` SHALL document this SLO.
 - AC-32.14: The name-search endpoint `/api/name-search` and member endpoint `/api/members/{bioguideId}` SHALL return responses with `Cache-Control: public, max-age=60, s-maxage=300`. This lets a browser reuse a result within a user's session without re-hitting the Worker, and lets CF's edge cache amortize across visitors. On a curator update, the next cache eviction picks up the new record within ~5 minutes at the edge.
+
+### FR-33: Dev Harness Env Picker + Search Status Indicator (NEW v2.5.0)
+
+**Problem.** The non-prod Workers (`dev`, `uat`, `stg`) are gated by Cloudflare Access. Opening `https://dev.vote.cogs.it.com` in a browser triggers an OTP email challenge, which is friction for smoke testing. The dev harness needs a way to exercise each env's Worker without the embedder-facing OTP flow. Separately, the name-search input needs a visible status indicator so developers can distinguish "still loading" from "succeeded, no matches" from "server error" without opening DevTools.
+
+**Solution.**
+1. The dev harness (`src/main.tsx`, not the embeddable build) SHALL render an **EnvPicker** component that selects which env's Worker the widget talks to. Selection maps to one of five API bases: `local`, `dev`, `uat`, `stg`, `prod`. Non-prod selections route through Vite dev-server proxies (`/env-<name>/*`) that attach CF Access service-token headers server-side, so the browser never hits the Access challenge.
+2. A URL parameter `?env=<name>` locks the picker to that env (useful for bookmarking "see my widget against stg data"). When locked, the picker control is disabled and a 🔒 glyph is shown.
+3. NameSearchInput SHALL render a **status indicator** glyph inline with the input, reflecting: idle (no glyph), loading (animated circle), error/unavailable (!), no-matches (?). Each glyph has a `title` and `aria-label` tooltip. A compact text line under the input surfaces the status in prose for screen-reader users and for the zero-match case. Error details SHALL be shown in non-prod envs only; prod SHALL display a generic "Search error" without upstream detail.
+
+**User story (US-8)**: *As a developer testing the widget, I want to switch between env Workers with one click and see search progress/errors without opening DevTools.*
+
+**Acceptance criteria:**
+- AC-33.1: EnvPicker SHALL render in a fixed position (top-right of the viewport) in the dev harness only. The embedded IIFE build (`src/embed.tsx`) SHALL NOT include the EnvPicker — production embedders get a single apiBase from the web component `api-base` attribute.
+- AC-33.2: Selecting an env SHALL remount the widget (via a React `key` change on the selected env name) so that in-flight state from the previous env does not leak into the next.
+- AC-33.3: The env→apiBase map SHALL be: `local → ''` (same-origin), `dev → '/env-dev'`, `uat → '/env-uat'`, `stg → '/env-stg'`, `prod → '/env-prod'`. The `/env-<name>` prefixes are handled by Vite dev-server proxies configured in `vite.config.ts`.
+- AC-33.4: For `dev`, `uat`, and `stg`, the Vite proxy SHALL attach `CF-Access-Client-Id` and `CF-Access-Client-Secret` headers to every forwarded request. Values come from `.env` (never committed). Prod SHALL NOT attach these headers.
+- AC-33.5: The Vite proxy SHALL set `Origin: https://trackukraine.com` on forwarded requests so the Worker's origin allowlist check passes. (The browser's real Origin is `http://localhost:5173`, which is permitted only on dev but rejected on uat/stg/prod — the proxy normalizes so the same harness can exercise every env.)
+- AC-33.6: On page load, the harness SHALL read the `env` URL parameter (if present and one of the valid names) and lock the picker to that env. If absent or invalid, the picker defaults to `dev` and remains interactive.
+- AC-33.7: NameSearchInput SHALL render a status glyph at the right edge of the input, inline with it (not full-width). Glyph states:
+  - **idle**: no glyph
+  - **loading**: animated circular indicator (CSS-only, no images) with title="Searching…"
+  - **error / unavailable**: red badge with `!` and title="Search failed" / "Search unavailable"
+  - **no-matches (success but zero results)**: yellow badge with `?` and title="No matches found"
+- AC-33.8: A compact text status line SHALL appear below the input (NOT in the results pane, NOT full-page-width) for the no-matches case — "No matches for \"<query>\"" — and, when `showErrorDetails=true`, for the error/unavailable case. Prod passes `showErrorDetails=false` so users see only the generic glyph.
+- AC-33.9: The `showErrorDetails` prop on VoterInfoWidget defaults to `false`. The dev harness sets it `env !== 'prod'`. The IIFE embed build always gets `false`.
+- AC-33.10: The status indicator SHALL be accessible: `role="status"`, glyph carries `aria-label` matching the tooltip, and the text line (when rendered) is also `role="status"` so screen readers announce it on state change.
 
 ### FR-26: Cloudflare Deployment Story (NEW v2.4.0)
 

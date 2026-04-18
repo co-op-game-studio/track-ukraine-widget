@@ -25,7 +25,7 @@ type Env = Omit<ProxyEnv, 'KV_VOTER_INFO'> & {
 };
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
-    return handleFetch(request, env as unknown as ProxyEnv, caches.default);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return handleFetch(request, env as unknown as ProxyEnv, caches.default, ctx);
   },
 };
