@@ -22,13 +22,12 @@ export interface CacheLike {
   put(req: Request | string, resp: Response): Promise<void>;
 }
 
-/** Minimal R2 surface we depend on — lets tests inject a fake. */
-interface R2Like {
-  get(key: string): Promise<{
-    body: ReadableStream | string | null;
-    httpEtag?: string;
-    httpMetadata?: { contentEncoding?: string };
-  } | null>;
+/** Minimal KV surface for tests. */
+export interface KVLike {
+  get(key: string, type?: 'text' | 'json'): Promise<string | null | unknown>;
+  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+  list(opts: { prefix: string; cursor?: string }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
+  delete(key: string): Promise<void>;
 }
 
 export interface ProxyEnv {
@@ -44,8 +43,8 @@ export interface ProxyEnv {
    * origins. Any other value (including unset) denies localhost. See AC-25.9.
    */
   ALLOW_LOCALHOST?: string;
-  /** R2 bucket binding. */
-  R2_ASSETS: R2Like;
+  /** KV namespace for curator records (member:, bill:, roll-call:, name-index:) + response cache (cache:). */
+  KV_VOTER_INFO: KVLike;
 }
 
 interface ApiRouteRule {
@@ -85,21 +84,6 @@ const API_ROUTES: ApiRouteRule[] = [
     upstreamAccept: 'application/json',
   },
 ];
-
-const STATIC_FILES: Record<string, { contentType: string; cacheControl: string }> = {
-  'voter-info-widget.iife.js': {
-    contentType: 'application/javascript; charset=utf-8',
-    cacheControl: 'public, max-age=600',
-  },
-  'ukraineBills.json': {
-    contentType: 'application/json; charset=utf-8',
-    cacheControl: 'public, max-age=600',
-  },
-  'ukraineVotes.json': {
-    contentType: 'application/json; charset=utf-8',
-    cacheControl: 'public, max-age=600',
-  },
-};
 
 const DEFAULT_ALLOWED_ORIGINS = [
   'https://trackukraine.com',
@@ -318,15 +302,6 @@ function corsHeaders(allowedOrigin: string): Record<string, string> {
   };
 }
 
-function staticCorsHeaders(): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Max-Age': '86400',
-    'Cross-Origin-Resource-Policy': 'cross-origin',
-  };
-}
-
 function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
   if (route.upstreamName !== 'congress') return route.cacheControl;
   if (/^v3\/house-vote\//.test(upstreamPath)) {
@@ -359,51 +334,220 @@ function jsonResponse(status: number, body: unknown, extraHeaders: HeadersInit =
   });
 }
 
-// ─── Request handlers ─────────────────────────────────────────────────────
+// ─── KV helpers (ADR-011, FR-32) ──────────────────────────────────────────
 
-async function handleStatic(
-  pathname: string,
-  method: string,
-  env: ProxyEnv,
-): Promise<Response | null> {
-  const key = pathname.replace(/^\/+/, '');
-  const fileMeta = STATIC_FILES[key];
-  if (!fileMeta) return null;
+const KV_PREFIXES = {
+  member: 'member:v1:',
+  bill: 'bill:v1:',
+  rollCall: 'roll-call:v1:',
+  nameIndex: 'name-index:v1:',
+  cache: 'cache:v1:',
+} as const;
 
-  if (method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: staticCorsHeaders() });
-  }
-  if (method !== 'GET' && method !== 'HEAD') {
-    return new Response('Method Not Allowed', {
-      status: 405,
-      headers: { Allow: 'GET, HEAD, OPTIONS', ...staticCorsHeaders() },
-    });
-  }
+/** Normalize a name-search query or indexed name: lowercase, strip diacritics,
+ *  remove apostrophes/hyphens, collapse whitespace. See AC-31.7. */
+export function normalizeSearchKey(s: string): string {
+  return s
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/['\u2019\-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  const obj = await env.R2_ASSETS.get(key);
-  if (!obj) {
-    return new Response('Not Found', { status: 404, headers: staticCorsHeaders() });
-  }
+export interface NameIndexEntry {
+  bioguideId: string;
+  displayName: string;
+  first: string;
+  last: string;
+  state: string;
+  chamber: 'Senate' | 'House';
+  party: string;
+  searchKeys: string[];
+}
 
-  const headers = new Headers({
-    'Content-Type': fileMeta.contentType,
-    'Cache-Control': fileMeta.cacheControl,
-    ...staticCorsHeaders(),
+/** Rank matches per AC-31.4: exact-prefix first, then substring, then by chamber then state. */
+export function rankMatches(query: string, entries: NameIndexEntry[]): NameIndexEntry[] {
+  const q = normalizeSearchKey(query);
+  if (!q) return [];
+  const scored = entries
+    .map((e) => {
+      const anyPrefix = e.searchKeys.some((k) => k.startsWith(q));
+      const anySubstring = e.searchKeys.some((k) => k.includes(q));
+      if (!anySubstring) return null;
+      return { e, prefix: anyPrefix };
+    })
+    .filter((x): x is { e: NameIndexEntry; prefix: boolean } => x !== null);
+  scored.sort((a, b) => {
+    if (a.prefix !== b.prefix) return a.prefix ? -1 : 1;
+    if (a.e.chamber !== b.e.chamber) return a.e.chamber === 'Senate' ? -1 : 1;
+    if (a.e.state !== b.e.state) return a.e.state.localeCompare(b.e.state);
+    return a.e.last.localeCompare(b.e.last);
   });
-  if (obj.httpEtag) headers.set('ETag', obj.httpEtag);
-  if (obj.httpMetadata?.contentEncoding) {
-    headers.set('Content-Encoding', obj.httpMetadata.contentEncoding);
-  }
-
-  if (method === 'HEAD') {
-    return new Response(null, { status: 200, headers });
-  }
-  // obj.body may be string (test fake) or ReadableStream (real R2)
-  const body = obj.body as ReadableStream | string | null;
-  return new Response(body, { status: 200, headers });
+  return scored.map((s) => s.e);
 }
 
 const API_ALLOW_METHODS = 'GET, HEAD, OPTIONS';
+
+async function handleMemberProfile(
+  bioguideId: string,
+  request: Request,
+  env: ProxyEnv,
+  origin: string,
+): Promise<DispatchResult> {
+  if (!/^[A-Z][0-9]{6}$/.test(bioguideId)) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_bioguide_id' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const record = await env.KV_VOTER_INFO.get(KV_PREFIXES.member + bioguideId, 'text');
+  if (!record) {
+    return {
+      response: jsonResponse(404, { error: 'member_not_found', bioguideId }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const headers = new Headers(corsHeaders(origin));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return {
+    response: new Response(request.method === 'HEAD' ? null : (record as string), {
+      status: 200,
+      headers,
+    }),
+    shape: 'api-proxied',
+  };
+}
+
+async function handleNameSearch(
+  request: Request,
+  url: URL,
+  env: ProxyEnv,
+  origin: string,
+): Promise<DispatchResult> {
+  const q = url.searchParams.get('q') ?? '';
+  const normalized = normalizeSearchKey(q);
+  if (normalized.length < 2) {
+    return {
+      response: jsonResponse(400, { error: 'query_too_short' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const meta = await env.KV_VOTER_INFO.get(KV_PREFIXES.nameIndex + 'meta', 'text');
+  if (!meta) {
+    return {
+      response: jsonResponse(503, { error: 'index_not_ready' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  // For multi-word queries ("van hollen"), scan shards for each word's first letter.
+  const letters = new Set<string>();
+  for (const word of normalized.split(' ')) {
+    const first = word[0];
+    if (first) letters.add(first);
+  }
+  const allEntries: NameIndexEntry[] = [];
+  const seen = new Set<string>();
+  for (const letter of letters) {
+    const shardJson = await env.KV_VOTER_INFO.get(KV_PREFIXES.nameIndex + letter, 'text');
+    if (!shardJson) continue;
+    const shard = JSON.parse(shardJson as string) as { entries: NameIndexEntry[] };
+    for (const entry of shard.entries) {
+      if (seen.has(entry.bioguideId)) continue;
+      seen.add(entry.bioguideId);
+      allEntries.push(entry);
+    }
+  }
+  const ranked = rankMatches(normalized, allEntries);
+  const truncated = ranked.length > 10;
+  const results = ranked.slice(0, 10);
+  const headers = new Headers(corsHeaders(origin));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return {
+    response: new Response(
+      request.method === 'HEAD' ? null : JSON.stringify({ results, truncated }),
+      { status: 200, headers },
+    ),
+    shape: 'api-proxied',
+  };
+}
+
+async function handleBill(
+  billId: string,
+  request: Request,
+  env: ProxyEnv,
+  origin: string,
+): Promise<DispatchResult> {
+  if (!/^[A-Z]+\d+$/i.test(billId)) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_bill_id' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const record = await env.KV_VOTER_INFO.get(KV_PREFIXES.bill + billId, 'text');
+  if (!record) {
+    return {
+      response: jsonResponse(404, { error: 'bill_not_found', billId }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const headers = new Headers(corsHeaders(origin));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return {
+    response: new Response(request.method === 'HEAD' ? null : (record as string), {
+      status: 200,
+      headers,
+    }),
+    shape: 'api-proxied',
+  };
+}
+
+async function handleRollCall(
+  key: string,
+  request: Request,
+  env: ProxyEnv,
+  origin: string,
+): Promise<DispatchResult> {
+  // key is "chamber/congress/session/rollCall"
+  const parts = key.split('/');
+  if (parts.length !== 4) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_roll_call_key' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const [chamber, congress, session, rollCall] = parts as [string, string, string, string];
+  if (!/^(house|senate)$/i.test(chamber) || !/^\d+$/.test(congress) || !/^\d+$/.test(session) || !/^\d+$/.test(rollCall)) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_roll_call_key' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const record = await env.KV_VOTER_INFO.get(
+    `${KV_PREFIXES.rollCall}${chamber.toLowerCase()}:${congress}:${session}:${rollCall}`,
+    'text',
+  );
+  if (!record) {
+    return {
+      response: jsonResponse(404, { error: 'roll_call_not_found' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const headers = new Headers(corsHeaders(origin));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+  return {
+    response: new Response(request.method === 'HEAD' ? null : (record as string), {
+      status: 200,
+      headers,
+    }),
+    shape: 'api-proxied',
+  };
+}
 
 async function handleApi(
   request: Request,
@@ -622,18 +766,67 @@ async function dispatch(
   const allowedOrigins = parseAllowedOrigins(env);
   const allowLocalhost = env.ALLOW_LOCALHOST === 'true';
 
-  // 1. Static file served from R2
-  const staticResp = await handleStatic(url.pathname, request.method, env);
-  if (staticResp) {
-    // If handleStatic returned a 4xx (405, 404 inside STATIC_FILES path),
-    // mark it worker-emitted; otherwise static-asset.
-    return {
-      response: staticResp,
-      shape: staticResp.status >= 400 ? 'worker-emitted' : 'static-asset',
-    };
+  // 1. KV-backed curator read routes (ADR-011, FR-32) — all go through origin check.
+  const kvRouteMatch = url.pathname.match(
+    /^\/api\/(members|bills|roll-calls|name-search)(?:\/(.+))?$/,
+  );
+  if (kvRouteMatch) {
+    // OPTIONS preflight for these routes
+    if (request.method === 'OPTIONS') {
+      if (!isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+        return {
+          response: new Response('Origin not allowed', {
+            status: 403,
+            headers: { Allow: API_ALLOW_METHODS },
+          }),
+          shape: 'worker-emitted',
+        };
+      }
+      return {
+        response: new Response(null, {
+          status: 204,
+          headers: { ...corsHeaders(origin!), Allow: API_ALLOW_METHODS },
+        }),
+        shape: 'api-proxied',
+      };
+    }
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
+      return {
+        response: new Response('Method Not Allowed', {
+          status: 405,
+          headers: { Allow: API_ALLOW_METHODS },
+        }),
+        shape: 'worker-emitted',
+      };
+    }
+    if (!isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+      return {
+        response: new Response('Origin not allowed', {
+          status: 403,
+          headers: { Allow: API_ALLOW_METHODS },
+        }),
+        shape: 'worker-emitted',
+      };
+    }
+    const [, kind, rest] = kvRouteMatch;
+    if (kind === 'members') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin!)), shape: 'worker-emitted' };
+      return handleMemberProfile(rest, request, env, origin!);
+    }
+    if (kind === 'bills') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bill_id' }, corsHeaders(origin!)), shape: 'worker-emitted' };
+      return handleBill(rest, request, env, origin!);
+    }
+    if (kind === 'roll-calls') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_roll_call_key' }, corsHeaders(origin!)), shape: 'worker-emitted' };
+      return handleRollCall(rest, request, env, origin!);
+    }
+    if (kind === 'name-search') {
+      return handleNameSearch(request, url, env, origin!);
+    }
   }
 
-  // 2. /api/* proxied with CORS + origin whitelist
+  // 2. /api/* proxied with CORS + origin whitelist (unchanged legacy routes)
   if (url.pathname.startsWith('/api/')) {
     return handleApi(request, url, env, origin, allowedOrigins, allowLocalhost, cache);
   }
@@ -647,6 +840,6 @@ async function dispatch(
     };
   }
 
-  // 4. Anything else (non-browser 404 probes, unknown API paths) — 404.
+  // 4. Anything else — 404.
   return { response: new Response('Not Found', { status: 404 }), shape: 'worker-emitted' };
 }

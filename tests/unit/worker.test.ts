@@ -39,20 +39,25 @@ function makeFakeCache(): CacheLike & { store: Map<string, Response> } {
   };
 }
 
-/** A fake R2 object with just the surface handleFetch touches. */
-type FakeR2Object = {
-  body: ReadableStream | string;
-  httpEtag?: string;
-  httpMetadata?: { contentEncoding?: string };
-};
-
-function makeFakeR2(objects: Record<string, FakeR2Object | null>): ProxyEnv['R2_ASSETS'] {
+/** A fake KV namespace with just the surface handleFetch touches. */
+function makeFakeKV(store: Record<string, string> = {}): ProxyEnv['KV_VOTER_INFO'] {
   return {
-    async get(key: string): Promise<FakeR2Object | null> {
-      return objects[key] ?? null;
+    async get(key: string, _type?: 'text' | 'json'): Promise<string | null> {
+      return store[key] ?? null;
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+    async put(key: string, value: string): Promise<void> {
+      store[key] = value;
+    },
+    async list({ prefix }: { prefix: string }) {
+      return {
+        keys: Object.keys(store).filter((k) => k.startsWith(prefix)).map((name) => ({ name })),
+        list_complete: true,
+      };
+    },
+    async delete(key: string): Promise<void> {
+      delete store[key];
+    },
+  };
 }
 
 /** Build a baseline prod env. Tests override fields as needed. */
@@ -61,7 +66,7 @@ function makeEnv(overrides: Partial<ProxyEnv> = {}): ProxyEnv {
     CONGRESS_API_KEY: 'SECRET-TEST-KEY',
     ALLOWED_ORIGINS: 'https://trackukraine.com,https://www.trackukraine.com',
     ALLOW_LOCALHOST: undefined,
-    R2_ASSETS: makeFakeR2({}),
+    KV_VOTER_INFO: makeFakeKV(),
     ...overrides,
   };
 }
@@ -920,27 +925,22 @@ describe('handleFetch — security header baseline (AC-27.1, 27.1a, 27.1b, 27.1c
     expect(r.headers.get('Cache-Control')).toBe('no-store');
   });
 
-  it('sets universal baseline on static file response (AC-27.1b)', async () => {
+  it('sets universal baseline on KV-backed /api/members response', async () => {
     const env = makeEnv({
-      R2_ASSETS: makeFakeR2({
-        'voter-info-widget.iife.js': {
-          body: 'console.log(1)',
-          httpEtag: 'abc',
-        },
+      KV_VOTER_INFO: makeFakeKV({
+        'member:v1:D000563': JSON.stringify({ bioguideId: 'D000563', last: 'Durbin' }),
       }),
     });
     const r = await handleFetch(
-      new Request('https://vote.cogs.it.com/voter-info-widget.iife.js'),
+      new Request('https://vote.cogs.it.com/api/members/D000563', {
+        headers: { Origin: 'https://trackukraine.com' },
+      }),
       env,
       makeFakeCache(),
     );
     expect(r.status).toBe(200);
     expectUniversalBaseline(r);
     expect(r.headers.get('Cross-Origin-Resource-Policy')).toBe('cross-origin');
-    expect(r.headers.get('Access-Control-Allow-Origin')).toBe('*');
-    // Static responses don't get CSP/Permissions-Policy (subresources, not documents).
-    expect(r.headers.get('Content-Security-Policy')).toBeNull();
-    expect(r.headers.get('Permissions-Policy')).toBeNull();
   });
 
   it('sets universal baseline + CSP on 404 Worker-emitted response', async () => {
