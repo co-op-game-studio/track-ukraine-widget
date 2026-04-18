@@ -128,6 +128,16 @@ export function isOriginAllowed(
 }
 
 /**
+ * Non-prod envs (dev/uat/stg) are gated by Cloudflare Access. Requests that
+ * reach the Worker have already passed OTP auth or carry a service token.
+ * We drop the Origin allowlist check on these envs — Access is the gate.
+ * Prod stays strict.
+ */
+export function isPreviewEnv(env: { PREVIEW_MODE?: string }): boolean {
+  return env.PREVIEW_MODE === 'true';
+}
+
+/**
  * Is the upstream-path (the portion after the route prefix) structurally safe?
  *
  * Rejects `..`, `//`, `@`, any raw control character, any DEL (`\x7f`), and
@@ -307,14 +317,18 @@ function parseAllowedOrigins(env: ProxyEnv): string[] {
   return [...DEFAULT_ALLOWED_ORIGINS];
 }
 
-function corsHeaders(allowedOrigin: string): Record<string, string> {
-  return {
-    'Access-Control-Allow-Origin': allowedOrigin,
+function corsHeaders(allowedOrigin: string | null): Record<string, string> {
+  // On same-origin requests the browser doesn't need (and ignores) ACAO; we
+  // omit it entirely rather than echoing a null/empty string that some
+  // validators flag as malformed.
+  const base: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };
+  if (allowedOrigin) base['Access-Control-Allow-Origin'] = allowedOrigin;
+  return base;
 }
 
 function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
@@ -752,7 +766,7 @@ async function handleApi(
 
   // Preflight (OPTIONS) — now only reached when route is known.
   if (request.method === 'OPTIONS') {
-    if (!isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
       return {
         response: new Response('Origin not allowed', {
           status: 403,
@@ -764,7 +778,7 @@ async function handleApi(
     return {
       response: new Response(null, {
         status: 204,
-        headers: { ...corsHeaders(origin!), Allow: API_ALLOW_METHODS },
+        headers: { ...corsHeaders(origin), Allow: API_ALLOW_METHODS },
       }),
       shape: 'api-proxied',
     };
@@ -781,7 +795,7 @@ async function handleApi(
     };
   }
 
-  if (!isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+  if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
     return {
       response: new Response('Origin not allowed', {
         status: 403,
@@ -796,7 +810,7 @@ async function handleApi(
   // AC-27.7: structural validation of upstream path.
   if (!isValidUpstreamPath(upstreamPath)) {
     return {
-      response: jsonResponse(400, { error: 'invalid_upstream_path' }, corsHeaders(origin!)),
+      response: jsonResponse(400, { error: 'invalid_upstream_path' }, corsHeaders(origin)),
       shape: 'worker-emitted',
     };
   }
@@ -806,7 +820,7 @@ async function handleApi(
   // the `v3/` prefix — rejects bare `v3/`, `v3/0`, `v3/-x`, etc.
   if (route.injectKey && !/^v3\/[a-z]/.test(upstreamPath)) {
     return {
-      response: jsonResponse(400, { error: 'unsupported_upstream_path' }, corsHeaders(origin!)),
+      response: jsonResponse(400, { error: 'unsupported_upstream_path' }, corsHeaders(origin)),
       shape: 'worker-emitted',
     };
   }
@@ -823,7 +837,7 @@ async function handleApi(
         response: jsonResponse(
           500,
           { error: 'server_misconfigured', detail: 'CONGRESS_API_KEY not set' },
-          corsHeaders(origin!),
+          corsHeaders(origin),
         ),
         shape: 'worker-emitted',
       };
@@ -859,7 +873,7 @@ async function handleApi(
         response: jsonResponse(
           502,
           { error: 'upstream_unreachable', upstream: route.upstreamName },
-          corsHeaders(origin!),
+          corsHeaders(origin),
         ),
         shape: 'worker-emitted',
       };
@@ -880,7 +894,7 @@ async function handleApi(
   if (!upstreamResponse.ok) {
     const envelope = normalizeUpstreamErrorBody(upstreamResponse.status, route.upstreamName);
     const sanitized = sanitizeBody(envelope, [env.CONGRESS_API_KEY]);
-    const finalHeaders = new Headers(corsHeaders(origin!));
+    const finalHeaders = new Headers(corsHeaders(origin));
     finalHeaders.set('Content-Type', 'application/json; charset=utf-8');
     finalHeaders.set('Cache-Control', 'no-store');
     finalHeaders.set('X-Proxy-Cache', wasCacheHit ? 'HIT' : 'MISS');
@@ -896,7 +910,7 @@ async function handleApi(
   // 2xx: pass upstream body, strip fingerprinting headers, apply CORS.
   const finalHeaders = new Headers(upstreamResponse.headers);
   stripFingerprintingHeaders(finalHeaders);
-  for (const [k, v] of Object.entries(corsHeaders(origin!))) finalHeaders.set(k, v);
+  for (const [k, v] of Object.entries(corsHeaders(origin))) finalHeaders.set(k, v);
   finalHeaders.set('Cache-Control', cacheControl);
   finalHeaders.set('X-Proxy-Cache', wasCacheHit ? 'HIT' : 'MISS');
 
@@ -952,7 +966,7 @@ async function dispatch(
   if (kvRouteMatch) {
     // OPTIONS preflight for these routes
     if (request.method === 'OPTIONS') {
-      if (!isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+      if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
         return {
           response: new Response('Origin not allowed', {
             status: 403,
@@ -964,7 +978,7 @@ async function dispatch(
       return {
         response: new Response(null, {
           status: 204,
-          headers: { ...corsHeaders(origin!), Allow: API_ALLOW_METHODS },
+          headers: { ...corsHeaders(origin), Allow: API_ALLOW_METHODS },
         }),
         shape: 'api-proxied',
       };
@@ -978,7 +992,7 @@ async function dispatch(
         shape: 'worker-emitted',
       };
     }
-    if (!isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
       return {
         response: new Response('Origin not allowed', {
           status: 403,
@@ -989,15 +1003,15 @@ async function dispatch(
     }
     const [, kind, rest] = kvRouteMatch;
     if (kind === 'members') {
-      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin!)), shape: 'worker-emitted' };
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
       return handleMemberProfile(rest, request, env, ctx, origin!);
     }
     if (kind === 'bills') {
-      if (!rest) return { response: jsonResponse(400, { error: 'missing_bill_id' }, corsHeaders(origin!)), shape: 'worker-emitted' };
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bill_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
       return handleBill(rest, request, env, origin!);
     }
     if (kind === 'roll-calls') {
-      if (!rest) return { response: jsonResponse(400, { error: 'missing_roll_call_key' }, corsHeaders(origin!)), shape: 'worker-emitted' };
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_roll_call_key' }, corsHeaders(origin)), shape: 'worker-emitted' };
       return handleRollCall(rest, request, env, origin!);
     }
     if (kind === 'name-search') {
@@ -1070,9 +1084,9 @@ async function dispatch(
 }
 
 function buildPreviewHtml(envName: string): string {
-  // Self-contained preview — loads the IIFE bundle from the same origin and
-  // renders the widget. Hostname becomes the api-base so all /api/* calls hit
-  // this same Worker.
+  // Non-prod preview served behind CF Access. The Worker skips the Origin
+  // allowlist check on PREVIEW_MODE envs because Access is the gate. Only
+  // prod enforces the cross-site embed allowlist.
   return `<!doctype html>
 <html lang="en">
   <head>
