@@ -1,26 +1,34 @@
 #!/usr/bin/env node
 /**
- * Prewarm the Worker KV + edge cache for every current-Congress member.
+ * Prewarm the Worker KV + edge cache for every current-Congress member
+ * AND for every curated Ukraine-vote roll-call roster. This is what the
+ * widget fetches per visitor; paying the cost once across all visitors
+ * avoids the per-visitor 429 storm observed on cold opens.
  *
- * How it works:
- *   1. Read every name-index:v1:{letter} shard from the live KV namespace
- *      via the name-search endpoint (one shard per letter a-z).
- *   2. Collect the unique bioguideIds from those shards.
- *   3. For each bioguideId, GET /api/members/{id} against the public host.
- *      The Worker's read-through fills KV member:v1:{id} on first hit
- *      (30-day TTL) and Cloudflare's edge caches the response under its
- *      Cache-Control header.
- *
- * Traffic: one /api/name-search call per letter (~26), plus one
- * /api/members/{id} call per unique member (~540). All go through our
- * cache layer, so the upstream Congress API sees at most one member-
- * profile fan-out per bioguideId — a one-time cost instead of per-user.
+ * Three warming phases (each paced to respect the per-IP rate limit):
+ *   1. /api/members/{bioguideId} — Worker read-through fills KV
+ *      member:v1:{id} (30-day TTL) and edge-caches the response.
+ *   2. /api/congress/v3/house-vote/{c}/{s}/{rc}/members?limit=500
+ *      — one per House roll-call in ukraineBills.json. Edge-cached
+ *      immutable for 1 year.
+ *   3. /api/senate/legislative/LIS/roll_call_votes/voteCS/vote_C_S_NNN.xml
+ *      — one per Senate roll-call. Edge-cached immutable for 1 year.
  *
  * Usage:
- *   node scripts/warm-member-cache.mjs [--host https://vote.cogs.it.com] \
- *                                      [--concurrency 8] [--dry-run]
+ *   node scripts/warm-member-cache.mjs --host <https://env.vote.cogs.it.com> \
+ *                                      [--concurrency 4] [--delay-ms 250] \
+ *                                      [--access-id <id>] [--access-secret <sec>] \
+ *                                      [--skip-members] [--skip-votes] [--dry-run]
+ *
+ * Environment variables (override CLI):
+ *   CF_ACCESS_CLIENT_ID, CF_ACCESS_CLIENT_SECRET — for dev/uat/stg Access gates.
  */
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import process from 'node:process';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const args = process.argv.slice(2);
 function arg(flag, fallback) {
@@ -28,26 +36,77 @@ function arg(flag, fallback) {
   return i >= 0 ? args[i + 1] : fallback;
 }
 const HOST = arg('--host', 'https://vote.cogs.it.com').replace(/\/$/, '');
-const CONCURRENCY = Number(arg('--concurrency', '8'));
+const CONCURRENCY = Number(arg('--concurrency', '4'));
+const DELAY_MS = Number(arg('--delay-ms', '250'));
 const DRY_RUN = args.includes('--dry-run');
+const SKIP_MEMBERS = args.includes('--skip-members');
+const SKIP_VOTES = args.includes('--skip-votes');
 const ORIGIN = 'https://trackukraine.com';
 
+const ACCESS_ID = process.env.CF_ACCESS_CLIENT_ID ?? arg('--access-id', '');
+const ACCESS_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? arg('--access-secret', '');
+
+const baseHeaders = { Origin: ORIGIN };
+if (ACCESS_ID) baseHeaders['CF-Access-Client-Id'] = ACCESS_ID;
+if (ACCESS_SECRET) baseHeaders['CF-Access-Client-Secret'] = ACCESS_SECRET;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function getJson(url) {
-  const res = await fetch(url, { headers: { Origin: ORIGIN } });
+  const res = await fetch(url, { headers: baseHeaders });
   if (!res.ok) throw new Error(`GET ${url} -> ${res.status}`);
   return res.json();
 }
 
-async function main() {
-  console.log(`Warming cache against ${HOST} (concurrency=${CONCURRENCY}${DRY_RUN ? ', DRY RUN' : ''})`);
+async function warmUrl(url) {
+  const res = await fetch(url, { headers: baseHeaders });
+  return res.status;
+}
 
-  // Page through the Congress member directory via our proxy. Cached
-  // upstream response (24h edge now), so this is at most one Congress
-  // API hit per page regardless of how many times we run.
+/**
+ * Run `work` items through a bounded pool, pacing each completed hit by
+ * DELAY_MS / CONCURRENCY so that steady-state throughput stays below the
+ * per-IP rate limit. Returns { ok, failures:[{key,status}] }.
+ */
+async function pacedPool(work, describe) {
+  const queue = [...work];
+  const total = queue.length;
+  let ok = 0;
+  const failures = [];
+  let done = 0;
+  const perWorkerPause = Math.max(0, DELAY_MS);
+  const workers = Array.from({ length: CONCURRENCY }, async () => {
+    while (true) {
+      const item = queue.shift();
+      if (!item) return;
+      try {
+        const status = await warmUrl(item.url);
+        if (status >= 200 && status < 300) ok++;
+        else failures.push({ key: item.key, status });
+      } catch (e) {
+        failures.push({ key: item.key, status: e.message });
+      }
+      done++;
+      if (done % 25 === 0) {
+        console.log(`  ${describe}: ${done}/${total} (${ok} ok, ${failures.length} failed)`);
+      }
+      if (perWorkerPause > 0) await sleep(perWorkerPause);
+    }
+  });
+  await Promise.all(workers);
+  console.log(`  ${describe}: done — ${ok} ok, ${failures.length} failed`);
+  if (failures.length) {
+    const sample = failures.slice(0, 10).map((f) => `${f.key}:${f.status}`).join(', ');
+    console.log(`    sample failures: ${sample}${failures.length > 10 ? ` …+${failures.length - 10}` : ''}`);
+  }
+  return { ok, failures };
+}
+
+async function collectBioguides() {
   const bioguides = new Set();
   let offset = 0;
   const limit = 250;
-  console.log(`Collecting bioguides from /api/congress/v3/member...`);
+  console.log(`Collecting bioguides from /api/congress/v3/member…`);
   while (true) {
     const url = `${HOST}/api/congress/v3/member?currentMember=true&format=json&limit=${limit}&offset=${offset}`;
     const data = await getJson(url);
@@ -58,30 +117,70 @@ async function main() {
     offset += limit;
   }
   console.log(`Found ${bioguides.size} unique bioguides`);
+  return [...bioguides];
+}
+
+function collectCuratedVotes() {
+  // ukraineBills.json is the curator's source of truth for Ukraine roll-calls.
+  const p = resolve(__dirname, '..', 'src', 'data', 'ukraineBills.json');
+  const bills = JSON.parse(readFileSync(p, 'utf8'));
+  const house = [];
+  const senate = [];
+  for (const b of bills) {
+    for (const v of b.votes ?? []) {
+      if (v.chamber === 'House') {
+        house.push({ congress: v.congress, session: v.session, rollCall: v.rollCall });
+      } else if (v.chamber === 'Senate') {
+        senate.push({ congress: v.congress, session: v.session, rollCall: v.rollCall });
+      }
+    }
+  }
+  return { house, senate };
+}
+
+function houseVoteUrl({ congress, session, rollCall }) {
+  return `${HOST}/api/congress/v3/house-vote/${congress}/${session}/${rollCall}/members?limit=500&format=json`;
+}
+function senateVoteUrl({ congress, session, rollCall }) {
+  const rc = String(rollCall).padStart(5, '0');
+  return `${HOST}/api/senate/legislative/LIS/roll_call_votes/vote${congress}${session}/vote_${congress}_${session}_${rc}.xml`;
+}
+
+async function main() {
+  console.log(`=== Warming cache against ${HOST} ===`);
+  console.log(`    concurrency=${CONCURRENCY} delay-ms=${DELAY_MS}${ACCESS_ID ? ' (Access headers present)' : ''}${DRY_RUN ? ' DRY RUN' : ''}`);
+
+  const tasks = [];
+  if (!SKIP_MEMBERS) {
+    const ids = await collectBioguides();
+    tasks.push({
+      label: '/api/members',
+      items: ids.map((id) => ({ key: id, url: `${HOST}/api/members/${id}` })),
+    });
+  }
+  if (!SKIP_VOTES) {
+    const { house, senate } = collectCuratedVotes();
+    console.log(`Curated votes: ${house.length} house, ${senate.length} senate`);
+    tasks.push({
+      label: '/api/congress/v3/house-vote/*/members',
+      items: house.map((v) => ({ key: `h:${v.congress}:${v.session}:${v.rollCall}`, url: houseVoteUrl(v) })),
+    });
+    tasks.push({
+      label: '/api/senate/…xml',
+      items: senate.map((v) => ({ key: `s:${v.congress}:${v.session}:${v.rollCall}`, url: senateVoteUrl(v) })),
+    });
+  }
 
   if (DRY_RUN) {
-    console.log('Dry run: skipping /api/members/{id} warm hits.');
+    for (const t of tasks) console.log(`DRY: ${t.label} (${t.items.length} items)`);
     return;
   }
 
-  const ids = [...bioguides];
-  let ok = 0, fail = 0;
-  const workers = Array.from({ length: CONCURRENCY }, async () => {
-    while (true) {
-      const id = ids.shift();
-      if (!id) return;
-      try {
-        const res = await fetch(`${HOST}/api/members/${id}`, { headers: { Origin: ORIGIN } });
-        if (res.ok) ok++;
-        else { fail++; console.warn(`  !${id}: ${res.status}`); }
-      } catch (e) {
-        fail++;
-        console.warn(`  !${id}: ${e.message}`);
-      }
-    }
-  });
-  await Promise.all(workers);
-  console.log(`Warmed: ${ok} ok, ${fail} failed`);
+  for (const t of tasks) {
+    console.log(`\n--- ${t.label} (${t.items.length} items) ---`);
+    await pacedPool(t.items, t.label);
+  }
+  console.log('\nDone.');
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
