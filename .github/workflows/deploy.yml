@@ -93,21 +93,15 @@ jobs:
       - name: Compute SRI hash (AC-26.9)
         run: npm run build:sri
 
-      - name: Stage static assets into ./dist for Worker Sites (AC-26.11)
-        run: |
-          # Worker Sites ships whatever's in ./dist; curated JSON lives under
-          # src/data/ so Vite can bundle it for the client. Copy both to
-          # ./dist so `/ukraineBills.json` and `/ukraineVotes.json` exist on
-          # the deployed hostname.
-          cp src/data/ukraineBills.json dist/
-          cp src/data/ukraineVotes.json dist/
-
       - name: Check build outputs
         run: |
+          # Per ADR-011, ukraineBills.json is a build-time import (bundled
+          # into the IIFE by Vite, NOT a separately-fetched asset), and
+          # ukraineVotes.json was removed entirely — vote data lives in KV
+          # via publish-to-kv.ts. So Worker Sites only ships the bundle and
+          # its SRI sidecar; both must exist.
           test -f dist/voter-info-widget.iife.js     || (echo "widget bundle missing" && exit 1)
           test -f dist/voter-info-widget.iife.js.sri || (echo "SRI sidecar missing" && exit 1)
-          test -f dist/ukraineBills.json             || (echo "ukraineBills.json missing in dist/" && exit 1)
-          test -f dist/ukraineVotes.json             || (echo "ukraineVotes.json missing in dist/" && exit 1)
 
       - name: Publish atomic records to KV
         env:
@@ -179,10 +173,11 @@ jobs:
             echo "::error::Non-v3 congress path returned $STATUS (expected 400)"; exit 1
           fi
 
-          # 5. AC-26.11 — every static asset MUST return 200. Missing any of
-          #    these is a silent widget break (bundle, SRI sidecar, or the
-          #    two curated datasets that embed.tsx fetches at boot).
-          for key in voter-info-widget.iife.js voter-info-widget.iife.js.sri ukraineBills.json ukraineVotes.json; do
+          # 5. AC-26.11 — bundle + SRI sidecar MUST return 200. Curated
+          #    JSON is bundled into the IIFE at build time (ukraineBills.json)
+          #    or moved to KV (ukraineVotes.json) per ADR-011; neither is a
+          #    separately-fetched Worker Sites asset anymore.
+          for key in voter-info-widget.iife.js voter-info-widget.iife.js.sri; do
             STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" "$HOST/$key")
             if [[ "$STATUS" != "200" ]]; then
               echo "::error::Static asset /$key returned $STATUS (expected 200) — deploy is missing this file"; exit 1
