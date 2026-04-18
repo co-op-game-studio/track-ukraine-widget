@@ -134,23 +134,23 @@ jobs:
           esac
 
           if [[ "$ENV_NAME" != "prod" && -z "$CF_ACCESS_CLIENT_ID" ]]; then
-            echo "::warning::CF_ACCESS_CLIENT_ID not set — non-prod smoke skipped"
-            echo "Deploy succeeded for $ENV_NAME @ $HOST (smoke skipped, no Access creds)"
-            exit 0
+            echo "::error::CF_ACCESS_CLIENT_ID not set — non-prod smoke will hit Access challenge"
+            exit 1
           fi
 
-          # Non-prod smoke via CF Access service token is flaky right now
-          # (Access auth returning 403 even with valid-looking creds). Until
-          # that's root-caused + CF_ACCESS_CLIENT_* is confirmed rotated,
-          # skip the entire edge smoke on non-prod. Worker was already
-          # deployed at this point, and local build-output checks ran
-          # earlier in the job; that's enough to treat the deploy as green.
-          #
-          # Prod does NOT use Access, so prod smoke still runs unconditionally.
+          # DIAGNOSTIC — when a smoke curl fails on non-prod, we want to
+          # see why Access rejected it. Print the full response headers
+          # for one probe up front; CF Access populates cf-access-request-id,
+          # cf-ray, and a detail body that identifies token/policy/IP issues.
+          # Purely informational — the real smoke runs below.
           if [[ "$ENV_NAME" != "prod" ]]; then
-            echo "::notice::Non-prod smoke skipped pending Access service-token refresh (see follow-up)"
-            echo "Deploy succeeded for $ENV_NAME @ $HOST (edge-smoke skipped)"
-            exit 0
+            echo "--- DIAGNOSTIC: Access probe on $HOST ---"
+            curl -sS -D /tmp/probe-hdrs.txt -o /tmp/probe-body.txt "${AUTH_HEADERS[@]}" "$HOST/voter-info-widget.iife.js.sri" || true
+            cat /tmp/probe-hdrs.txt | head -40
+            echo "--- body (first 400 chars) ---"
+            head -c 400 /tmp/probe-body.txt || true
+            echo
+            echo "--- end diagnostic ---"
           fi
 
           echo "Smoking $HOST"
