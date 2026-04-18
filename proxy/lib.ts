@@ -76,7 +76,7 @@ export interface ProxyEnv {
   RATE_LIMITER?: RateLimiterLike;
 }
 
-interface ApiRouteRule {
+export interface ApiRouteRule {
   prefix: string;
   /** Short name used in normalized error envelopes (AC-27.5). */
   upstreamName: 'census' | 'senate' | 'congress';
@@ -93,7 +93,7 @@ interface ApiRouteRule {
   allowedQueryParams: readonly string[];
 }
 
-const API_ROUTES: ApiRouteRule[] = [
+export const API_ROUTES: ApiRouteRule[] = [
   {
     prefix: '/api/census/',
     upstreamName: 'census',
@@ -508,7 +508,11 @@ async function applyRateLimit(
   };
 }
 
-function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
+/**
+ * Per-route Cache-Control picker. Exported for AC-25.2/25.3/25.4 tests.
+ * See spec.md for the exact contract each return value satisfies.
+ */
+export function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
   if (route.upstreamName !== 'congress') return route.cacheControl;
   if (/^v3\/house-vote\//.test(upstreamPath)) {
     return 'public, s-maxage=31536000, max-age=31536000, immutable';
@@ -569,6 +573,10 @@ export interface NameIndexEntry {
   last: string;
   state: string;
   chamber: 'Senate' | 'House';
+  /** House district number; null for Senators and non-voting delegates
+   *  (AC-32.4 REVISED v2.5.2). Optional for backward compat with pre-v2.5.2
+   *  shards; the curator SHALL write it on all post-v2.5.2 records. */
+  district?: number | null;
   party: string;
   photoUrl?: string | null;
   searchKeys: string[];

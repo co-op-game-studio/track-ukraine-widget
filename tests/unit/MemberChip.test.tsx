@@ -61,4 +61,35 @@ describe('MemberChip', () => {
     rerender(<MemberChip representative={houseRep} selected={false} onClick={() => {}} />);
     expect(screen.getByText(/District 7/)).toBeInTheDocument();
   });
+
+  // AC-31.4 (REVISED v2.5.2) — when a House rep has null district (e.g., a
+  // name-search result constructed from a shard that predates the district
+  // field, or any edge case where district is unknown), the chip SHALL
+  // render "U.S. Representative" — NEVER "District null".
+  it('AC-31.4 — renders "U.S. Representative" for house rep with null district (no "District null" literal)', () => {
+    const houseNoDistrict: Representative = {
+      ...senator,
+      chamber: 'house',
+      district: null,
+    };
+    const { container } = render(
+      <MemberChip representative={houseNoDistrict} selected={false} onClick={() => {}} />,
+    );
+    expect(screen.getByText(/U\.S\. Representative/)).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/District\s+null/i);
+    expect(container.textContent).not.toMatch(/District\s+undefined/i);
+  });
+
+  // AC-31.4 — non-voting delegates (e.g., DC, PR, territories) render their
+  // own subtitle, independent of district.
+  it('AC-31.4 — renders "Delegate (non-voting)" for isNonVoting house rep', () => {
+    const delegate: Representative = {
+      ...senator,
+      chamber: 'house',
+      district: 0,
+      isNonVoting: true,
+    };
+    render(<MemberChip representative={delegate} selected={false} onClick={() => {}} />);
+    expect(screen.getByText(/Delegate \(non-voting\)/)).toBeInTheDocument();
+  });
 });
