@@ -16,7 +16,9 @@
     "spec:refresh": "node scripts/extract-openapi.mjs",
     "curate": "tsx scripts/build-curated-bills.ts && tsx scripts/build-vote-rosters.ts",
     "curate:bills": "tsx scripts/build-curated-bills.ts",
-    "curate:rosters": "tsx scripts/build-vote-rosters.ts"
+    "curate:rosters": "tsx scripts/build-vote-rosters.ts",
+    "publish:kv": "node scripts/publish-to-kv.mjs",
+    "stg:sync-data": "node scripts/sync-stg-data.mjs"
   },
   "dependencies": {
     "react": "^19.0.0",

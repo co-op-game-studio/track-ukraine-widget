@@ -1,14 +1,13 @@
 name: Deploy
 
 # Branch → environment mapping (FR-26):
-#   develop → dev    (gated — manual approval)
-#   uat     → uat    (gated — manual approval)
-#   stg     → stg    (gated — manual approval)
-#   prod    → prod   (gated — manual approval)
+#   develop → dev    (ungated per current session)
+#   uat     → uat    (ungated per current session)
+#   stg     → stg    (reviewer-gated)
+#   prod    → prod   (reviewer-gated)
 #
-# Feature work lives on feature/* branches — no deploy workflow fires for those.
-# Everything flows the same pipeline: typecheck → test → build → upload R2 → deploy Worker.
-# Only the `wrangler-env`, `bucket-suffix`, and `github-env` matrix values differ.
+# Pipeline: typecheck → test → build → publish-to-kv → deploy Worker → smoke.
+# (R2 bucket uploads removed in v2.5.0 — ADR-011 consolidated all storage to KV.)
 
 on:
   push:
@@ -22,18 +21,15 @@ on:
         options: [dev, uat, stg, prod]
 
 concurrency:
-  # One deploy per env at a time; queue, don't cancel in-flight.
   group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   resolve:
-    # Map the triggering branch (or workflow_dispatch input) to an env set.
     runs-on: ubuntu-latest
     outputs:
       env_name: ${{ steps.pick.outputs.env_name }}
       wrangler_env: ${{ steps.pick.outputs.wrangler_env }}
-      bucket: ${{ steps.pick.outputs.bucket }}
     steps:
       - id: pick
         shell: bash
@@ -51,15 +47,14 @@ jobs:
           fi
 
           case "$E" in
-            prod) WRANGLER_ENV=""    BUCKET="voter-info-widget-assets"     ;;
-            stg)  WRANGLER_ENV="stg" BUCKET="voter-info-widget-assets-stg" ;;
-            uat)  WRANGLER_ENV="uat" BUCKET="voter-info-widget-assets-uat" ;;
-            dev)  WRANGLER_ENV="dev" BUCKET="voter-info-widget-assets-dev" ;;
+            prod) WRANGLER_ENV=""    ;;
+            stg)  WRANGLER_ENV="stg" ;;
+            uat)  WRANGLER_ENV="uat" ;;
+            dev)  WRANGLER_ENV="dev" ;;
           esac
 
-          echo "env_name=$E"               >> "$GITHUB_OUTPUT"
+          echo "env_name=$E"                >> "$GITHUB_OUTPUT"
           echo "wrangler_env=$WRANGLER_ENV" >> "$GITHUB_OUTPUT"
-          echo "bucket=$BUCKET"            >> "$GITHUB_OUTPUT"
 
   deploy:
     needs: resolve
@@ -68,7 +63,8 @@ jobs:
     environment: ${{ needs.resolve.outputs.env_name }}
     env:
       WRANGLER_ENV: ${{ needs.resolve.outputs.wrangler_env }}
-      BUCKET: ${{ needs.resolve.outputs.bucket }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -95,60 +91,18 @@ jobs:
         run: |
           test -f dist/voter-info-widget.iife.js || (echo "widget bundle missing" && exit 1)
           test -f src/data/ukraineBills.json     || (echo "ukraineBills.json missing" && exit 1)
-          test -f src/data/ukraineVotes.json     || (echo "ukraineVotes.json missing" && exit 1)
+          test -f src/data/ukraineVotes.json     || (echo "ukraineVotes.json missing (needed as publish-to-kv input)" && exit 1)
 
-      - name: Upload widget bundle to R2
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: >
-            r2 object put ${{ env.BUCKET }}/voter-info-widget.iife.js
-            --file dist/voter-info-widget.iife.js
-            --content-type "application/javascript; charset=utf-8"
-            --cache-control "public, max-age=600"
-            --remote
-
-      - name: Upload ukraineBills.json to R2
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: >
-            r2 object put ${{ env.BUCKET }}/ukraineBills.json
-            --file src/data/ukraineBills.json
-            --content-type "application/json; charset=utf-8"
-            --cache-control "public, max-age=600"
-            --remote
-
-      - name: Upload ukraineVotes.json to R2
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: >
-            r2 object put ${{ env.BUCKET }}/ukraineVotes.json
-            --file src/data/ukraineVotes.json
-            --content-type "application/json; charset=utf-8"
-            --cache-control "public, max-age=600"
-            --remote
+      - name: Publish atomic records to KV
+        run: node scripts/publish-to-kv.mjs --env ${{ needs.resolve.outputs.env_name }}
 
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          # CONGRESS_API_KEY is set once per-env via `wrangler secret put` —
-          # not rotated on every deploy.
           command: deploy ${{ env.WRANGLER_ENV && format('--env {0}', env.WRANGLER_ENV) || '' }}
 
-      # Post-deploy smoke test — hits the real edge to confirm the Worker
-      # actually responds. Non-prod is gated by Cloudflare Access (FR-29 /
-      # ADR-008), so we carry service-token headers for dev/uat/stg and
-      # hit prod without auth.
-      #
-      # Expressed as a single bash block so the auth-header composition
-      # is visible at a glance.
       - name: Post-deploy smoke
         env:
           ENV_NAME: ${{ needs.resolve.outputs.env_name }}
@@ -167,7 +121,6 @@ jobs:
             *) echo "Unknown ENV_NAME=$ENV_NAME"; exit 1 ;;
           esac
 
-          # Fail loud if non-prod deploy but secrets missing.
           if [[ "$ENV_NAME" != "prod" && -z "$CF_ACCESS_CLIENT_ID" ]]; then
             echo "::error::CF_ACCESS_CLIENT_ID not set — non-prod smoke will hit Access challenge"
             exit 1
@@ -175,13 +128,7 @@ jobs:
 
           echo "Smoking $HOST"
 
-          # 1. Static bundle shipped.
-          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" "$HOST/voter-info-widget.iife.js")
-          if [[ "$STATUS" != "200" ]]; then
-            echo "::error::Bundle fetch returned $STATUS (expected 200)"; exit 1
-          fi
-
-          # 2. API proxies with allowed Origin.
+          # 1. API proxies with allowed Origin (Census geocoder)
           STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
             -H "Origin: https://trackukraine.com" \
             "$HOST/api/census/geocoder/geographies/onelineaddress?address=1600+Pennsylvania+Ave+NW+Washington+DC+20500&benchmark=Public_AR_Current&vintage=Current_Current&format=json")
@@ -189,8 +136,15 @@ jobs:
             echo "::error::Census API returned $STATUS (expected 200)"; exit 1
           fi
 
-          # 3. Origin enforcement — disallowed origin should 403.
-          #    Only run against prod/stg/uat (dev has permissive CORS).
+          # 2. KV-backed /api/name-search returns 200 for a known query
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
+            -H "Origin: https://trackukraine.com" \
+            "$HOST/api/name-search?q=durb")
+          if [[ "$STATUS" != "200" ]]; then
+            echo "::error::name-search returned $STATUS (expected 200)"; exit 1
+          fi
+
+          # 3. Origin enforcement (not dev which has permissive CORS).
           if [[ "$ENV_NAME" != "dev" ]]; then
             STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
               -H "Origin: https://evil.example.com" "$HOST/api/census/x")
@@ -199,7 +153,7 @@ jobs:
             fi
           fi
 
-          # 4. Non-v3 congress path must 400 (AC-27.6) and NOT send our key upstream.
+          # 4. Non-v3 congress path must 400 (AC-27.6).
           STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" \
             -H "Origin: https://trackukraine.com" "$HOST/api/congress/admin")
           if [[ "$STATUS" != "400" ]]; then
