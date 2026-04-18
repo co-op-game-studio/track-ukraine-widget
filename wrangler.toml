@@ -50,7 +50,9 @@ enabled = true
 name = "voter-info-widget-proxy-dev"
 
 [env.dev.vars]
-ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080,http://localhost:4173,https://dev.vote.cogs.it.com"
+# PREVIEW_MODE bypasses Origin allowlist (Access is the gate). ALLOWED_ORIGINS
+# stays set so enforcement behavior matches prod if PREVIEW_MODE were removed.
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 ALLOW_LOCALHOST = "true"
 PREVIEW_MODE = "true"
 ENV_NAME = "dev"
@@ -73,7 +75,7 @@ enabled = true
 name = "voter-info-widget-proxy-uat"
 
 [env.uat.vars]
-ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080,https://uat.vote.cogs.it.com"
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 PREVIEW_MODE = "true"
 ENV_NAME = "uat"
 
@@ -95,7 +97,7 @@ enabled = true
 name = "voter-info-widget-proxy-stg"
 
 [env.stg.vars]
-ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,https://stg.vote.cogs.it.com"
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 PREVIEW_MODE = "true"
 ENV_NAME = "stg"
 
