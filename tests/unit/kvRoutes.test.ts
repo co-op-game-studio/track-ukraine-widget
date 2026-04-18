@@ -2,7 +2,7 @@
  * KV-backed route tests for /api/members, /api/name-search, /api/bills, /api/roll-calls.
  * Traces to: FR-24 (revised), FR-31, FR-32, ADR-011.
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { handleFetch, type ProxyEnv, type KVLike, type CacheLike, normalizeSearchKey, rankMatches, type NameIndexEntry } from '../../proxy/lib';
 
 function makeFakeKV(store: Record<string, string> = {}): KVLike {

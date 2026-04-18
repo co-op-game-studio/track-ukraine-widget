@@ -26,6 +26,8 @@ import {
   bundledHouseCast,
   bundledSenateCast,
   hasBundledRoster,
+  preloadHouseMember,
+  preloadSenateMember,
 } from '../services/bundledRosters';
 import {
   clusterMemberVotes,
@@ -101,6 +103,8 @@ async function loadHouseRecord(
   member: Representative,
   apiBase: string,
 ): Promise<RawRow[]> {
+  // Preload this member's KV profile so subsequent bundledHouseCast() lookups are hot.
+  await preloadHouseMember(member.bioguideId);
   const curated = getCuratedVotesForChamber('House');
 
   // Partition into bundled-roster hits vs fallback-needed.
@@ -154,8 +158,9 @@ async function loadSenateRecord(
   member: Representative,
   apiBase: string,
 ): Promise<RawRow[]> {
-  const curated = getCuratedVotesForChamber('Senate');
   const lastName = member.name.split(',')[0]?.trim() ?? member.name;
+  await preloadSenateMember(lastName, member.state);
+  const curated = getCuratedVotesForChamber('Senate');
 
   const fallbackWork: typeof curated = [];
   const bundled: RawRow[] = [];

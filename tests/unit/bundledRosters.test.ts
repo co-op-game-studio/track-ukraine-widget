@@ -1,98 +1,109 @@
 /**
- * Bundled-roster lookup tests (FR-24).
+ * Member-profile-backed roster lookup tests (FR-24 revised, FR-32, ADR-011).
  *
- * In production the roster file loads asynchronously via initRosters(). For
- * tests we seed it synchronously from a mocked fetch so we can assert on the
- * contract without a real network request.
+ * The service lazily fetches /api/members/{bioguideId} on demand and caches
+ * per-member. Tests use a fake fetch to return canned profiles.
  */
-import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   bundledHouseCast,
   bundledSenateCast,
   hasBundledRoster,
   initRosters,
+  preloadHouseMember,
+  preloadSenateMember,
+  __resetBundledRostersForTest,
 } from '../../src/services/bundledRosters';
-import { getCuratedVotesForChamber } from '../../src/services/ukraineFilter';
 
-beforeAll(async () => {
-  // Prime the module-level roster store by feeding a stub fetch that returns
-  // the real ukraineVotes.json file off disk.
-  const jsonText = readFileSync('src/data/ukraineVotes.json', 'utf8');
-  vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-    new Response(jsonText, { status: 200, headers: { 'Content-Type': 'application/json' } }),
-  );
-  await initRosters('file://dummy/ukraineVotes.json');
+const API_BASE = 'https://example.com';
+
+function canned(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+beforeEach(() => {
+  __resetBundledRostersForTest();
   vi.restoreAllMocks();
 });
 
+describe('initRosters', () => {
+  it('stores the api base for subsequent fetches', async () => {
+    await initRosters(API_BASE);
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(canned({
+      bioguideId: 'D000563', first: 'Richard', last: 'Durbin', state: 'IL',
+      chamber: 'House', party: 'D', ukraineVotes: [],
+    }));
+    await preloadHouseMember('D000563');
+    expect(spy).toHaveBeenCalledWith(`${API_BASE}/api/members/D000563`);
+  });
+});
+
 describe('bundledHouseCast', () => {
-  it('returns a valid cast for a known House voter on a bundled vote', () => {
-    // Pick a real House curated vote from the bundled data.
-    const houseVotes = getCuratedVotesForChamber('House');
-    expect(houseVotes.length).toBeGreaterThan(0);
-    const v = houseVotes[0]!.vote;
-
-    // Confirm the roster is bundled
-    expect(hasBundledRoster('House', v.congress, v.session, v.rollCall)).toBe(true);
-
-    // For a bioguide we know won't be in the roster, we get null.
-    const cast = bundledHouseCast(v.congress, v.session, v.rollCall, 'ZZZ00000');
-    expect(cast).toBe(null);
+  it('returns cast after profile loads', async () => {
+    await initRosters(API_BASE);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(canned({
+      bioguideId: 'B001315', chamber: 'House', first: 'Nikki', last: 'Budzinski', state: 'IL', party: 'D',
+      ukraineVotes: [
+        { rollCallId: 'house:117:2:65', cast: 'Yea', date: '', billId: 'HR2471', question: '', weight: 0.9, billTitle: '' },
+      ],
+    }));
+    await preloadHouseMember('B001315');
+    expect(bundledHouseCast(117, 2, 65, 'B001315')).toBe('Yea');
   });
 
-  it('returns undefined when the roster is not bundled for that vote', () => {
-    // A roll call number that's not in the curated set at all
-    const cast = bundledHouseCast(99, 9, 99999, 'ZZZ00000');
-    expect(cast).toBeUndefined();
+  it('returns undefined before profile loads', () => {
+    expect(bundledHouseCast(117, 2, 65, 'B001315')).toBeUndefined();
+  });
+
+  it('returns null when profile loaded but member absent on that roll call (DNS)', async () => {
+    await initRosters(API_BASE);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(canned({
+      bioguideId: 'X000001', chamber: 'House', first: 'X', last: 'Y', state: 'FL', party: 'R',
+      ukraineVotes: [],
+    }));
+    await preloadHouseMember('X000001');
+    expect(bundledHouseCast(117, 2, 65, 'X000001')).toBe(null);
   });
 });
 
 describe('bundledSenateCast', () => {
-  it('returns a valid cast for a known senator on a bundled vote', () => {
-    // Use a well-known senator + vote combination from the real data
-    // HR 7691 Senate#191 — Durbin was present
-    const cast = bundledSenateCast(117, 2, 191, 'Durbin', 'IL');
-    // Must be a string like "Yea" / "Nay" / etc. — not null, not undefined
-    expect(typeof cast).toBe('string');
-    expect(['Yea', 'Nay', 'Present', 'Not Voting']).toContain(cast);
+  it('resolves senate key via last|state synthetic bioguide', async () => {
+    await initRosters(API_BASE);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(canned({
+      bioguideId: 'S|Durbin|IL', chamber: 'Senate', first: 'Richard', last: 'Durbin', state: 'IL', party: 'D',
+      ukraineVotes: [
+        { rollCallId: 'senate:117:2:191', cast: 'Yea', date: '', billId: 'HR7691', question: '', weight: 1.0, billTitle: '' },
+      ],
+    }));
+    await preloadSenateMember('Durbin', 'IL');
+    expect(bundledSenateCast(117, 2, 191, 'Durbin', 'IL')).toBe('Yea');
   });
 
-  it('returns null when the senator is not in a bundled vote roster (Did Not Serve)', () => {
-    // Fake last name + real vote
-    const cast = bundledSenateCast(117, 2, 191, 'NotARealSenator', 'ZZ');
-    expect(cast).toBe(null);
-  });
-
-  it('returns undefined when the vote itself is not bundled', () => {
-    const cast = bundledSenateCast(99, 9, 99999, 'Durbin', 'IL');
-    expect(cast).toBeUndefined();
+  it('returns null for absent senator after profile load', async () => {
+    await initRosters(API_BASE);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(canned({
+      bioguideId: 'S|NotReal|ZZ', chamber: 'Senate', first: 'N', last: 'R', state: 'ZZ', party: 'I',
+      ukraineVotes: [],
+    }));
+    await preloadSenateMember('NotReal', 'ZZ');
+    expect(bundledSenateCast(117, 2, 191, 'NotReal', 'ZZ')).toBe(null);
   });
 });
 
 describe('hasBundledRoster', () => {
-  it('is true for every curated Senate vote', () => {
-    const senateVotes = getCuratedVotesForChamber('Senate');
-    expect(senateVotes.length).toBeGreaterThan(0);
-    for (const { vote } of senateVotes) {
-      expect(
-        hasBundledRoster('Senate', vote.congress, vote.session, vote.rollCall),
-      ).toBe(true);
-    }
-  });
-
-  it('is true for every curated House vote', () => {
-    const houseVotes = getCuratedVotesForChamber('House');
-    expect(houseVotes.length).toBeGreaterThan(0);
-    for (const { vote } of houseVotes) {
-      expect(
-        hasBundledRoster('House', vote.congress, vote.session, vote.rollCall),
-      ).toBe(true);
-    }
-  });
-
-  it('is false for votes not in the curated set', () => {
-    expect(hasBundledRoster('Senate', 99, 9, 99999)).toBe(false);
-    expect(hasBundledRoster('House', 99, 9, 99999)).toBe(false);
+  it('becomes true once any cached member has the roll call', async () => {
+    await initRosters(API_BASE);
+    expect(hasBundledRoster('House', 117, 2, 65)).toBe(false);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(canned({
+      bioguideId: 'B001315', chamber: 'House', first: 'Nikki', last: 'Budzinski', state: 'IL', party: 'D',
+      ukraineVotes: [
+        { rollCallId: 'house:117:2:65', cast: 'Yea', date: '', billId: 'HR2471', question: '', weight: 0.9, billTitle: '' },
+      ],
+    }));
+    await preloadHouseMember('B001315');
+    expect(hasBundledRoster('House', 117, 2, 65)).toBe(true);
   });
 });

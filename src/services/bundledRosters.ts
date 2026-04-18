@@ -1,81 +1,127 @@
 /**
- * Roster lookup service. Reads the roster JSON either from:
- *   1. An explicit URL passed via `initRosters(url)` at boot time (production)
- *   2. A fallback empty map (dev / offline / before init)
+ * Member-profile-backed roster lookup (FR-24 revised, FR-32, ADR-011).
  *
- * FR-24 AC-24.6: the roster JSON is served as a sibling file from R2 (not
- * inlined into the widget bundle) to keep the IIFE under 250KB gzipped. The
- * embed snippet provides an `assets-base` attribute; the widget fetches
- * `${assetsBase}/ukraineVotes.json` once on boot and caches it in-memory.
+ * This module preserves the public API that the useVotingRecord hook depends on:
+ *   - initRosters(apiBase)           — set the base URL for /api/members
+ *   - rostersReady()                 — becomes true once at least one member is cached
+ *   - hasBundledRoster(chamber,c,s,rc) — true if *any* cached member has a cast for this roll call
+ *   - bundledHouseCast(c,s,rc,bioguide) — cast for the given House member on the roll call, or undefined if we haven't fetched them yet, or null if they did not serve
+ *   - bundledSenateCast(c,s,rc,last,state) — same for Senate, matched by last|state
  *
- * In dev, if no assets-base is set, the rosters are fetched from the Vite
- * dev server (which serves src/data/ukraineVotes.json as a static asset).
+ * Behind the scenes the data is fetched lazily from /api/members/{bioguideId}
+ * (or an analogous key for senators — see Senate lookup section below).
+ * A simple in-memory Map caches each member's profile after first fetch.
+ *
+ * Senate lookup: the curator keys senate entries by a pseudo-bioguide
+ * `S|{last}|{state}` because senate XML lacks bioguides. This module
+ * encapsulates that detail.
  */
 
-interface HouseRosterEntry {
+interface UkraineVoteEntry {
+  rollCallId: string; // "chamber:congress:session:rollCall", lowercase
   cast: string;
-  party: string;
-  state: string;
+  date: string;
+  billId: string;
+  question: string;
+  weight: number;
+  billTitle: string;
+}
+
+interface MemberProfile {
+  bioguideId: string;
   first: string;
   last: string;
-}
-
-interface SenateRosterEntry {
-  cast: string;
+  state: string;
+  chamber: 'House' | 'Senate';
   party: string;
-  first: string;
+  ukraineVotes: UkraineVoteEntry[];
 }
 
-interface RostersFile {
-  generatedAt: string;
-  rosters: Record<string, Record<string, HouseRosterEntry | SenateRosterEntry>>;
+let apiBase = '';
+const profileCache = new Map<string, MemberProfile | null>(); // null = fetched, not found
+const inflight = new Map<string, Promise<MemberProfile | null>>();
+
+export function initRosters(base: string): Promise<void> {
+  apiBase = base.replace(/\/+$/, '');
+  return Promise.resolve();
 }
 
-let ROSTERS: RostersFile = { generatedAt: '', rosters: {} };
-let initPromise: Promise<void> | null = null;
-
-/**
- * Initialize the roster store by fetching the JSON file from the given URL.
- * Called once at widget boot. Subsequent calls reuse the in-flight promise.
- */
-export function initRosters(url: string): Promise<void> {
-  if (initPromise) return initPromise;
-  initPromise = fetch(url)
-    .then(async (res) => {
-      if (!res.ok) {
-        throw new Error(`Roster file fetch ${res.status} from ${url}`);
-      }
-      const data = (await res.json()) as RostersFile;
-      ROSTERS = data;
-    })
-    .catch((err) => {
-      // Keep initPromise set so we don't retry. If rosters are missing, the
-      // hook falls back to the network path (which still works — just slower).
-      console.warn('[voter-info-widget] Failed to load rosters:', err);
-    });
-  return initPromise;
-}
-
-/** True once the roster file has loaded (or failed). */
 export function rostersReady(): boolean {
-  return ROSTERS.generatedAt !== '';
+  return apiBase !== '';
 }
 
+function memberKey(chamber: 'House' | 'Senate', bioguide: string): string {
+  return `${chamber}|${bioguide}`;
+}
+
+function rollCallId(chamber: 'House' | 'Senate', congress: number, session: number, rollCall: number): string {
+  return `${chamber.toLowerCase()}:${congress}:${session}:${rollCall}`;
+}
+
+async function fetchMemberProfile(chamber: 'House' | 'Senate', bioguide: string): Promise<MemberProfile | null> {
+  if (!apiBase) return null;
+  const key = memberKey(chamber, bioguide);
+  if (profileCache.has(key)) return profileCache.get(key) ?? null;
+  const existing = inflight.get(key);
+  if (existing) return existing;
+  const p = (async (): Promise<MemberProfile | null> => {
+    try {
+      const res = await fetch(`${apiBase}/api/members/${encodeURIComponent(bioguide)}`);
+      if (res.status === 404) {
+        profileCache.set(key, null);
+        return null;
+      }
+      if (!res.ok) {
+        // Transient failure — cache nothing so a retry is possible
+        return null;
+      }
+      const data = (await res.json()) as MemberProfile;
+      profileCache.set(key, data);
+      return data;
+    } catch {
+      return null;
+    } finally {
+      inflight.delete(key);
+    }
+  })();
+  inflight.set(key, p);
+  return p;
+}
+
+/** Synchronously check whether we have any cached cast for this roll call. */
 export function hasBundledRoster(
   chamber: 'House' | 'Senate',
   congress: number,
   session: number,
   rollCall: number,
 ): boolean {
-  const key = `${chamber}|${congress}|${session}|${rollCall}`;
-  return key in ROSTERS.rosters;
+  const targetId = rollCallId(chamber, congress, session, rollCall);
+  for (const profile of profileCache.values()) {
+    if (!profile) continue;
+    if (profile.chamber !== chamber) continue;
+    if (profile.ukraineVotes.some((v) => v.rollCallId === targetId)) return true;
+  }
+  return false;
 }
 
 /**
- * House member's cast from the roster.
- *   undefined = roster not loaded yet OR vote not in bundled set (fall back to network)
- *   null      = roster loaded, member absent from roster (Did Not Serve)
- *   string    = their vote_cast
+ * Preload a House member's profile. Returns a promise that resolves when the
+ * fetch completes (or fails); callers may await to ensure `bundledHouseCast`
+ * is hot.
+ */
+export function preloadHouseMember(bioguideId: string): Promise<MemberProfile | null> {
+  return fetchMemberProfile('House', bioguideId);
+}
+
+export function preloadSenateMember(last: string, state: string): Promise<MemberProfile | null> {
+  return fetchMemberProfile('Senate', `S|${last}|${state}`);
+}
+
+/**
+ * Synchronous lookup (from cache only). Returns:
+ *   undefined = member not fetched yet — caller should await preloadHouseMember first
+ *   null      = member fetched, but absent from roster for this roll call (Did Not Serve)
+ *   string    = their vote cast
  */
 export function bundledHouseCast(
   congress: number,
@@ -83,12 +129,13 @@ export function bundledHouseCast(
   rollCall: number,
   bioguideId: string,
 ): string | null | undefined {
-  const key = `House|${congress}|${session}|${rollCall}`;
-  const roster = ROSTERS.rosters[key];
-  if (!roster) return undefined;
-  const entry = roster[bioguideId];
-  if (!entry) return null;
-  return entry.cast;
+  const key = memberKey('House', bioguideId);
+  if (!profileCache.has(key)) return undefined;
+  const profile = profileCache.get(key);
+  if (!profile) return null;
+  const targetId = rollCallId('House', congress, session, rollCall);
+  const v = profile.ukraineVotes.find((x) => x.rollCallId === targetId);
+  return v ? v.cast : null;
 }
 
 export function bundledSenateCast(
@@ -98,14 +145,22 @@ export function bundledSenateCast(
   lastName: string,
   state: string,
 ): string | null | undefined {
-  const key = `Senate|${congress}|${session}|${rollCall}`;
-  const roster = ROSTERS.rosters[key];
-  if (!roster) return undefined;
-  const entry = roster[`${lastName}|${state}`];
-  if (!entry) return null;
-  return entry.cast;
+  const key = memberKey('Senate', `S|${lastName}|${state}`);
+  if (!profileCache.has(key)) return undefined;
+  const profile = profileCache.get(key);
+  if (!profile) return null;
+  const targetId = rollCallId('Senate', congress, session, rollCall);
+  const v = profile.ukraineVotes.find((x) => x.rollCallId === targetId);
+  return v ? v.cast : null;
 }
 
 export function rosterGeneratedAt(): string {
-  return ROSTERS.generatedAt;
+  return '';
+}
+
+/** Test-only reset. */
+export function __resetBundledRostersForTest(): void {
+  profileCache.clear();
+  inflight.clear();
+  apiBase = '';
 }
