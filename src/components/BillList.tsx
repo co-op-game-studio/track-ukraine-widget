@@ -7,6 +7,7 @@ import { Fragment, useMemo, useState } from 'react';
 import type { UkraineBill } from '../hooks/useSponsoredBills';
 import type { Valence } from '../services/valence';
 import { formatDate } from '../utils/formatters';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 const PAGE_SIZE = 5;
 
@@ -99,7 +100,7 @@ export function BillList({
                     >
                       <td>
                         <a
-                          href={b.congressGovUrl}
+                          href={sanitizeUrl(b.congressGovUrl) ?? '#'}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="viw-billlist-link"
@@ -179,7 +180,7 @@ function BillSummary({ bill }: { bill: UkraineBill }) {
         <div className="viw-billlist-summary-title">Bill summary</div>
         <div className="viw-billlist-summary-text viw-billlist-summary-na">
           No summary is available for this bill yet. Read the full text on{' '}
-          <a href={bill.congressGovUrl} target="_blank" rel="noopener noreferrer">congress.gov</a>.
+          <a href={sanitizeUrl(bill.congressGovUrl) ?? '#'} target="_blank" rel="noopener noreferrer">congress.gov</a>.
         </div>
       </div>
     );

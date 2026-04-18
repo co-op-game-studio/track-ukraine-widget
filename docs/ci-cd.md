@@ -49,11 +49,11 @@ This document specifies the CI/CD pipeline for the Voter Information Widget. The
 
 ### 2.5 Deploy (Future)
 
-**Trigger**: Push to `main` (after all checks pass)
+**Trigger**: Rung-branch push (`develop` → dev deploy, etc.; `main` runs PR checks only per FR-30)
 **Targets**:
-- Widget bundle → CDN (e.g., Cloudflare R2, S3 + CloudFront)
-- CORS proxy → Cloudflare Workers (`wrangler deploy`)
-- Standalone page → Static hosting (Cloudflare Pages, Vercel, Netlify)
+- Widget bundle + curated JSON + SRI sidecar → Worker Sites static assets (ships with `wrangler deploy` from `./dist`)
+- Curator data → KV namespace `KV_VOTER_INFO` (populated by `scripts/publish-to-kv.ts`)
+- CORS proxy + all routes above → Cloudflare Worker (`wrangler deploy`)
 
 ---
 
