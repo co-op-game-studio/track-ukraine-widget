@@ -28,7 +28,7 @@ function resultToRepresentative(r: NameSearchResult): Representative {
       r.party === 'I' ? 'Independent' : r.party,
     partyAbbreviation: r.party,
     state: r.state,
-    district: null,
+    district: r.district ?? null,
     chamber: r.chamber.toLowerCase() as 'house' | 'senate',
     // AC-31.1: photoUrl from KV-backed name-search is sanitized at this
     // boundary so MemberChip can trust the field.

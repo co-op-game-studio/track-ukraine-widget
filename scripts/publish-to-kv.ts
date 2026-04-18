@@ -146,6 +146,9 @@ interface NameIndexEntry {
   last: string;
   state: string;
   chamber: 'Senate' | 'House';
+  /** House district number. Null for Senators and non-voting delegates
+   *  (Congress.gov omits `district` for those). */
+  district: number | null;
   party: string;
   photoUrl: string | null;
   searchKeys: string[];
@@ -266,6 +269,7 @@ function splitName(full: string): { first: string; last: string } {
       last,
       state: stateCode,
       chamber,
+      district: chamber === 'House' ? (m.district ?? null) : null,
       party: partyLetter(m.partyName),
       photoUrl: m.depiction?.imageUrl ?? null,
       searchKeys,
@@ -323,8 +327,10 @@ function splitName(full: string): { first: string; last: string } {
   const payloadPath = join(dir, 'bulk.json');
   writeFileSync(payloadPath, JSON.stringify(pairs), 'utf8');
 
-  const wranglerEnvFlag = ENV === 'prod' ? '' : `--env ${ENV}`;
-  const cmd = `npx wrangler kv bulk put --binding KV_VOTER_INFO ${wranglerEnvFlag} --remote ${payloadPath}`.trim();
+  // Target by explicit namespace-id so wrangler doesn't try to resolve a
+  // binding from an upstream wrangler config (which can accidentally be
+  // picked up from a parent directory).
+  const cmd = `npx wrangler kv bulk put --namespace-id ${namespaceId} --remote ${payloadPath}`;
   console.log(`Running: ${cmd}`);
   execSync(cmd, { stdio: 'inherit' });
   console.log(`\n✓ Wrote ${pairs.length} KV records to ${ENV} namespace.`);

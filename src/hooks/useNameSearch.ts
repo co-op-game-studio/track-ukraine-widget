@@ -12,6 +12,9 @@ export interface NameSearchResult {
   last: string;
   state: string;
   chamber: 'Senate' | 'House';
+  /** House district. Null for Senators and for any shard entry predating
+   *  the curator's district-included schema. */
+  district?: number | null;
   party: string;
   photoUrl?: string | null;
   searchKeys: string[];
