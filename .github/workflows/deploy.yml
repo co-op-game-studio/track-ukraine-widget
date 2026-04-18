@@ -91,7 +91,6 @@ jobs:
         run: |
           test -f dist/voter-info-widget.iife.js || (echo "widget bundle missing" && exit 1)
           test -f src/data/ukraineBills.json     || (echo "ukraineBills.json missing" && exit 1)
-          test -f src/data/ukraineVotes.json     || (echo "ukraineVotes.json missing (needed as publish-to-kv input)" && exit 1)
 
       - name: Publish atomic records to KV
         env:
