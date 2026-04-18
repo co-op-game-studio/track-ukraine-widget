@@ -517,9 +517,9 @@ function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string 
     return 'public, s-maxage=31536000, max-age=31536000, immutable';
   }
   if (/^v3\/member\/.*\/(sponsored|cosponsored)-legislation/.test(upstreamPath)) {
-    return 'public, s-maxage=3600, max-age=300';
+    return 'public, s-maxage=604800, max-age=86400';
   }
-  return 'public, s-maxage=3600, max-age=3600';
+  return 'public, s-maxage=86400, max-age=86400';
 }
 
 function sanitizeBody(body: string, redactList: string[]): string {
