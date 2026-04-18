@@ -138,6 +138,23 @@ export function isPreviewEnv(env: { PREVIEW_MODE?: string }): boolean {
 }
 
 /**
+ * Same-origin GET/HEAD bypass: browsers omit the Origin header on same-origin
+ * read requests. Sec-Fetch-Site is browser-set (Forbidden Header) and
+ * unforgeable by client script, so 'same-origin' with method=GET is a reliable
+ * signal that this request came from a document served by this Worker's own
+ * host. That's legitimate (our /embed page talking to our own /api/*).
+ *
+ * Narrowly scoped: GET/HEAD only, Origin absent. Doesn't widen the surface
+ * vs. any allowlisted cross-origin GET (which bypasses the allowlist by
+ * matching it).
+ */
+export function isSameOriginBypass(request: Request): boolean {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return false;
+  if (request.headers.get('Origin')) return false;
+  return request.headers.get('Sec-Fetch-Site') === 'same-origin';
+}
+
+/**
  * Is the upstream-path (the portion after the route prefix) structurally safe?
  *
  * Rejects `..`, `//`, `@`, any raw control character, any DEL (`\x7f`), and
@@ -180,7 +197,7 @@ export function normalizeUpstreamErrorBody(status: number, upstream: string): st
  *   cross-origin for embedding; CSP/Permissions-Policy intentionally absent
  *   (they apply to documents, not subresources).
  */
-export type ResponseShape = 'worker-emitted' | 'api-proxied' | 'static-asset';
+export type ResponseShape = 'worker-emitted' | 'api-proxied' | 'static-asset' | 'embeddable-html';
 
 /** CSP used on any HTML/error content the Worker emits itself. */
 const WORKER_EMITTED_CSP =
@@ -228,11 +245,14 @@ export function applySecurityHeaders(
 ): Response {
   const headers = new Headers(resp.headers);
 
-  // Universal baseline (AC-27.1) — set on EVERY response.
+  // Universal baseline (AC-27.1) — set on EVERY response except 'embeddable-html'
+  // which needs to be frameable. Everything else gets X-Frame-Options: DENY.
   headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Referrer-Policy', 'no-referrer');
-  headers.set('X-Frame-Options', 'DENY');
+  if (shape !== 'embeddable-html') {
+    headers.set('X-Frame-Options', 'DENY');
+  }
   headers.set('X-DNS-Prefetch-Control', 'off');
   headers.set('X-Permitted-Cross-Domain-Policies', 'none');
   headers.set('Cross-Origin-Opener-Policy', 'same-origin');
@@ -250,6 +270,11 @@ export function applySecurityHeaders(
     }
   } else if (shape === 'api-proxied') {
     // AC-27.1c: allow cross-origin read for embedder browsers.
+    headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  } else if (shape === 'embeddable-html') {
+    // Embed page — designed for iframing on third-party sites. No CSP
+    // restriction from our side (set inline on the response with embed-friendly
+    // directives). CORP cross-origin so the iframe's browser can render it.
     headers.set('Cross-Origin-Resource-Policy', 'cross-origin');
   } else {
     // 'static-asset' — AC-27.1b: cross-origin embed.
@@ -766,7 +791,7 @@ async function handleApi(
 
   // Preflight (OPTIONS) — now only reached when route is known.
   if (request.method === 'OPTIONS') {
-    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost) && !isSameOriginBypass(request)) {
       return {
         response: new Response('Origin not allowed', {
           status: 403,
@@ -795,7 +820,7 @@ async function handleApi(
     };
   }
 
-  if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+  if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost) && !isSameOriginBypass(request)) {
     return {
       response: new Response('Origin not allowed', {
         status: 403,
@@ -966,7 +991,7 @@ async function dispatch(
   if (kvRouteMatch) {
     // OPTIONS preflight for these routes
     if (request.method === 'OPTIONS') {
-      if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+      if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost) && !isSameOriginBypass(request)) {
         return {
           response: new Response('Origin not allowed', {
             status: 403,
@@ -992,7 +1017,7 @@ async function dispatch(
         shape: 'worker-emitted',
       };
     }
-    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost)) {
+    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost) && !isSameOriginBypass(request)) {
       return {
         response: new Response('Origin not allowed', {
           status: 403,
@@ -1030,6 +1055,28 @@ async function dispatch(
   //    - Any other text/html GET: 301 → trackukraine.com.
   const accept = request.headers.get('Accept') ?? '';
   if (request.method === 'GET' && accept.includes('text/html')) {
+    // /embed on any env (including prod): serve the embed-ready widget page
+    // designed for iframe embedding on third-party sites. Frames allowed
+    // from anywhere; no CSP frame-ancestors restriction.
+    if (url.pathname === '/embed' || url.pathname === '/embed/') {
+      return {
+        response: new Response(buildEmbedHtml(env.ENV_NAME ?? 'prod'), {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'public, max-age=600',
+            'Content-Security-Policy':
+              "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; " +
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+              "font-src 'self' https://fonts.gstatic.com; " +
+              "img-src 'self' data: https:; " +
+              "connect-src 'self'; " +
+              "base-uri 'none'",
+          },
+        }),
+        shape: 'embeddable-html',
+      };
+    }
     // Non-prod (PREVIEW_MODE='true'): serve widget preview at any HTML request.
     // Worker-level Access gate is already upstream; if we're here, the user is
     // authenticated or on localhost. Always render the preview — never redirect
@@ -1081,6 +1128,62 @@ async function dispatch(
     }
   }
   return { response: new Response('Not Found', { status: 404 }), shape: 'worker-emitted' };
+}
+
+/**
+ * Embed-friendly HTML served at /embed on any env. Designed for iframe
+ * embedding on third-party sites (e.g. trackukraine.com, Discord link
+ * previews, WordPress). Notifies the parent frame of its content height
+ * via postMessage so the host can auto-size the iframe.
+ */
+function buildEmbedHtml(envName: string): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voter Info Widget</title>
+    <meta property="og:title" content="Voter Info Widget — Ukraine Focus" />
+    <meta property="og:description" content="See how your U.S. Senators and Representative voted on major Ukraine aid, sanctions, and oversight legislation." />
+    <style>
+      html, body { margin: 0; padding: 0; background: transparent; }
+      body { font-family: "Hanken Grotesk", system-ui, sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="viw-mount"></div>
+    <script src="/voter-info-widget.iife.js" defer></script>
+    <script>
+      // Mount the widget with api-base = this page's origin. This forces
+      // fetch() calls to be cross-origin (vs. same-origin with no Origin
+      // header) so the Worker's ALLOWED_ORIGINS check sees a real Origin.
+      window.addEventListener('load', function () {
+        var el = document.createElement('voter-info-widget');
+        el.setAttribute('api-base', window.location.origin);
+        document.getElementById('viw-mount').appendChild(el);
+      });
+      // Auto-size iframe: on content-height changes, postMessage to parent.
+      (function () {
+        var lastHeight = 0;
+        function notify() {
+          var h = document.documentElement.scrollHeight;
+          if (h !== lastHeight) {
+            lastHeight = h;
+            window.parent.postMessage(
+              { type: 'viw:resize', height: h, env: ${JSON.stringify(envName)} },
+              '*'
+            );
+          }
+        }
+        var ro = new ResizeObserver(notify);
+        ro.observe(document.body);
+        // Also fire on window load + periodic fallback for pre-ResizeObserver cases.
+        window.addEventListener('load', notify);
+        setInterval(notify, 500);
+      })();
+    </script>
+  </body>
+</html>`;
 }
 
 function buildPreviewHtml(envName: string): string {
