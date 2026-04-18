@@ -1,13 +1,14 @@
 name: Ladder Guard
 
-# Enforces the develop → uat → stg → prod promotion rotation.
-# PRs into a ladder branch must come from the immediately-preceding rung.
+# Enforces the main → develop → uat → stg → prod promotion rotation.
+# `main` is trunk (source of truth); the four deploy branches form a ladder
+# where each rung's source must be the immediately-preceding rung.
 # Hotfix PRs can be named `hotfix/*` to bypass (for emergency prod patches);
 # those still require reviewer approval via branch protection.
 
 on:
   pull_request:
-    branches: [uat, stg, prod]
+    branches: [develop, uat, stg, prod]
 
 jobs:
   check-source:
@@ -20,6 +21,13 @@ jobs:
         run: |
           echo "PR: $HEAD → $BASE"
           case "$BASE" in
+            develop)
+              if [[ "$HEAD" == "main" || "$HEAD" == hotfix/* ]]; then
+                echo "✓ main or hotfix/* → develop is allowed"
+                exit 0
+              fi
+              echo "::error::PR into develop must come from 'main' or 'hotfix/*' (got '$HEAD')"
+              exit 1 ;;
             uat)
               if [[ "$HEAD" == "develop" || "$HEAD" == hotfix/* ]]; then
                 echo "✓ develop or hotfix/* → uat is allowed"
