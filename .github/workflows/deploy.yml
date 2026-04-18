@@ -6,6 +6,9 @@ name: Deploy
 #   stg     → stg    (reviewer-gated)
 #   prod    → prod   (reviewer-gated)
 #
+# `main` is the trunk branch and is NOT a deploy target. Promotion is
+# main → develop → uat → stg → prod; ladder-guard.yml enforces PR sources.
+#
 # Pipeline: typecheck → test → build → publish-to-kv → deploy Worker → smoke.
 # (R2 bucket uploads removed in v2.5.0 — ADR-011 consolidated all storage to KV.)
 
