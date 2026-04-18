@@ -1091,3 +1091,13 @@
   font-style: italic;
   opacity: 0.85;
 }
+
+.viw-address-label-hint {
+  font-weight: 500;
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.72rem;
+  opacity: 0.85;
+  margin-left: 0.5rem;
+}
