@@ -3,12 +3,15 @@
  * bills, tagged with valence. Amendments (D-6) are dropped silently.
  *
  * Traces to: FR-7, FR-11, FR-15, US-4, design.md §3.2.3, §4.9.
+ *
+ * Data source: `/api/members/{bioguideId}` — a KV-backed member profile that
+ * already contains the first 250 sponsored + 250 cosponsored entries baked
+ * in at Worker-build time (see proxy/lib.ts buildProfileFromUpstream). That
+ * replaces the prior 5-page × 2-relationship pagination against Congress.gov
+ * with a single cached KV read, dropping the per-rep cost from 10 upstream
+ * round-trips to 1.
  */
 import { useCallback, useRef, useState } from 'react';
-import {
-  fetchSponsoredLegislation,
-  fetchCosponsoredLegislation,
-} from '../services/congressApi';
 import { formatBillNumber } from '../utils/formatters';
 import {
   isCuratedBill,
@@ -16,13 +19,7 @@ import {
   type CuratedBill,
 } from '../services/ukraineFilter';
 import { computeValence, type Valence } from '../services/valence';
-import type {
-  CongressLegislationRawEntry,
-  CongressLegislationListResponse,
-} from '../types/api';
-
-const SCAN_PAGE_SIZE = 100;
-const SCAN_MAX_PAGES = 5;
+import type { CongressLegislationRawEntry } from '../types/api';
 
 export type BillStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -85,32 +82,15 @@ function tryBuildUkraineBill(
   };
 }
 
-async function scan(
+function mapAndSort(
+  raw: CongressLegislationRawEntry[],
   relationship: 'sponsored' | 'cosponsored',
-  bioguideId: string,
-  apiBase: string,
-  fetcher: (
-    id: string,
-    base: string,
-    offset: number,
-    limit: number,
-  ) => Promise<CongressLegislationListResponse>,
-): Promise<UkraineBill[]> {
+): UkraineBill[] {
   const keep: UkraineBill[] = [];
-  for (let page = 0; page < SCAN_MAX_PAGES; page++) {
-    const offset = page * SCAN_PAGE_SIZE;
-    const resp = await fetcher(bioguideId, apiBase, offset, SCAN_PAGE_SIZE);
-    const raw =
-      (relationship === 'sponsored' ? resp.sponsoredLegislation : resp.cosponsoredLegislation) ?? [];
-    if (raw.length === 0) break;
-
-    for (const e of raw) {
-      const mapped = tryBuildUkraineBill(e, relationship);
-      if (mapped) keep.push(mapped);
-    }
-    if (raw.length < SCAN_PAGE_SIZE) break;
+  for (const e of raw) {
+    const mapped = tryBuildUkraineBill(e, relationship);
+    if (mapped) keep.push(mapped);
   }
-
   // Featured first, then newest introduced
   return keep.sort((a, b) => {
     if (a.featured !== b.featured) return a.featured ? -1 : 1;
@@ -134,12 +114,17 @@ export function useSponsoredBills(
     setError(null);
 
     try {
-      const [sponsored, cosponsored] = await Promise.all([
-        scan('sponsored', bioguideId, apiBase, fetchSponsoredLegislation),
-        scan('cosponsored', bioguideId, apiBase, fetchCosponsoredLegislation),
-      ]);
+      const base = apiBase.replace(/\/+$/, '');
+      const res = await fetch(`${base}/api/members/${encodeURIComponent(bioguideId)}`);
+      if (!res.ok) throw new Error(`member profile ${res.status}`);
+      const profile = (await res.json()) as {
+        sponsored?: CongressLegislationRawEntry[];
+        cosponsored?: CongressLegislationRawEntry[];
+      };
       if (thisReq !== reqIdRef.current) return;
 
+      const sponsored = mapAndSort(profile.sponsored ?? [], 'sponsored');
+      const cosponsored = mapAndSort(profile.cosponsored ?? [], 'cosponsored');
       setData({ sponsored, cosponsored });
       setStatus('success');
     } catch (e) {
