@@ -133,12 +133,12 @@
 }
 
 .viw-address-input {
-  flex: 1 1 300px;
+  flex: 1 1 0;
   min-width: 0;
   padding: 0.85rem 1rem;
   border: 2px solid var(--viw-black);
   border-radius: 0;
-  font-size: 1rem;
+  font-size: 16px; /* prevents iOS zoom-on-focus */
   font-family: inherit;
   color: inherit;
   background: var(--viw-white);
@@ -151,7 +151,7 @@
 .viw-address-submit {
   padding: 0.85rem 1.5rem;
   border: 2px solid var(--viw-black);
-  border-left-width: 0; /* flush with input */
+  border-left-width: 0; /* flush with input on desktop */
   border-radius: 0;
   background: var(--viw-yellow);
   color: var(--viw-black);
@@ -163,6 +163,24 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   transition: background-color 0.1s linear;
+  white-space: nowrap;
+}
+
+/* Mobile: stack the submit button full-width under the input. */
+@media (max-width: 520px) {
+  .viw-address-input {
+    flex-basis: 100%;
+  }
+  .viw-address-submit {
+    flex-basis: 100%;
+    border-left-width: 2px;
+    border-top-width: 0;
+  }
+  .viw-address-label-hint {
+    display: block;
+    margin-left: 0;
+    margin-top: 0.2rem;
+  }
 }
 .viw-address-submit:hover:not(:disabled) { background: var(--viw-yellow-dark); }
 .viw-address-submit:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -1093,4 +1111,11 @@
   font-size: 0.72rem;
   opacity: 0.85;
   margin-left: 0.5rem;
+}
+@media (max-width: 520px) {
+  .viw-address-label-hint {
+    display: block;
+    margin-left: 0;
+    margin-top: 0.2rem;
+  }
 }
