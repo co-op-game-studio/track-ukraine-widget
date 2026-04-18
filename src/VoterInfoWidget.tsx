@@ -28,13 +28,6 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
 
   return (
     <div className="viw-root">
-      <header className="viw-root-header">
-        <h1 className="viw-root-title">Do your candidates support Ukraine?</h1>
-        <p className="viw-root-subtitle">
-          Enter your home address, or search by name, to see how your U.S. Senators and
-          Representative voted on major Ukraine aid, sanctions, and oversight legislation.
-        </p>
-      </header>
 
       <AddressInput
         onSubmit={(addr) => {
@@ -79,6 +72,8 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
         <small>
           Data from U.S. Census Bureau, Congress.gov, and Senate.gov. Not affiliated with
           any government agency.
+          <br />
+          We do not store or keep any information you enter in this form.
         </small>
       </footer>
     </div>

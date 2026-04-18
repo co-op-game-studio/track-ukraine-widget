@@ -83,32 +83,28 @@
   letter-spacing: -0.01em;
   line-height: 1;
   margin: 0 0 0.75rem;
-  color: var(--viw-white);
-  text-shadow: var(--viw-hero-shadow);
+  color: var(--viw-black);
 }
 
 .viw-root-subtitle {
-  color: var(--viw-white);
-  text-shadow: 1px 1px 0 var(--viw-black);
+  color: var(--viw-black);
   font-weight: 700;
   font-size: 1.05rem;
   margin: 0 auto;
   max-width: 680px;
 }
 
-/* If the widget is on a light-background host, the subtitle would disappear.
-   Add a fallback: if the widget's own bg is set by the host via inheritance,
-   you can wrap the widget in a cyan band. For embedders that want dark text
-   on light, override .viw-root-title { color: black; text-shadow: none; }  */
+/* Host-page typography assumed. The widget renders black text on whatever
+   background the embedder provides. If you're embedding on a dark background,
+   override `.viw-root-title, .viw-root-subtitle, .viw-root-footer, .viw-address-label,
+   .viw-results-heading-state, .viw-results-heading-district { color: #fff; }`
+   and add text-shadows to taste. */
 
 .viw-root-footer {
-  margin-top: 3rem;
-  padding-top: 1rem;
-  border-top: 1px solid rgba(255,255,255,0.3);
-  color: var(--viw-white);
+  margin-top: 2rem;
+  color: var(--viw-black);
   font-size: 0.78rem;
   text-align: center;
-  text-shadow: 1px 1px 0 rgba(0,0,0,0.6);
 }
 
 /* ── AddressInput ── */
@@ -126,8 +122,7 @@
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 0.78rem;
-  color: var(--viw-white);
-  text-shadow: 1px 1px 0 var(--viw-black);
+  color: var(--viw-black);
   margin-bottom: 0.5rem;
 }
 
@@ -219,15 +214,13 @@
   font-weight: 900;
   font-style: italic;
   text-transform: uppercase;
-  color: var(--viw-white);
-  text-shadow: var(--viw-hero-shadow);
+  color: var(--viw-black);
   line-height: 1;
 }
 
 .viw-results-heading-district {
   font-size: 0.88rem;
-  color: var(--viw-white);
-  text-shadow: 1px 1px 0 var(--viw-black);
+  color: var(--viw-black);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
