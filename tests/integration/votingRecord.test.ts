@@ -17,6 +17,9 @@ vi.mock('../../src/services/bundledRosters', () => ({
   bundledHouseCast: () => undefined,
   bundledSenateCast: () => undefined,
   rosterGeneratedAt: () => '1970-01-01T00:00:00.000Z',
+  preloadHouseMember: () => Promise.resolve(null),
+  preloadSenateMember: () => Promise.resolve(null),
+  initRosters: () => Promise.resolve(),
 }));
 
 import { useVotingRecord } from '../../src/hooks/useVotingRecord';

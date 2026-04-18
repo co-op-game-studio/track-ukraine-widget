@@ -37,23 +37,52 @@ function chamberLabel(rep: Representative): string {
 
 export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) {
   const [tab, setTab] = useState<Tab>('votes');
-  const votingRecord = useVotingRecord(representative, apiBase);
-  const bills = useSponsoredBills(representative.bioguideId, apiBase);
+  // Enrich the representative with profile data (photoUrl, website, district)
+  // fetched from /api/members/{bioguideId}. This makes the name-search path
+  // render the same rich card as the address path without the address flow
+  // having to pass photoUrl through.
+  const [enriched, setEnriched] = useState<Representative>(representative);
+  useEffect(() => {
+    setEnriched(representative);
+    const base = apiBase.replace(/\/+$/, '');
+    let cancelled = false;
+    fetch(`${base}/api/members/${encodeURIComponent(enriched.bioguideId)}`)
+      .then(async (r) => (r.ok ? r.json() : null))
+      .then((p: {
+        photoUrl?: string | null;
+        website?: string | null;
+        district?: number | null;
+        officialName?: string;
+      } | null) => {
+        if (!p || cancelled) return;
+        setEnriched((curr) => ({
+          ...curr,
+          photoUrl: curr.photoUrl ?? p.photoUrl ?? null,
+          officialWebsiteUrl: curr.officialWebsiteUrl ?? p.website ?? null,
+          district: curr.district ?? p.district ?? null,
+          name: curr.name || p.officialName || curr.name,
+        }));
+      })
+      .catch(() => { /* keep base representative if profile lookup fails */ });
+    return () => { cancelled = true; };
+  }, [representative, apiBase]);
+  const votingRecord = useVotingRecord(enriched, apiBase);
+  const bills = useSponsoredBills(enriched.bioguideId, apiBase);
   const score = useUkraineScore(votingRecord.data, bills.data);
 
   useEffect(() => {
     // Auto-load on mount (or when member switches)
-    if (!(representative.isNonVoting && representative.chamber === 'house') && votingRecord.status === 'idle') {
+    if (!(enriched.isNonVoting && enriched.chamber === 'house') && votingRecord.status === 'idle') {
       votingRecord.load();
     }
     if (bills.status === 'idle') {
       bills.load();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [representative.bioguideId]);
+  }, [enriched.bioguideId]);
 
-  const stateName = stateCodeToName(representative.state) ?? representative.state;
-  const partyClass = partyCssClass(representative.partyAbbreviation);
+  const stateName = stateCodeToName(enriched.state) ?? enriched.state;
+  const partyClass = partyCssClass(enriched.partyAbbreviation);
 
   const obstructionCount =
     (votingRecord.data?.obstructionCount ?? 0)
@@ -63,29 +92,29 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
   return (
     <section
       className={`viw-detail viw-detail-${partyClass}`}
-      aria-labelledby={`viw-detail-name-${representative.bioguideId}`}
+      aria-labelledby={`viw-detail-name-${enriched.bioguideId}`}
     >
       <header className="viw-detail-header">
         <div className="viw-detail-identity">
-          {representative.photoUrl ? (
-            <img src={representative.photoUrl} alt="" className="viw-detail-photo" loading="lazy" />
+          {enriched.photoUrl ? (
+            <img src={enriched.photoUrl} alt="" className="viw-detail-photo" loading="lazy" />
           ) : (
             <div className="viw-detail-photo viw-detail-photo-placeholder" aria-hidden />
           )}
           <div className="viw-detail-ident-text">
-            <h3 id={`viw-detail-name-${representative.bioguideId}`} className="viw-detail-name">
-              {representative.name}
+            <h3 id={`viw-detail-name-${enriched.bioguideId}`} className="viw-detail-name">
+              {enriched.name}
             </h3>
             <div className="viw-detail-meta">
               <span className={`viw-detail-party viw-detail-party-${partyClass}`}>
-                {representative.party.toUpperCase()}
+                {enriched.party.toUpperCase()}
               </span>
               <span className="viw-detail-state">{stateName}</span>
-              <span className="viw-detail-chamber">{chamberLabel(representative)}</span>
+              <span className="viw-detail-chamber">{chamberLabel(enriched)}</span>
             </div>
-            {representative.officialWebsiteUrl && (
+            {enriched.officialWebsiteUrl && (
               <a
-                href={representative.officialWebsiteUrl}
+                href={enriched.officialWebsiteUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="viw-detail-link"
@@ -100,7 +129,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
         </button>
       </header>
 
-      {!representative.isNonVoting && (
+      {!enriched.isNonVoting && (
         <UkraineScoreBadge
           score={score}
           obstructionCount={obstructionCount}
@@ -116,7 +145,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
           aria-selected={tab === 'votes'}
           className={`viw-detail-tab ${tab === 'votes' ? 'active' : ''}`}
           onClick={() => setTab('votes')}
-          disabled={representative.isNonVoting && representative.chamber === 'house'}
+          disabled={enriched.isNonVoting && enriched.chamber === 'house'}
         >
           Ukraine Votes
         </button>
@@ -133,7 +162,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
 
       <div className="viw-detail-body">
         {tab === 'votes' &&
-          (representative.isNonVoting && representative.chamber === 'house' ? (
+          (enriched.isNonVoting && enriched.chamber === 'house' ? (
             <div className="viw-detail-nonvoting">Non-voting delegate — no floor vote record.</div>
           ) : (
             <VoteList

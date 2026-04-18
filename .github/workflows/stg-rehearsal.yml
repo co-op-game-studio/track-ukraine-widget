@@ -1,0 +1,69 @@
+name: Stg Rehearsal (T-025e / FR-30)
+
+# Rehearses a prod-style release against stg:
+#   1. Sync prod KV → stg KV
+#   2. Deploy stg Worker (same code as any deploy)
+#   3. Run unit tests (local mode)
+#   4. Run smoke tests against the stg edge (remote mode)
+#
+# AC-30.5 warning emitted until a real remote-mode test suite lands.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: stg-rehearsal
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: stg
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+
+      - name: Sync prod KV → stg KV
+        run: npx tsx scripts/sync-stg-data.ts
+
+      - name: Deploy stg Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --env stg
+
+      - name: Local-mode tests
+        run: npm test
+
+      - name: Remote smoke against stg edge
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        run: |
+          H=https://stg.vote.cogs.it.com
+          AH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
+
+          for CHECK in \
+            "$H/api/name-search?q=durb|200" \
+            "$H/api/members/D000563|200" \
+          ; do
+            URL="${CHECK%|*}"
+            EXPECT="${CHECK##*|}"
+            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AH[@]}" \
+              -H "Origin: https://trackukraine.com" "$URL")
+            if [[ "$STATUS" != "$EXPECT" ]]; then
+              echo "::error::$URL returned $STATUS (expected $EXPECT)"; exit 1
+            fi
+            echo "✓ $URL → $STATUS"
+          done
+
+      - name: AC-30.5 coverage warning
+        run: |
+          echo "::warning::stg rehearsal ran unit tests only; no remote-mode test coverage yet."

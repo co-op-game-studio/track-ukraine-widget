@@ -1,20 +1,31 @@
 /**
- * Dev entry point — renders the widget directly (no Shadow DOM) for dev mode.
- * Production uses embed.tsx via the library build.
+ * Dev entry point — renders the widget with an env picker for local testing.
+ * Production embedding uses embed.tsx via the library build.
  */
-import { StrictMode } from 'react';
+import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { VoterInfoWidget } from './VoterInfoWidget';
 import { initRosters } from './services/bundledRosters';
+import { EnvPicker, ENV_API_BASE, useEnvFromUrl, type EnvName } from './EnvPicker';
 import './styles/widget.css';
 
-// FR-24: in dev, Vite serves the JSON file from src/data/. In production the
-// sibling-file fetch comes from R2 via embed.tsx's rosterUrl() helper.
-initRosters('/src/data/ukraineVotes.json');
+function Harness() {
+  const { env: initialEnv, locked } = useEnvFromUrl('dev');
+  const [env, setEnv] = useState<EnvName>(initialEnv);
+  const apiBase = ENV_API_BASE[env];
+  // Re-init the member-profile cache apiBase whenever env changes.
+  initRosters(apiBase);
+  return (
+    <>
+      <EnvPicker value={env} locked={locked} onChange={setEnv} />
+      <VoterInfoWidget key={env} apiBase={apiBase} showErrorDetails={env !== 'prod'} />
+    </>
+  );
+}
 
 const root = document.getElementById('root')!;
 createRoot(root).render(
   <StrictMode>
-    <VoterInfoWidget apiBase="" />
+    <Harness />
   </StrictMode>,
 );

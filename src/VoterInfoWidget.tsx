@@ -1,42 +1,78 @@
 /**
- * VoterInfoWidget — root component that composes AddressInput, ResultsPanel, ErrorBanner.
- * Traces to: T-021, all user stories
+ * VoterInfoWidget — composes AddressInput + NameSearchInput and routes to
+ * ResultsPanel (for address-based lookups) or NameSearchResultsPanel (for
+ * live name-search).
+ * Traces to: T-021, FR-31, all user stories.
  */
 import { AddressInput } from './components/AddressInput';
+import { NameSearchInput } from './components/NameSearchInput';
+import { NameSearchResultsPanel } from './components/NameSearchResultsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { ResultsPanel } from './components/ResultsPanel';
 import { useAddressLookup } from './hooks/useAddressLookup';
+import { useNameSearch } from './hooks/useNameSearch';
 
 export interface VoterInfoWidgetProps {
-  /** Base URL where the CORS proxy is hosted. Empty string = same-origin (dev). */
+  /** Base URL for proxy API calls. Empty string = same-origin. */
   apiBase?: string;
+  /** When true, show detailed error messages from the search layer (dev/uat/stg).
+   *  Prod should set false — errors become generic. */
+  showErrorDetails?: boolean;
 }
 
-export function VoterInfoWidget({ apiBase = '' }: VoterInfoWidgetProps) {
+export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: VoterInfoWidgetProps) {
   const lookup = useAddressLookup(apiBase);
+  const search = useNameSearch(apiBase);
   const loading = lookup.status === 'loading';
+  const hasActiveSearch = search.query.trim().length >= 2;
 
   return (
     <div className="viw-root">
       <header className="viw-root-header">
         <h1 className="viw-root-title">Do your candidates support Ukraine?</h1>
         <p className="viw-root-subtitle">
-          Enter your home address to see how your U.S. Senators and Representative
-          voted on major Ukraine aid, sanctions, and oversight legislation.
+          Enter your home address, or search by name, to see how your U.S. Senators and
+          Representative voted on major Ukraine aid, sanctions, and oversight legislation.
         </p>
       </header>
 
-      <AddressInput onSubmit={lookup.lookup} disabled={loading} />
+      <AddressInput
+        onSubmit={(addr) => {
+          search.clear();
+          return lookup.lookup(addr);
+        }}
+        disabled={loading}
+      />
 
-      {lookup.error && (
-        <ErrorBanner
-          message={lookup.error.message}
-          onDismiss={lookup.reset}
-        />
+      <NameSearchInput
+        value={search.query}
+        onChange={(q) => {
+          if (q.trim().length > 0) lookup.reset();
+          search.setQuery(q);
+        }}
+        disabled={loading}
+        status={search.status}
+        resultCount={search.results.length}
+        showErrorDetails={showErrorDetails}
+        errorMessage={search.error}
+      />
+
+      {lookup.error && !hasActiveSearch && (
+        <ErrorBanner message={lookup.error.message} onDismiss={lookup.reset} />
       )}
 
-      {lookup.status === 'success' && lookup.data && (
-        <ResultsPanel result={lookup.data} apiBase={apiBase} />
+      {hasActiveSearch ? (
+        <NameSearchResultsPanel
+          query={search.query}
+          results={search.results}
+          truncated={search.truncated}
+          status={search.status}
+          error={null /* error surface lives on the input now */}
+          apiBase={apiBase}
+        />
+      ) : (
+        lookup.status === 'success' &&
+        lookup.data && <ResultsPanel result={lookup.data} apiBase={apiBase} />
       )}
 
       <footer className="viw-root-footer">

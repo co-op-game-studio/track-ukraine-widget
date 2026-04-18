@@ -1,13 +1,14 @@
 /**
  * Web Component wrapper — defines <voter-info-widget> as a custom element.
- * Traces to: US-6, US-9, FR-24, FR-26, ADR-004, ADR-005.
+ * Traces to: US-6, US-9, FR-24 (revised), FR-26, ADR-004, ADR-011.
  *
  * Mounts React into a Shadow DOM so host-site styles can't leak in.
  * CSS is inlined via Vite's `?inline` suffix.
  *
  * Attributes:
- *   api-base       URL of the CORS proxy Worker (e.g. https://api.trackukraine.com)
- *   assets-base    URL where static assets (rosters JSON) are hosted (e.g. https://cdn.trackukraine.com)
+ *   api-base       URL of the proxy Worker (e.g. https://vote.cogs.it.com).
+ *                  Member profiles are fetched from `${apiBase}/api/members/{bioguideId}`
+ *                  per ADR-011 (KV-sole-datastore).
  */
 import { createRoot, type Root } from 'react-dom/client';
 import { StrictMode } from 'react';
@@ -17,38 +18,24 @@ import { initRosters } from './services/bundledRosters';
 import widgetCss from './styles/widget.css?inline';
 
 /**
- * Compute where to fetch the roster JSON file from. Precedence:
- *   1. `assets-base` attribute (if the embedder set it explicitly)
- *   2. `api-base` attribute (single-domain setup — rosters and API share origin)
- *   3. Same origin as the <script> tag that loaded the widget
- *   4. Current page origin (dev fallback)
- *
- * In the single-domain deployment (vote.cogs.it.com), steps 2 and 3 both
- * yield the same URL — callers only need to set `api-base`.
+ * Compute the API base for member-profile fetches. Precedence:
+ *   1. `api-base` attribute (single-domain setup)
+ *   2. Same origin as the <script> tag that loaded the widget
+ *   3. Current page origin (dev fallback)
  */
-function rosterUrl(element: HTMLElement): string {
-  const assetsBase = element.getAttribute('assets-base');
-  if (assetsBase) {
-    return `${assetsBase.replace(/\/$/, '')}/ukraineVotes.json`;
-  }
-
-  const apiBase = element.getAttribute('api-base');
-  if (apiBase) {
-    return `${apiBase.replace(/\/$/, '')}/ukraineVotes.json`;
-  }
-
-  // Derive from the <script> tag that loaded this widget
+function apiBaseFor(element: HTMLElement): string {
+  const attr = element.getAttribute('api-base');
+  if (attr) return attr.replace(/\/$/, '');
   const scripts = document.querySelectorAll<HTMLScriptElement>('script[src*="voter-info-widget"]');
   for (const s of Array.from(scripts)) {
     try {
       const u = new URL(s.src);
-      return `${u.origin}${u.pathname.replace(/[^/]+$/, '')}ukraineVotes.json`;
+      return u.origin;
     } catch {
-      // continue
+      /* continue */
     }
   }
-
-  return '/ukraineVotes.json';
+  return '';
 }
 
 class VoterInfoElement extends HTMLElement {
@@ -66,10 +53,9 @@ class VoterInfoElement extends HTMLElement {
     style.textContent = widgetCss as string;
     shadow.appendChild(style);
 
-    // FR-24: kick off the rosters fetch before React mounts. The hook checks
-    // `hasBundledRoster()` on each open; if rosters arrive late it falls back
-    // to the network path transparently.
-    initRosters(rosterUrl(this));
+    // FR-24 revised (ADR-011): initialize the member-profile service with
+    // the apiBase. Profiles are fetched lazily per-member on demand.
+    initRosters(apiBaseFor(this));
 
     // Mount React
     const mount = document.createElement('div');

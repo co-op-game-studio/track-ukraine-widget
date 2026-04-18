@@ -9,18 +9,22 @@
 # Feature branches must be named feature/* and never deploy — they merge
 # into develop via PR, and the dev deploy fires on merge (with approval).
 #
-# Each env has its own Worker + R2 bucket. The top-level block is prod
-# (no env flag → `wrangler deploy` targets prod). Non-prod envs deploy with
-# `wrangler deploy --env <dev|uat|stg>`.
+# Each env has its own Worker + its own KV namespace (v2.5.0 — ADR-011
+# replaced the v2.4.0 R2 buckets with KV-only atomic record storage).
+# The top-level block is prod (no env flag → `wrangler deploy` targets prod).
+# Non-prod envs deploy with `wrangler deploy --env <dev|uat|stg>`.
 #
-# Per-env routes (identical across envs — only origin CORS and bucket differ):
-#     /api/census/*       → proxies to geocoding.geo.census.gov
-#     /api/congress/*     → proxies to api.congress.gov  (with API key injected)
-#     /api/senate/*       → proxies to www.senate.gov
-#     /voter-info-widget.iife.js
-#     /ukraineBills.json
-#     /ukraineVotes.json  → served from R2 via the ASSETS binding
-#     else                → 404
+# Per-env routes (identical across envs — only origin CORS and KV namespace differ):
+#     /api/census/*               → proxies to geocoding.geo.census.gov
+#     /api/congress/*             → proxies to api.congress.gov  (with API key injected)
+#     /api/senate/*               → proxies to www.senate.gov
+#     /api/members/{bioguideId}   → reads member:v1:* from KV
+#     /api/name-search?q=...      → reads name-index:v1:* from KV
+#     /api/bills/{billId}         → reads bill:v1:* from KV
+#     /api/roll-calls/{c}/{s}/{r}/{rc}  → reads roll-call:v1:* from KV
+#     /voter-info-widget.iife.js  → served via Worker Sites ASSETS binding
+#     /index.html                 → served via Worker Sites ASSETS binding
+#     else                        → 404
 #
 # CONGRESS_API_KEY is set per-env via `wrangler secret put CONGRESS_API_KEY --env <name>`.
 # DO NOT put it here.
@@ -37,10 +41,13 @@ compatibility_date = "2025-01-01"
 # ─── PROD (default, branch: prod) ────────────────────────────────────────────
 [vars]
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
+# ALLOW_LOCALHOST is deliberately unset in prod (AC-25.9). A localhost origin
+# on the prod Worker is either a misconfigured embedder or an attacker using
+# us as a free Congress.gov gateway — either way, deny.
 
-[[r2_buckets]]
-binding = "ASSETS"
-bucket_name = "voter-info-widget-assets"
+[[kv_namespaces]]
+binding = "KV_VOTER_INFO"
+id = "72d3dbce1a1d4ea4aec74b305d7995e6"
 
 [observability]
 enabled = true
@@ -52,12 +59,14 @@ enabled = true
 name = "voter-info-widget-proxy-dev"
 
 [env.dev.vars]
-# Dev is wide-open CORS so we can point any local host at it for smoke tests.
-ALLOWED_ORIGINS = "*"
+# Dev intentionally widens the CORS origin set AND permits localhost so
+# developers can point any local harness at the dev Worker for smoke tests.
+ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080,http://localhost:4173"
+ALLOW_LOCALHOST = "true"
 
-[[env.dev.r2_buckets]]
-binding = "ASSETS"
-bucket_name = "voter-info-widget-assets-dev"
+[[env.dev.kv_namespaces]]
+binding = "KV_VOTER_INFO"
+id = "743b2feda53648cd8242d3b89538bfac"
 
 [env.dev.observability]
 enabled = true
@@ -72,9 +81,9 @@ name = "voter-info-widget-proxy-uat"
 # UAT mirrors prod origins + a couple of localhost entries for reviewer smoke tests.
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com,http://localhost:5173,http://localhost:8080"
 
-[[env.uat.r2_buckets]]
-binding = "ASSETS"
-bucket_name = "voter-info-widget-assets-uat"
+[[env.uat.kv_namespaces]]
+binding = "KV_VOTER_INFO"
+id = "3756142363984d218d5f489151716b30"
 
 [env.uat.observability]
 enabled = true
@@ -89,9 +98,9 @@ name = "voter-info-widget-proxy-stg"
 # Staging mirrors prod origins exactly — last-gate before promotion.
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 
-[[env.stg.r2_buckets]]
-binding = "ASSETS"
-bucket_name = "voter-info-widget-assets-stg"
+[[env.stg.kv_namespaces]]
+binding = "KV_VOTER_INFO"
+id = "4ff9a8e54b82489fb9a300466bd68686"
 
 [env.stg.observability]
 enabled = true
@@ -104,7 +113,9 @@ name = "voter-info-widget-proxy-preview"
 
 [env.preview.vars]
 ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173"
+ALLOW_LOCALHOST = "true"
 
-[[env.preview.r2_buckets]]
-binding = "ASSETS"
-bucket_name = "voter-info-widget-assets-dev"
+[[env.preview.kv_namespaces]]
+binding = "KV_VOTER_INFO"
+# Preview shares the dev namespace — convenient for "just point wrangler dev at real data"
+id = "743b2feda53648cd8242d3b89538bfac"
