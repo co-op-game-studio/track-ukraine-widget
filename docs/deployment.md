@@ -146,19 +146,32 @@ gh secret set CF_ACCESS_CLIENT_SECRET --body "<from Service Token creation>"
 
 ### Deploy
 
-`git push origin main` → `.github/workflows/deploy.yml` runs:
+`main` is the trunk branch and is NOT a deploy target. Pushing to `main`
+runs PR checks only. Deploys happen when `main` is promoted down the
+ladder (`main → develop → uat → stg → prod`). Each rung push triggers
+`.github/workflows/deploy.yml`:
   1. Typecheck + test
-  2. `npm run build:lib` + `npm run curate`
-  3. Upload three files to R2 via wrangler
-  4. `wrangler deploy` to push the Worker
+  2. `npm run build:lib`
+  3. `npx tsx scripts/publish-to-kv.ts --env <env>` (ADR-011: KV is the
+     sole datastore; R2 uploads were removed in v2.5.0)
+  4. `wrangler deploy [--env <env>]` to push the Worker
+  5. Post-deploy smoke
+
+Standard ladder promotion:
+```bash
+# Promote main → develop (triggers dev deploy)
+gh pr create --base develop --head main --title "promote main → develop"
+# After dev is green, promote develop → uat, uat → stg, stg → prod.
+# ladder-guard.yml enforces that each PR source is the previous rung
+# (or `hotfix/*`).
+```
 
 To deploy manually (e.g. rolling back):
 ```bash
 git checkout <good-commit>
 npm run build:lib
-npm run curate
-# three `wrangler r2 object put` commands (see step 5)
-npx wrangler deploy
+npx tsx scripts/publish-to-kv.ts --env <env>
+npx wrangler deploy [--env <env>]
 ```
 
 ### Refresh curated data

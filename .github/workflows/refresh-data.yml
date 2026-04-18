@@ -80,7 +80,8 @@ jobs:
 
             Review the JSON diffs; if the changes look sensible (new votes on
             existing curated bills, or a curator output that matches real API
-            data), merge this PR. Deploy runs on push to `main`.
+            data), merge this PR into `main`. Deploys happen as `main` is
+            promoted down the ladder (`main → develop → uat → stg → prod`).
 
             See spec FR-24, FR-26 and docs/deployment.md for context.
           branch: chore/refresh-curated-data
