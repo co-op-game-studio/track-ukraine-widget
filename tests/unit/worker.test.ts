@@ -1021,6 +1021,373 @@ describe('handleFetch — browser redirect (existing behavior preserved)', () =>
   });
 });
 
+// ─── Post-audit hardening (v2.5.1) ─────────────────────────────────────────
+
+describe('handleFetch — expanded fingerprinting header strip (AC-27.16)', () => {
+  const origin = { Origin: 'https://trackukraine.com' };
+
+  it('strips upstream x-ratelimit-* headers', async () => {
+    fakeUpstream = async () =>
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-ratelimit-limit': '20000',
+          'x-ratelimit-remaining': '19807',
+          'X-RateLimit-Reset': '1700000000',
+        },
+      });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', { headers: origin }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(r.headers.get('x-ratelimit-limit')).toBeNull();
+    expect(r.headers.get('x-ratelimit-remaining')).toBeNull();
+    expect(r.headers.get('X-RateLimit-Reset')).toBeNull();
+  });
+
+  it('strips upstream Clear-Site-Data', async () => {
+    fakeUpstream = async () =>
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Clear-Site-Data': '"cookies", "storage"',
+        },
+      });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', { headers: origin }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(r.headers.get('Clear-Site-Data')).toBeNull();
+  });
+
+  it('strips upstream Refresh', async () => {
+    fakeUpstream = async () =>
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          Refresh: '5; url=https://evil.com',
+        },
+      });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', { headers: origin }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(r.headers.get('Refresh')).toBeNull();
+  });
+
+  it('strips upstream Content-Location', async () => {
+    fakeUpstream = async () =>
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Location': '/v3/member/canonical',
+        },
+      });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', { headers: origin }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(r.headers.get('Content-Location')).toBeNull();
+  });
+});
+
+describe('handleFetch — upstream Access-Control-* headers stripped (AC-27.17)', () => {
+  it('strips upstream Access-Control-Expose-Headers and layers our own', async () => {
+    fakeUpstream = async () =>
+      new Response('{}', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Expose-Headers': 'X-Upstream-Choice',
+          'Access-Control-Allow-Origin': '*',
+        },
+      });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: { Origin: 'https://trackukraine.com' },
+      }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    // Upstream's Access-Control-Expose-Headers is gone.
+    expect(r.headers.get('Access-Control-Expose-Headers')).toBeNull();
+    // Our Access-Control-Allow-Origin (origin reflection, not wildcard) remains.
+    expect(r.headers.get('Access-Control-Allow-Origin')).toBe('https://trackukraine.com');
+  });
+});
+
+describe('handleFetch — upstream fetch timeout (AC-27.18)', () => {
+  it('returns 504 upstream_timeout when the upstream aborts with a timeout error', async () => {
+    fakeUpstream = async () => {
+      // Simulate what AbortSignal.timeout() produces when it fires.
+      const err = new DOMException('The operation was aborted.', 'AbortError');
+      throw err;
+    };
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: { Origin: 'https://trackukraine.com' },
+      }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    // 504 (timeout) is more specific than the pre-existing 502 (unreachable).
+    expect([502, 504]).toContain(r.status);
+    // Must not cache timeouts.
+    expect(r.headers.get('Cache-Control')).toBe('no-store');
+  });
+
+  it('attaches AbortSignal to the upstream fetch call', async () => {
+    let sawSignal = false;
+    fakeUpstream = async (_url, init) => {
+      sawSignal = !!init?.signal;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: { Origin: 'https://trackukraine.com' },
+      }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(sawSignal).toBe(true);
+  });
+});
+
+// AC-27.19 superseded: the R2-backed STATIC_FILES map was replaced by Worker
+// Sites (env.ASSETS.fetch), so the prototype-lookup confusion that AC-27.19
+// guarded against no longer exists in our code. Worker Sites delegates
+// static-file resolution to Cloudflare's runtime, which keys its own store.
+// See docs/decisions/ADR-010-post-audit-hardening.md §AC-27.19 supersedure.
+
+describe('handleFetch — query-param allowlist + canonical cache key (AC-27.20)', () => {
+  it('drops unknown query params before forwarding to upstream (congress)', async () => {
+    let capturedUrl = '';
+    fakeUpstream = async (u) => {
+      capturedUrl = u;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    await handleFetch(
+      new Request(
+        'https://vote.cogs.it.com/api/congress/v3/member?limit=10&nonce=attacker&format=json&bogus=1',
+        { headers: { Origin: 'https://trackukraine.com' } },
+      ),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    const u = new URL(capturedUrl);
+    // Allowed params kept:
+    expect(u.searchParams.get('limit')).toBe('10');
+    expect(u.searchParams.get('format')).toBe('json');
+    // Unknown params dropped:
+    expect(u.searchParams.get('nonce')).toBeNull();
+    expect(u.searchParams.get('bogus')).toBeNull();
+  });
+
+  it('drops unknown query params before forwarding to census', async () => {
+    let capturedUrl = '';
+    fakeUpstream = async (u) => {
+      capturedUrl = u;
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    await handleFetch(
+      new Request(
+        'https://vote.cogs.it.com/api/census/geocoder/geographies/onelineaddress?address=x&benchmark=y&vintage=z&format=json&leak=abc',
+        { headers: { Origin: 'https://trackukraine.com' } },
+      ),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    const u = new URL(capturedUrl);
+    expect(u.searchParams.get('address')).toBe('x');
+    expect(u.searchParams.get('benchmark')).toBe('y');
+    expect(u.searchParams.get('leak')).toBeNull();
+  });
+
+  it('drops all query params on senate (none allowed)', async () => {
+    let capturedUrl = '';
+    fakeUpstream = async (u) => {
+      capturedUrl = u;
+      return new Response('<xml/>', { status: 200, headers: { 'Content-Type': 'application/xml' } });
+    };
+    await handleFetch(
+      new Request(
+        'https://vote.cogs.it.com/api/senate/legislative/LIS/roll_call_votes/x?nonce=1&junk=2',
+        { headers: { Origin: 'https://trackukraine.com' } },
+      ),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    const u = new URL(capturedUrl);
+    expect(u.searchParams.toString()).toBe('');
+  });
+
+  it('cache key ignores unknown params — nonce fuzz does NOT fragment the cache', async () => {
+    let upstreamCalls = 0;
+    fakeUpstream = async () => {
+      upstreamCalls++;
+      return new Response('{}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    const cache = makeFakeCache();
+    const env = makeEnv();
+    // Three requests that differ only in "nonce" — should all hit the same cache key.
+    for (const nonce of ['1', '2', '3']) {
+      await handleFetch(
+        new Request(
+          `https://vote.cogs.it.com/api/congress/v3/member?limit=10&nonce=${nonce}&format=json`,
+          { headers: { Origin: 'https://trackukraine.com' } },
+        ),
+        env,
+        cache,
+      );
+    }
+    // First call is a miss; next two are cache hits.
+    expect(upstreamCalls).toBe(1);
+  });
+});
+
+describe('handleFetch — rate limit (AC-27.21, AC-27.22)', () => {
+  /**
+   * A rate-limiter binding stub. When the Worker invokes
+   * `env.RATE_LIMITER.limit({ key })`, the stub returns success/failure
+   * deterministically based on the per-key counter it tracks.
+   */
+  function makeRateLimiter(limit: number) {
+    const counts = new Map<string, number>();
+    return {
+      async limit({ key }: { key: string }): Promise<{ success: boolean }> {
+        const n = (counts.get(key) ?? 0) + 1;
+        counts.set(key, n);
+        return { success: n <= limit };
+      },
+      reset() {
+        counts.clear();
+      },
+    };
+  }
+
+  it('returns 429 with Retry-After when the limiter rejects (AC-27.21)', async () => {
+    const rl = makeRateLimiter(0); // reject every request
+    fakeUpstream = async () =>
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: rl as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.7',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(429);
+    expect(r.headers.get('Retry-After')).toBeTruthy();
+    expect(r.headers.get('Cache-Control')).toBe('no-store');
+    const body = await r.json();
+    expect(body.error).toBe('rate_limited');
+  });
+
+  it('does not consume the rate-limit budget for a missing-Origin request (AC-27.22)', async () => {
+    const rl = makeRateLimiter(1);
+    let seen = 0;
+    const wrap = {
+      async limit(arg: { key: string }) {
+        seen++;
+        return rl.limit(arg);
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: wrap as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360'),
+      env,
+      makeFakeCache(),
+    );
+    // 403 from the origin guard
+    expect(r.status).toBe(403);
+    // Budget untouched — the limiter must not have been called.
+    expect(seen).toBe(0);
+  });
+
+  it('does not consume the rate-limit budget for an unknown /api/<foo> route (AC-27.22)', async () => {
+    let seen = 0;
+    const rl = {
+      async limit({ key: _k }: { key: string }) {
+        seen++;
+        return { success: true };
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: rl as any });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/bogus/x', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.8',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(404);
+    expect(seen).toBe(0);
+  });
+
+  it('does consume the rate-limit budget for a valid allowed-origin GET (AC-27.21)', async () => {
+    const rl = makeRateLimiter(100);
+    let seen = 0;
+    const wrap = {
+      async limit(arg: { key: string }) {
+        seen++;
+        return rl.limit(arg);
+      },
+    };
+    fakeUpstream = async () =>
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const env = makeEnv({ RATE_LIMITER: wrap as any });
+    await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: {
+          Origin: 'https://trackukraine.com',
+          'CF-Connecting-IP': '203.0.113.9',
+        },
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(seen).toBe(1);
+  });
+
+  it('is fail-open when RATE_LIMITER binding is absent (tests/local without the binding)', async () => {
+    // If no binding is present, the Worker must still serve requests — otherwise
+    // local `vitest` runs and any future consumer that hasn't wired the binding
+    // would break. The zone-level limit still applies in prod regardless.
+    fakeUpstream = async () =>
+      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/congress/v3/member/A000360', {
+        headers: { Origin: 'https://trackukraine.com' },
+      }),
+      makeEnv(), // RATE_LIMITER not set
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(200);
+  });
+});
+
 afterAll(() => {
   globalThis.fetch = originalFetch;
 });

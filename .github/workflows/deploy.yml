@@ -90,10 +90,24 @@ jobs:
       - name: Build widget bundle
         run: npm run build:lib
 
+      - name: Compute SRI hash (AC-26.9)
+        run: npm run build:sri
+
+      - name: Stage static assets into ./dist for Worker Sites (AC-26.11)
+        run: |
+          # Worker Sites ships whatever's in ./dist; curated JSON lives under
+          # src/data/ so Vite can bundle it for the client. Copy both to
+          # ./dist so `/ukraineBills.json` and `/ukraineVotes.json` exist on
+          # the deployed hostname.
+          cp src/data/ukraineBills.json dist/
+          cp src/data/ukraineVotes.json dist/
+
       - name: Check build outputs
         run: |
-          test -f dist/voter-info-widget.iife.js || (echo "widget bundle missing" && exit 1)
-          test -f src/data/ukraineBills.json     || (echo "ukraineBills.json missing" && exit 1)
+          test -f dist/voter-info-widget.iife.js     || (echo "widget bundle missing" && exit 1)
+          test -f dist/voter-info-widget.iife.js.sri || (echo "SRI sidecar missing" && exit 1)
+          test -f dist/ukraineBills.json             || (echo "ukraineBills.json missing in dist/" && exit 1)
+          test -f dist/ukraineVotes.json             || (echo "ukraineVotes.json missing in dist/" && exit 1)
 
       - name: Publish atomic records to KV
         env:

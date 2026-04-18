@@ -30,6 +30,14 @@ export interface KVLike {
   delete(key: string): Promise<void>;
 }
 
+/**
+ * Minimal Cloudflare Workers Rate Limiting API surface (AC-27.21).
+ * Fail-open if the binding is absent — tests and local wrangler-dev.
+ */
+export interface RateLimiterLike {
+  limit(args: { key: string }): Promise<{ success: boolean }>;
+}
+
 export interface ProxyEnv {
   /** Congress.gov API key. Injected into /api/congress/v3/* upstream requests. */
   CONGRESS_API_KEY: string;
@@ -60,6 +68,12 @@ export interface ProxyEnv {
    * for unknown paths so assets serve after Worker route matching fails.
    */
   ASSETS?: { fetch: (req: Request) => Promise<Response> };
+  /**
+   * Rate limiter binding (AC-27.21). Absent in tests and local dev — the
+   * Worker fail-opens when this is undefined (the zone-level limit in
+   * AC-28.3 still applies in prod regardless). See ADR-010.
+   */
+  RATE_LIMITER?: RateLimiterLike;
 }
 
 interface ApiRouteRule {
@@ -71,6 +85,12 @@ interface ApiRouteRule {
   cacheControl: string;
   /** Pinned upstream Accept header (AC-27.11). Server-side pinned, never from client. */
   upstreamAccept: string;
+  /**
+   * Query parameters we will forward to upstream (AC-27.20). Unknown params
+   * are dropped before building the upstream URL and before computing the
+   * cache key. An empty list means "drop all".
+   */
+  allowedQueryParams: readonly string[];
 }
 
 const API_ROUTES: ApiRouteRule[] = [
@@ -81,6 +101,17 @@ const API_ROUTES: ApiRouteRule[] = [
     injectKey: false,
     cacheControl: 'public, s-maxage=86400, max-age=3600',
     upstreamAccept: 'application/json',
+    allowedQueryParams: [
+      'address',
+      'street',
+      'city',
+      'state',
+      'zip',
+      'benchmark',
+      'vintage',
+      'layers',
+      'format',
+    ],
   },
   {
     prefix: '/api/senate/',
@@ -89,6 +120,7 @@ const API_ROUTES: ApiRouteRule[] = [
     injectKey: false,
     cacheControl: 'public, s-maxage=31536000, max-age=31536000, immutable',
     upstreamAccept: 'application/xml, text/xml, */*;q=0.1',
+    allowedQueryParams: [],
   },
   {
     prefix: '/api/congress/',
@@ -97,6 +129,17 @@ const API_ROUTES: ApiRouteRule[] = [
     injectKey: true,
     cacheControl: 'public, s-maxage=3600, max-age=300',
     upstreamAccept: 'application/json',
+    allowedQueryParams: [
+      'limit',
+      'offset',
+      'format',
+      'fromDateTime',
+      'toDateTime',
+      'sort',
+      'chamber',
+      'congress',
+      'currentMember',
+    ],
   },
 ];
 
@@ -298,10 +341,13 @@ const FINGERPRINT_HEADER_PREFIXES = [
   'x-correlation-id',
   'x-trace-id',
   'x-b3-',
+  // AC-27.16: upstream quota-state leak.
+  'x-ratelimit-',
+  // AC-27.17: Worker is the sole authority on CORS response headers.
+  'access-control-',
 ];
 const FINGERPRINT_HEADERS_EXACT = new Set([
   'set-cookie',
-  'access-control-allow-credentials',
   'server',
   'via',
   'link',
@@ -312,6 +358,10 @@ const FINGERPRINT_HEADERS_EXACT = new Set([
   'x-powered-by',
   'x-aspnet-version',
   'x-aspnetmvc-version',
+  // AC-27.16: upstream directive headers we never want to honor.
+  'clear-site-data',
+  'refresh',
+  'content-location',
 ]);
 
 /** Remove fingerprinting / sensitive upstream headers in place (AC-27.4). */
@@ -354,6 +404,82 @@ function corsHeaders(allowedOrigin: string | null): Record<string, string> {
   };
   if (allowedOrigin) base['Access-Control-Allow-Origin'] = allowedOrigin;
   return base;
+}
+
+/**
+ * Build the upstream URL for an API route (AC-27.20).
+ *
+ * The client's query-string is filtered against the route's allowlist,
+ * `api_key` is always stripped (AC-25.10 — set explicitly if the route
+ * needs it), and the remaining params are serialized in sorted order so
+ * the cache key is a function of meaningful inputs only. An attacker
+ * cannot fragment the cache by walking `&nonce=1..N`, because `nonce`
+ * is dropped before cache-key derivation.
+ */
+export function buildUpstreamUrl(
+  route: ApiRouteRule,
+  upstreamPath: string,
+  clientParams: URLSearchParams,
+): URL {
+  const u = new URL(`${route.target}/${upstreamPath}`);
+  const canonical = new URLSearchParams();
+  const allowed = new Set(route.allowedQueryParams);
+  const names = new Set<string>();
+  for (const name of clientParams.keys()) names.add(name);
+  for (const name of [...names].sort()) {
+    if (name === 'api_key') continue; // AC-25.10
+    if (!allowed.has(name)) continue; // AC-27.20
+    for (const v of clientParams.getAll(name)) canonical.append(name, v);
+  }
+  u.search = canonical.toString();
+  return u;
+}
+
+/**
+ * Derive a rate-limit key from the incoming request. Uses
+ * `CF-Connecting-IP` — Cloudflare's authoritative client-IP header — and
+ * falls back to a per-URL stub in tests so the limiter branch still
+ * exercises.
+ */
+function rateLimitKey(request: Request, url: URL): string {
+  const ip = request.headers.get('CF-Connecting-IP');
+  if (ip) return ip;
+  return `no-ip:${url.pathname}`;
+}
+
+/**
+ * Apply the AC-27.21 rate limit. Returns a `DispatchResult` to short-circuit
+ * with a 429, or `null` to continue processing. Fail-open if the binding is
+ * absent (AC-27.21 note) or if the binding itself errors — the zone-level
+ * limit (AC-28.3) still applies in prod.
+ */
+async function applyRateLimit(
+  request: Request,
+  url: URL,
+  env: ProxyEnv,
+  origin: string | null,
+): Promise<DispatchResult | null> {
+  if (!env.RATE_LIMITER) return null;
+  const key = rateLimitKey(request, url);
+  let result: { success: boolean };
+  try {
+    result = await env.RATE_LIMITER.limit({ key });
+  } catch {
+    return null;
+  }
+  if (result.success) return null;
+  return {
+    response: jsonResponse(
+      429,
+      { error: 'rate_limited', retry_after: 60 },
+      {
+        ...corsHeaders(origin),
+        'Retry-After': '60',
+        'Cache-Control': 'no-store',
+      },
+    ),
+    shape: 'worker-emitted',
+  };
 }
 
 function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
@@ -478,17 +604,21 @@ async function buildProfileFromUpstream(
   if (!env.CONGRESS_API_KEY) return null;
   const keyQS = `api_key=${env.CONGRESS_API_KEY}`;
 
+  // AC-27.18: 15 s timeout on each upstream fetch. Three parallel requests —
+  // a slow upstream must not tie up Worker concurrency until Cloudflare's
+  // 30 s platform limit cuts it.
   const [detailRes, sponsoredRes, cosponsoredRes] = await Promise.all([
     fetch(`https://api.congress.gov/v3/member/${bioguideId}?format=json&${keyQS}`, {
       headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
     }),
     fetch(
       `https://api.congress.gov/v3/member/${bioguideId}/sponsored-legislation?limit=250&format=json&${keyQS}`,
-      { headers: { Accept: 'application/json' } },
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
     ),
     fetch(
       `https://api.congress.gov/v3/member/${bioguideId}/cosponsored-legislation?limit=250&format=json&${keyQS}`,
-      { headers: { Accept: 'application/json' } },
+      { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000) },
     ),
   ]);
 
@@ -850,11 +980,16 @@ async function handleApi(
     };
   }
 
-  const upstreamUrl = new URL(`${route.target}/${upstreamPath}`);
-  upstreamUrl.search = url.search;
+  // AC-27.21 + AC-27.22: rate-limit AFTER cheap rejections (origin/route/
+  // path/method) and BEFORE the expensive upstream fetch. No budget spent
+  // on cheap rejects.
+  const rlResult = await applyRateLimit(request, url, env, origin);
+  if (rlResult) return rlResult;
 
-  // AC-25.10: strip client-supplied api_key before maybe overwriting.
-  upstreamUrl.searchParams.delete('api_key');
+  // AC-27.20: build upstream URL with an allowlist of query params.
+  // Unknown params are dropped before forwarding and before cache-key
+  // derivation. Allowed params are sorted for a canonical form.
+  const upstreamUrl = buildUpstreamUrl(route, upstreamPath, url.searchParams);
 
   if (route.injectKey) {
     if (!env.CONGRESS_API_KEY) {
@@ -883,22 +1018,26 @@ async function handleApi(
   if (!upstreamResponse) {
     try {
       // AC-27.11: pin upstream Accept server-side. Never forward client Accept.
-      // This makes the cache key semantically complete without including
-      // Accept, and prevents an attacker from poisoning the shared cache by
-      // requesting HTML for a URL that legitimate clients request as JSON.
+      // AC-27.18: 15 s upstream fetch timeout. Without this, a slow upstream
+      // ties up Worker concurrency until Cloudflare's 30 s platform limit.
       upstreamResponse = await fetch(upstreamUrl.toString(), {
         method: 'GET',
         headers: {
           Accept: route.upstreamAccept,
-          'User-Agent': 'voter-info-widget-proxy/2.4',
+          'User-Agent': 'voter-info-widget-proxy/2.5.1',
         },
+        signal: AbortSignal.timeout(15_000),
       });
-    } catch {
+    } catch (err) {
+      const isTimeout = err instanceof DOMException && err.name === 'AbortError';
       return {
         response: jsonResponse(
-          502,
-          { error: 'upstream_unreachable', upstream: route.upstreamName },
-          corsHeaders(origin),
+          isTimeout ? 504 : 502,
+          {
+            error: isTimeout ? 'upstream_timeout' : 'upstream_unreachable',
+            upstream: route.upstreamName,
+          },
+          { ...corsHeaders(origin), 'Cache-Control': 'no-store' },
         ),
         shape: 'worker-emitted',
       };

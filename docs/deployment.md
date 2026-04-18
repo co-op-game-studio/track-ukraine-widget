@@ -88,38 +88,65 @@ Add Custom Domain → `vote.cogs.it.com`**.
 
 Cloudflare handles the TLS cert automatically.
 
-### 5. Upload the static assets to R2
+### 5. Ship the static assets with the Worker (Worker Sites)
 
-These are built artifacts; CI normally does it, but the first deploy may be
-manual:
+As of ADR-011, static assets are served via **Worker Sites** — the
+`[assets]` binding in `wrangler.toml` points at `./dist`, and
+`wrangler deploy` ships every file under that directory with the Worker
+itself. There is no separate R2 upload step for static content. Member /
+bill / roll-call data lives in KV; see `scripts/publish-to-kv.ts`.
+
+All four assets must be present in `./dist` before `wrangler deploy`:
+the bundle, its SRI sidecar, and the two Ukraine datasets
+(FR-26 AC-26.9, AC-26.11).
 
 ```bash
 npm ci
-npm run build:lib
-npm run curate    # refreshes ukraineBills.json + ukraineVotes.json
+npm run build:lib             # writes dist/voter-info-widget.iife.js
+npm run build:sri             # writes dist/voter-info-widget.iife.js.sri (AC-26.9)
+npm run curate                # writes src/data/ukraineBills.json + ukraineVotes.json
 
-npx wrangler r2 object put voter-info-widget-assets/voter-info-widget.iife.js \
-  --file dist/voter-info-widget.iife.js \
-  --content-type "application/javascript; charset=utf-8"
+# The curated JSON lives under src/data/ so Vite can bundle it; Worker
+# Sites needs the copies under ./dist. The deploy workflow copies them
+# automatically (`.github/workflows/deploy.yml`); for manual deploys,
+# copy them yourself:
+cp src/data/ukraineBills.json dist/
+cp src/data/ukraineVotes.json dist/
 
-npx wrangler r2 object put voter-info-widget-assets/ukraineBills.json \
-  --file src/data/ukraineBills.json \
-  --content-type "application/json; charset=utf-8"
-
-npx wrangler r2 object put voter-info-widget-assets/ukraineVotes.json \
-  --file src/data/ukraineVotes.json \
-  --content-type "application/json; charset=utf-8"
+npx wrangler deploy           # ships ./dist + the Worker together
 ```
 
-Smoke test:
+Smoke test (AC-26.11 — every asset SHALL return 200):
 ```bash
-curl -I https://vote.cogs.it.com/voter-info-widget.iife.js
-# → 200, application/javascript
+for key in voter-info-widget.iife.js voter-info-widget.iife.js.sri ukraineBills.json ukraineVotes.json; do
+  code=$(curl -o /dev/null -s -w "%{http_code}" "https://vote.cogs.it.com/$key")
+  echo "$code  /$key"
+done
+# → 200  /voter-info-widget.iife.js
+#   200  /voter-info-widget.iife.js.sri
+#   200  /ukraineBills.json
+#   200  /ukraineVotes.json
+
+# AC-26.12: confirm the Worker deploy is the authority for the bundle
+# response (not a Pages binding or a direct R2 public URL).
+curl -I https://vote.cogs.it.com/voter-info-widget.iife.js | grep -iE "content-type|strict-transport-security|cross-origin-resource-policy"
+# Expect:
+#   Content-Type: application/javascript; charset=utf-8   (or text/javascript from CF)
+#   Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+#   Cross-Origin-Resource-Policy: cross-origin
 
 curl "https://vote.cogs.it.com/api/census/geocoder/geographies/onelineaddress?address=1600+Pennsylvania+Ave+NW+Washington+DC+20500&benchmark=Public_AR_Current&vintage=Current_Current&format=json" \
   -H "Origin: https://trackukraine.com"
 # → 200 JSON with CORS headers set to trackukraine.com
 ```
+
+**If the static-asset smoke test does not return the Worker's security
+header baseline**, something else in the Cloudflare account is serving
+`/voter-info-widget.iife.js` instead of the Worker. Common culprits: a
+leftover Pages project bound to the same hostname, a Transform Rule
+overriding the response, or a stale R2 public-bucket custom domain.
+Resolve by removing the conflicting binding — the Worker deploy is the
+single authority per AC-26.12.
 
 ### 6. GitHub Actions secrets
 
@@ -189,12 +216,59 @@ git push
 
 ### Rotate the Congress.gov API key
 
-```bash
-echo "NEW_KEY" | npx wrangler secret put CONGRESS_API_KEY
-gh secret set CONGRESS_API_KEY --body "NEW_KEY"
-```
+See FR-31 AC-31.3. The key-holder is the only person who can regenerate
+the key at api.congress.gov — the rotation procedure below is deliberately
+step-by-step because a botched rotation means either (a) the widget is down
+until the next deploy, or (b) the old key is still live somewhere and can be
+used to drain quota. Both are bad, in different ways.
 
-Widget doesn't need redeployment — the key only lives server-side in the Worker.
+**Operator prerequisites:** login to api.congress.gov with the account that
+owns the current key; `wrangler` authenticated as a Cloudflare user with
+Worker-secret-write access; `gh` authenticated against this repo.
+
+1. **Generate a new key** at https://api.congress.gov/sign-up (regenerate — do
+   not create a second account). Note it once; it is not retrievable later.
+2. **Rotate the prod Worker secret** — apply per env that holds prod-grade
+   traffic:
+   ```bash
+   echo "NEW_KEY" | npx wrangler secret put CONGRESS_API_KEY
+   echo "NEW_KEY" | npx wrangler secret put CONGRESS_API_KEY --env stg
+   ```
+   The dev/uat envs SHOULD use a distinct key from prod — see step 5.
+3. **Rotate the GitHub Actions secret** (used by the weekly data-refresh job,
+   NOT by the Worker — the Worker reads from the Cloudflare secret store):
+   ```bash
+   gh secret set CONGRESS_API_KEY --body "NEW_KEY"
+   ```
+4. **Verify the new key is live** on each env — `X-Proxy-Cache: MISS` on the
+   first call proves it reached Congress.gov:
+   ```bash
+   curl -i -H "Origin: https://trackukraine.com" \
+     "https://vote.cogs.it.com/api/congress/v3/bill?limit=1&nonce=rotate-$(date +%s)"
+   # Expect: 200, `X-Proxy-Cache: MISS` on this request, 200 again on immediate retry with HIT.
+   ```
+5. **Dev key hygiene** — the local `.env` file SHOULD NOT contain the prod key
+   (AC-31.3). Generate a *second* Congress.gov key (a second account, or ask
+   Congress.gov support for a dev-scoped key) and put only that in `.env`:
+   ```bash
+   # voter-info-widget/.env
+   VITE_CONGRESS_API_KEY=DEV_KEY_NOT_PROD
+   ```
+   Verify no occurrence of the old prod key remains anywhere:
+   ```bash
+   cd voter-info-widget
+   grep -r "OLD_PROD_KEY" . --exclude-dir node_modules --exclude-dir dist 2>/dev/null
+   # Expect: no output.
+   ```
+6. **Revoke the old key** at api.congress.gov (there's a "revoke" button next
+   to each key). Do this AFTER the new key is confirmed live — otherwise the
+   window between new-key-deployed and old-key-revoked is where production
+   would break.
+
+Widget bundle does not need redeployment — the key only lives server-side in
+the Worker. The dev key never enters the bundle (AC-26.8 guards React against
+`process.env` leaks but the key specifically is read only by dev scripts
+like `scripts/build-vote-rosters.ts`).
 
 ### Invalidate the edge cache
 
@@ -255,20 +329,45 @@ the inline comment.
 **Verify**: `curl -A "python-requests/2.31" https://vote.cogs.it.com/` —
 should get a challenge page. Legitimate browser UAs should pass through.
 
-### 3. [USER ONLY] Rate Limiting on /api/* (AC-28.3)
+### 3. [USER ONLY] Rate Limiting on /api/* (AC-28.3, revised v2.5.1)
+
+Layered with the in-Worker per-IP limit (AC-27.21) wired via wrangler.toml
+— this zone rule is the blunt volumetric first line. Per env:
+
+| Env | Hostname | Rate |
+|-----|----------|------|
+| prod | vote.cogs.it.com | **20 req / 60 s / IP** |
+| stg | stg.vote.cogs.it.com | 20 req / 60 s / IP |
+| uat | uat.vote.cogs.it.com | 120 req / 60 s / IP |
+| dev | dev.vote.cogs.it.com | 1200 req / 60 s / IP |
+
+Create one rule per hostname so the thresholds can differ.
 
 1. Dashboard → zone → **Security → WAF → Rate limiting rules → Create rule**.
-2. **Rule name**: `api-rate-limit`.
-3. **If incoming requests match**: `(http.host wildcard "*vote.cogs.it.com"
+2. **Rule name**: `api-rate-limit-prod`.
+3. **If incoming requests match**: `(http.host eq "vote.cogs.it.com"
    and starts_with(http.request.uri.path, "/api/"))`.
 4. **Characteristics**: `IP source address` (default).
-5. **Rate**: `100 requests per 1 minute`.
+5. **Rate**: `20 requests per 1 minute`.
 6. **Then take action**: `Block` for `10 minutes`.
-7. Save & Deploy.
+7. Save & Deploy. Repeat for the three non-prod hostnames with the rates in
+   the table above.
 
-**Verify**: `for i in {1..150}; do curl -o /dev/null -s -w "%{http_code}\n"
--H "Origin: https://trackukraine.com" "https://vote.cogs.it.com/api/census/geocoder/x?benchmark=Public_AR_Current&vintage=Current_Current&format=json"; done`
-— request ~101 should return 429.
+**Why 20/min/IP in prod**: the widget's intended use is **one address lookup
+per visitor**, which fans out to roughly 7 upstream calls after the edge
+cache warms. 20 gives ~2.5× headroom over a single legitimate burst and
+catches diverse-IP attackers earlier than the previous 100/min threshold.
+See ADR-010 for the full rationale.
+
+**Verify prod**: `for i in {1..30}; do curl -o /dev/null -s -w "%{http_code}\n"
+-H "Origin: https://trackukraine.com" "https://vote.cogs.it.com/api/census/geocoder/x?benchmark=Public_AR_Current&vintage=Current_Current&format=json&nonce=$i"; done`
+— request ~21 should return 429.
+
+**In-Worker rate limit binding** (AC-27.21): already declared per-env in
+`wrangler.toml` as `[[unsafe.bindings]] type = "ratelimit"`. Each env has a
+distinct `namespace_id` (1001 = prod, 1002 = dev, 1003 = uat, 1004 = stg,
+1005 = preview) so the buckets don't collide across envs. No dashboard work
+needed — the binding is deployed with the Worker via `wrangler deploy`.
 
 ### 4. [USER ONLY] Transform Rules — strip injected headers (AC-28.4)
 
