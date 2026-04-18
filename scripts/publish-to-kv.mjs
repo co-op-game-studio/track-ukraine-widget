@@ -136,15 +136,28 @@ for (const [rollCallKey, roster] of Object.entries(rosters)) {
   const rcMeta = rollCallRecords.get(rollCallId);
 
   for (const [memberKey, entry] of Object.entries(roster)) {
-    const bioguideId = chamber === 'House' ? memberKey : `S|${entry.last}|${entry.state ?? ''}`;
+    // House memberKey is bioguideId. Senate memberKey is "last|state".
+    let bioguideId;
+    let last;
+    let state;
+    if (chamber === 'House') {
+      bioguideId = memberKey;
+      last = entry.last ?? '';
+      state = entry.state ?? '';
+    } else {
+      const [senLast, senState] = memberKey.split('|');
+      last = entry.last ?? senLast ?? '';
+      state = entry.state ?? senState ?? '';
+      bioguideId = `S|${last}|${state}`;
+    }
     let m = memberRecords.get(bioguideId);
     if (!m) {
       m = {
         bioguideId,
         first: entry.first ?? '',
-        last: entry.last ?? '',
-        officialName: `${entry.first ?? ''} ${entry.last ?? ''}`.trim(),
-        state: entry.state ?? '',
+        last,
+        officialName: `${entry.first ?? ''} ${last}`.trim(),
+        state,
         district: chamber === 'House' ? null : null, // House district not in roster; out of scope for v1 cutover
         chamber,
         party: entry.party ?? '',
