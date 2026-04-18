@@ -1021,16 +1021,27 @@ async function dispatch(
     // authenticated or on localhost. Always render the preview — never redirect
     // to trackukraine.com on a lower env.
     if (env.PREVIEW_MODE === 'true') {
+      // Preview HTML loads the widget IIFE bundle from the same origin + needs
+      // inline style for the env-label styling. Relax CSP vs. the default
+      // worker-emitted baseline. Shape 'static-asset' skips the restrictive
+      // CSP in applySecurityHeaders (that branch sets CORP cross-origin only).
       return {
         response: new Response(buildPreviewHtml(env.ENV_NAME ?? 'non-prod'), {
           status: 200,
           headers: {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-store',
+            'Content-Security-Policy':
+              "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; " +
+              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+              "font-src 'self' https://fonts.gstatic.com; " +
+              "img-src 'self' data: https:; " +
+              "connect-src 'self'; " +
+              "frame-ancestors 'none'; base-uri 'none'",
             'X-Preview-Mode': 'served',
           },
         }),
-        shape: 'worker-emitted',
+        shape: 'static-asset',
       };
     }
     // Prod only: bounce voters to the embed host.
