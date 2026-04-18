@@ -27,7 +27,7 @@ export function AddressInput({ onSubmit, disabled = false }: AddressInputProps) 
   return (
     <form className="viw-address-form" onSubmit={handleSubmit} noValidate>
       <label htmlFor="viw-address" className="viw-address-label">
-        Enter your home address
+        Enter your home address <span className="viw-address-label-hint">(street + state or ZIP required)</span>
       </label>
       <div className="viw-address-row">
         <input
