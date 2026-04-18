@@ -8,6 +8,7 @@ import type {
 } from '../types/api';
 import type { Representative } from '../types/domain';
 import { stateNameToCode, isTerritory } from '../utils/fipsMap';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 /** Heuristic: member is non-voting if they represent a territory */
 function isNonVotingDelegate(stateCode: string): boolean {
@@ -46,7 +47,7 @@ export function mapSummaryToRepresentative(
     state: stateCode,
     district: m.district,
     chamber,
-    photoUrl: m.depiction?.imageUrl ?? null,
+    photoUrl: sanitizeUrl(m.depiction?.imageUrl),
     isNonVoting: isNonVotingDelegate(stateCode) && chamber === 'house',
     officialWebsiteUrl: null, // only populated by the detail endpoint
   };
@@ -68,7 +69,8 @@ export function enrichWithMemberDetail(
     partyAbbreviation:
       (currentParty?.partyAbbreviation as Representative['partyAbbreviation']) ??
       base.partyAbbreviation,
-    photoUrl: detail.depiction?.imageUrl ?? base.photoUrl,
-    officialWebsiteUrl: detail.officialWebsiteUrl ?? base.officialWebsiteUrl ?? null,
+    photoUrl: sanitizeUrl(detail.depiction?.imageUrl) ?? base.photoUrl,
+    officialWebsiteUrl:
+      sanitizeUrl(detail.officialWebsiteUrl) ?? base.officialWebsiteUrl ?? null,
   };
 }

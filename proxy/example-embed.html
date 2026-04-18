@@ -19,9 +19,24 @@
     <voter-info-widget api-base="http://localhost:8787"></voter-info-widget>
 
     <!--
-      In production, replace this script src with the CDN URL where you host
-      dist/voter-info-widget.iife.js
+      Local development: this script tag loads the built bundle from the
+      sibling `dist/` directory. No SRI in local dev because the hash
+      changes on every `npm run build`.
     -->
     <script src="../dist/voter-info-widget.iife.js"></script>
+
+    <!--
+      Production embed snippet (FR-26 AC-26.10) — SRI-pinned form:
+
+        <script
+          src="https://vote.cogs.it.com/voter-info-widget.iife.js"
+          integrity="sha384-REPLACE_WITH_CURRENT_HASH"
+          crossorigin="anonymous"
+          async
+        ></script>
+
+      Fetch the current release hash from:
+        https://vote.cogs.it.com/voter-info-widget.iife.js.sri
+    -->
   </body>
 </html>

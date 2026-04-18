@@ -12,6 +12,7 @@ import type { NameSearchResult } from '../hooks/useNameSearch';
 import type { NameSearchStatus } from '../hooks/useNameSearch';
 import { MemberChip } from './MemberChip';
 import { RepDetail } from './RepDetail';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 function resultToRepresentative(r: NameSearchResult): Representative {
   return {
@@ -29,7 +30,9 @@ function resultToRepresentative(r: NameSearchResult): Representative {
     state: r.state,
     district: null,
     chamber: r.chamber.toLowerCase() as 'house' | 'senate',
-    photoUrl: r.photoUrl ?? null,
+    // AC-31.1: photoUrl from KV-backed name-search is sanitized at this
+    // boundary so MemberChip can trust the field.
+    photoUrl: sanitizeUrl(r.photoUrl),
     isNonVoting: false,
     officialWebsiteUrl: null,
   };

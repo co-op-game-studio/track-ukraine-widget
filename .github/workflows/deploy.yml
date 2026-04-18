@@ -90,10 +90,18 @@ jobs:
       - name: Build widget bundle
         run: npm run build:lib
 
+      - name: Compute SRI hash (AC-26.9)
+        run: npm run build:sri
+
       - name: Check build outputs
         run: |
-          test -f dist/voter-info-widget.iife.js || (echo "widget bundle missing" && exit 1)
-          test -f src/data/ukraineBills.json     || (echo "ukraineBills.json missing" && exit 1)
+          # Per ADR-011, ukraineBills.json is a build-time import (bundled
+          # into the IIFE by Vite, NOT a separately-fetched asset), and
+          # ukraineVotes.json was removed entirely — vote data lives in KV
+          # via publish-to-kv.ts. So Worker Sites only ships the bundle and
+          # its SRI sidecar; both must exist.
+          test -f dist/voter-info-widget.iife.js     || (echo "widget bundle missing" && exit 1)
+          test -f dist/voter-info-widget.iife.js.sri || (echo "SRI sidecar missing" && exit 1)
 
       - name: Publish atomic records to KV
         env:
@@ -163,6 +171,26 @@ jobs:
             -H "Origin: https://trackukraine.com" "$HOST/api/congress/admin")
           if [[ "$STATUS" != "400" ]]; then
             echo "::error::Non-v3 congress path returned $STATUS (expected 400)"; exit 1
+          fi
+
+          # 5. AC-26.11 — bundle + SRI sidecar MUST return 200. Curated
+          #    JSON is bundled into the IIFE at build time (ukraineBills.json)
+          #    or moved to KV (ukraineVotes.json) per ADR-011; neither is a
+          #    separately-fetched Worker Sites asset anymore.
+          for key in voter-info-widget.iife.js voter-info-widget.iife.js.sri; do
+            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${AUTH_HEADERS[@]}" "$HOST/$key")
+            if [[ "$STATUS" != "200" ]]; then
+              echo "::error::Static asset /$key returned $STATUS (expected 200) — deploy is missing this file"; exit 1
+            fi
+          done
+
+          # 6. AC-26.12 — the bundle response MUST pass through the Worker's
+          #    applySecurityHeaders baseline (HSTS is the canonical marker).
+          #    If STS is missing, something else in CF is shadowing /voter-info-widget.iife.js
+          #    (Pages binding, Transform Rule, stale R2 public URL) and AC-26.12 is violated.
+          STS=$(curl -sS -I "${AUTH_HEADERS[@]}" "$HOST/voter-info-widget.iife.js" | tr -d '\r' | grep -i '^strict-transport-security:' || true)
+          if [[ -z "$STS" ]]; then
+            echo "::error::Bundle response is missing Strict-Transport-Security — a non-Worker serving path is shadowing /voter-info-widget.iife.js (AC-26.12)"; exit 1
           fi
 
           echo "Smoke passed for $ENV_NAME @ $HOST"
