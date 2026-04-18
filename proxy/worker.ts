@@ -20,8 +20,9 @@
 
 import { handleFetch, type ProxyEnv } from './lib';
 
-type Env = Omit<ProxyEnv, 'KV_VOTER_INFO'> & {
+type Env = Omit<ProxyEnv, 'KV_VOTER_INFO' | 'ASSETS'> & {
   KV_VOTER_INFO: KVNamespace;
+  ASSETS: Fetcher;
 };
 
 export default {
