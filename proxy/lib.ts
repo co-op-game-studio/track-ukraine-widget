@@ -43,6 +43,15 @@ export interface ProxyEnv {
    * origins. Any other value (including unset) denies localhost. See AC-25.9.
    */
   ALLOW_LOCALHOST?: string;
+  /**
+   * When exactly "true", the Worker serves a preview HTML page at / instead of
+   * 301-redirecting to trackukraine.com. Enabled on dev/uat/stg for "open in
+   * browser to see the widget live". Prod omits this so voters still land on
+   * the embed host.
+   */
+  PREVIEW_MODE?: string;
+  /** Short env label (dev/uat/stg/prod) shown in preview HTML for orientation. */
+  ENV_NAME?: string;
   /** KV namespace for curator records (member:, bill:, roll-call:, name-index:) + response cache (cache:). */
   KV_VOTER_INFO: KVLike;
 }
@@ -995,9 +1004,24 @@ async function dispatch(
     return handleApi(request, url, env, origin, allowedOrigins, allowLocalhost, cache);
   }
 
-  // 3. Browser navigation to an unowned path → bounce to the host site.
+  // 3. Browser navigation.
+  //    - PREVIEW_MODE (dev/uat/stg) at root path "/": serve a preview page
+  //      that renders the widget live.
+  //    - Any other text/html GET: 301 → trackukraine.com.
   const accept = request.headers.get('Accept') ?? '';
   if (request.method === 'GET' && accept.includes('text/html')) {
+    if (env.PREVIEW_MODE === 'true' && url.pathname === '/') {
+      return {
+        response: new Response(buildPreviewHtml(env.ENV_NAME ?? 'non-prod'), {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/html; charset=utf-8',
+            'Cache-Control': 'no-store',
+          },
+        }),
+        shape: 'worker-emitted',
+      };
+    }
     return {
       response: Response.redirect('https://trackukraine.com/', 301),
       shape: 'worker-emitted',
@@ -1006,4 +1030,32 @@ async function dispatch(
 
   // 4. Anything else — 404.
   return { response: new Response('Not Found', { status: 404 }), shape: 'worker-emitted' };
+}
+
+function buildPreviewHtml(envName: string): string {
+  // Self-contained preview — loads the IIFE bundle from the same origin and
+  // renders the widget. Hostname becomes the api-base so all /api/* calls hit
+  // this same Worker.
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Voter Info Widget — ${envName}</title>
+    <style>
+      html, body { margin: 0; padding: 0; min-height: 100vh; }
+      body { background: #00b4e6; font-family: "Hanken Grotesk", system-ui, sans-serif; }
+      .viw-env-label {
+        position: fixed; top: 8px; right: 8px;
+        background: #000; color: #ffd400; padding: 6px 10px; border-radius: 4px;
+        font-family: monospace; font-size: 12px; border: 2px solid #ffd400; z-index: 9999;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="viw-env-label">ENV: ${envName}</div>
+    <voter-info-widget api-base=""></voter-info-widget>
+    <script src="/voter-info-widget.iife.js" defer></script>
+  </body>
+</html>`;
 }
