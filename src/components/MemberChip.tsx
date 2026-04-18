@@ -22,6 +22,7 @@ function partyCssClass(abbr: string): string {
 function subtitle(rep: Representative): string {
   if (rep.chamber === 'senate') return 'U.S. Senator';
   if (rep.isNonVoting) return 'Delegate (non-voting)';
+  if (rep.district == null) return 'U.S. Representative';
   return `District ${rep.district}`;
 }
 

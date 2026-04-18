@@ -33,6 +33,7 @@ function partyCssClass(abbr: string): string {
 function chamberLabel(rep: Representative): string {
   if (rep.chamber === 'senate') return 'U.S. Senator';
   if (rep.isNonVoting) return 'U.S. Delegate (non-voting)';
+  if (rep.district == null) return 'U.S. Representative';
   return `U.S. Representative · District ${rep.district}`;
 }
 

@@ -1,9 +1,9 @@
 /**
- * Sponsored Bills Integration Tests (v2 — Ukraine-filtered)
+ * Sponsored Bills Integration Tests (v3 — KV-profile-backed)
  * Traces to: FR-7, FR-11, US-4
  *
  * Verifies the hook:
- *   - scans sponsored/cosponsored lists
+ *   - reads sponsored/cosponsored from /api/members/{bioguideId}
  *   - keeps only entries in the curated Ukraine set
  *   - drops amendments (D-6) and other non-matching entries
  *   - marks featured entries
@@ -12,10 +12,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useSponsoredBills } from '../../src/hooks/useSponsoredBills';
 
-// Build fixtures that include a mix of Ukraine bills and non-Ukraine bills
-// plus an amendment. The hook should keep only the Ukraine ones.
-const sponsored = {
-  sponsoredLegislation: [
+// The KV-backed member profile carries sponsored/cosponsored arrays
+// (same CongressLegislationRawEntry shape the hook consumed before).
+const profile = {
+  bioguideId: 'D000563',
+  sponsored: [
     // Ukraine, FEATURED: H.R. 7691 (117) — $40B supplemental
     {
       congress: 117,
@@ -46,11 +47,7 @@ const sponsored = {
       url: 'https://api.congress.gov/v3/amendment/114/samdt/4855',
     },
   ],
-  pagination: { count: 3 },
-};
-
-const cosponsored = {
-  cosponsoredLegislation: [
+  cosponsored: [
     // Ukraine, non-featured: H.R. 6833 (117) — FY23 CR with Ukraine supplemental
     {
       congress: 117,
@@ -72,26 +69,23 @@ const cosponsored = {
       url: '',
     },
   ],
-  pagination: { count: 2 },
 };
 
-function routeFetch(routes: Array<{ match: (u: string) => boolean; body: unknown }>) {
+function mockProfile(body: unknown, status = 200) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = typeof input === 'string' ? input : (input as Request).url;
-    const route = routes.find((r) => r.match(url));
-    if (!route) return new Response('miss', { status: 500 });
-    return new Response(JSON.stringify(route.body), { status: 200 });
+    if (url.includes('/api/members/')) {
+      return new Response(JSON.stringify(body), { status });
+    }
+    return new Response('miss', { status: 500 });
   });
 }
 
-describe('useSponsoredBills (Ukraine-filtered, v2)', () => {
+describe('useSponsoredBills (Ukraine-filtered, v3)', () => {
   beforeEach(() => vi.restoreAllMocks());
 
   it('keeps only curated Ukraine bills and drops everything else', async () => {
-    routeFetch([
-      { match: (u) => u.includes('/sponsored-legislation'), body: sponsored },
-      { match: (u) => u.includes('/cosponsored-legislation'), body: cosponsored },
-    ]);
+    mockProfile(profile);
 
     const { result } = renderHook(() => useSponsoredBills('D000563', ''));
     await act(async () => {
@@ -113,19 +107,16 @@ describe('useSponsoredBills (Ukraine-filtered, v2)', () => {
   });
 
   it('D-6: drops amendments (type: null) without crashing', async () => {
-    // Regression for the Lankford crash. A raw list with ONLY amendments should
-    // succeed and return empty arrays.
-    const onlyAmendments = {
-      sponsoredLegislation: [
+    // Regression for the Lankford crash. A profile whose sponsored list
+    // contains only amendments should succeed and return empty arrays.
+    mockProfile({
+      bioguideId: 'L000575',
+      sponsored: [
         { amendmentNumber: '4855', congress: 114, introducedDate: '2016-06-22', latestAction: null, type: null, url: '' },
         { amendmentNumber: '4739', congress: 114, introducedDate: '2016-06-16', latestAction: null, type: null, url: '' },
       ],
-      pagination: { count: 2 },
-    };
-    routeFetch([
-      { match: (u) => u.includes('/sponsored-legislation'), body: onlyAmendments },
-      { match: (u) => u.includes('/cosponsored-legislation'), body: { cosponsoredLegislation: [], pagination: { count: 0 } } },
-    ]);
+      cosponsored: [],
+    });
 
     const { result } = renderHook(() => useSponsoredBills('L000575', ''));
     await act(async () => {
