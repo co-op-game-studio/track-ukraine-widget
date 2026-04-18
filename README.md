@@ -27,12 +27,45 @@ references our embed snippet; nothing on their infrastructure changes.
 
 ### The embed snippet
 
+Pinned with Subresource Integrity — the recommended form (FR-26 AC-26.10):
+
 ```html
-<script src="https://vote.cogs.it.com/voter-info-widget.iife.js"></script>
+<script
+  src="https://vote.cogs.it.com/voter-info-widget.iife.js"
+  integrity="sha384-REPLACE_WITH_CURRENT_HASH"
+  crossorigin="anonymous"
+  async
+></script>
 <voter-info-widget api-base="https://vote.cogs.it.com"></voter-info-widget>
 ```
 
-Two lines. Both go into a Fourthwall custom-HTML section. The widget
+Replace `sha384-REPLACE_WITH_CURRENT_HASH` with the current release's hash.
+Fetch the current hash from `https://vote.cogs.it.com/voter-info-widget.iife.js.sri`
+(published alongside the bundle by the deploy workflow — FR-26 AC-26.9).
+
+The SRI hash changes on every widget release. An integrator who automates the
+fetch (e.g., a build step that pulls the hash at deploy time) stays pinned
+across releases. An integrator who hardcodes the hash will see the widget fail
+to load (browser blocks the script on hash mismatch) after the next deploy
+until they update the hash — this is the **correct** behavior: a silent
+auto-update would defeat the point of SRI.
+
+The bundle response carries `Access-Control-Allow-Origin: *` so
+`crossorigin="anonymous"` works (FR-27 AC-27.1b).
+
+**Unpinned (not recommended):**
+
+```html
+<script src="https://vote.cogs.it.com/voter-info-widget.iife.js" async></script>
+<voter-info-widget api-base="https://vote.cogs.it.com"></voter-info-widget>
+```
+
+Without `integrity=`, an integrator inherits the full trust chain of the
+widget's deploy pipeline — a Cloudflare account compromise or a deploy mistake
+means arbitrary JS executes in the `trackukraine.com` origin. SRI is the only
+mitigation a third-party embedder can apply.
+
+Either way: both lines go into a Fourthwall custom-HTML section. The widget
 self-mounts when the browser reaches it.
 
 `vote.cogs.it.com` is a single Cloudflare Worker domain serving:
