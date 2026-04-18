@@ -1,9 +1,11 @@
 /**
- * Address Lookup Integration Tests
- * Traces to: FR-1, FR-2, FR-3, FR-4, US-1
+ * Address Lookup Integration Tests (v2.5.2 — ADR-012).
  *
- * Tests the full address → Census → Congress.gov → Representative[] pipeline
- * via the useAddressLookup hook. Fetch is mocked; services are real.
+ * Tests the full address → Census → state-members → Representative[]
+ * pipeline via the useAddressLookup hook. Fetch is mocked; services
+ * are real.
+ *
+ * Traces to: FR-1, FR-2, FR-3, FR-4 (REVISED v2.5.2), US-1, FR-32 AC-32.16.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
@@ -39,70 +41,68 @@ const censusChicago = {
 
 const censusNoMatch = { result: { addressMatches: [] } };
 
-const houseRepIL7 = {
-  members: [
-    {
-      bioguideId: 'D000096',
-      name: 'Davis, Danny K.',
-      partyName: 'Democratic',
-      state: 'Illinois',
-      district: 7,
-      depiction: { imageUrl: 'https://www.congress.gov/img/member/d000096_200.jpg', attribution: '' },
-      terms: { item: [{ chamber: 'House of Representatives', startYear: 1997 }] },
-      updateDate: '2025-09-24',
-      url: 'https://api.congress.gov/v3/member/D000096',
-    },
-  ],
-  pagination: { count: 1 },
-  request: {},
-};
-
+/** AC-32.16 state-members:v1:IL record (as served by the Worker route). */
 const stateMembersIL = {
-  members: [
+  stateCode: 'IL',
+  senators: [
     {
       bioguideId: 'D000563',
-      name: 'Durbin, Richard J.',
-      partyName: 'Democratic',
-      state: 'Illinois',
+      first: 'Richard',
+      last: 'Durbin',
+      officialName: 'Richard Durbin',
+      state: 'IL',
       district: null,
-      terms: {
-        item: [
-          { chamber: 'House of Representatives', startYear: 1983, endYear: 1997 },
-          { chamber: 'Senate', startYear: 1997 },
-        ],
-      },
-      updateDate: '2026-03-08',
-      url: '',
+      chamber: 'Senate',
+      party: 'D',
+      photoUrl: 'https://www.congress.gov/img/member/d000563_200.jpg',
+      website: 'https://www.durbin.senate.gov',
     },
     {
       bioguideId: 'D000622',
-      name: 'Duckworth, Tammy',
-      partyName: 'Democratic',
-      state: 'Illinois',
+      first: 'Tammy',
+      last: 'Duckworth',
+      officialName: 'Tammy Duckworth',
+      state: 'IL',
       district: null,
-      terms: { item: [{ chamber: 'Senate', startYear: 2017 }] },
-      updateDate: '2026-03-08',
-      url: '',
-    },
-    // House reps are also present in the state-wide response; hook should filter them out
-    {
-      bioguideId: 'D000096',
-      name: 'Davis, Danny K.',
-      partyName: 'Democratic',
-      state: 'Illinois',
-      district: 7,
-      terms: { item: [{ chamber: 'House of Representatives', startYear: 1997 }] },
-      updateDate: '2025-09-24',
-      url: '',
+      chamber: 'Senate',
+      party: 'D',
+      photoUrl: 'https://www.congress.gov/img/member/d000622_200.jpg',
+      website: 'https://www.duckworth.senate.gov',
     },
   ],
-  pagination: { count: 19 },
-  request: {},
+  house: [
+    {
+      bioguideId: 'J000309',
+      first: 'Jonathan',
+      last: 'Jackson',
+      officialName: 'Jonathan Jackson',
+      state: 'IL',
+      district: 1,
+      chamber: 'House',
+      party: 'D',
+      photoUrl: null,
+      website: null,
+    },
+    {
+      bioguideId: 'D000096',
+      first: 'Danny',
+      last: 'Davis',
+      officialName: 'Danny Davis',
+      state: 'IL',
+      district: 7,
+      chamber: 'House',
+      party: 'D',
+      photoUrl: 'https://www.congress.gov/img/member/d000096_200.jpg',
+      website: 'https://davis.house.gov',
+    },
+  ],
+  generatedAt: '2026-04-19T02:00:00Z',
+  schemaVersion: 1,
 };
 
 // ─── Mock fetch router ───
 
-type RouteMap = Array<{ match: (url: string) => boolean; body: unknown; isXml?: boolean }>;
+type RouteMap = Array<{ match: (url: string) => boolean; body: unknown; status?: number }>;
 
 function routeFetch(routes: RouteMap) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -111,27 +111,16 @@ function routeFetch(routes: RouteMap) {
     if (!route) {
       return new Response(`No mock for ${url}`, { status: 500 });
     }
-    if (route.isXml) {
-      return new Response(route.body as string, {
-        status: 200,
-        headers: { 'Content-Type': 'application/xml' },
-      });
-    }
     return new Response(JSON.stringify(route.body), {
-      status: 200,
+      status: route.status ?? 200,
       headers: { 'Content-Type': 'application/json' },
     });
   });
 }
 
-describe('useAddressLookup', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+describe('useAddressLookup (v2.5.2 — state-members KV)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => vi.restoreAllMocks());
 
   it('is idle initially with no data, no error, not loading', () => {
     const { result } = renderHook(() => useAddressLookup(''));
@@ -140,19 +129,16 @@ describe('useAddressLookup', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('resolves an address to state, district, 3 representatives (1 house + 2 senators)', async () => {
+  it('resolves an address to state, district, 3 representatives (2 senators + 1 house rep for district)', async () => {
     routeFetch([
       { match: (u) => u.includes('/api/census/'), body: censusChicago },
-      { match: (u) => /\/api\/congress\/v3\/member\/congress\/119\/IL\/7/.test(u), body: houseRepIL7 },
-      { match: (u) => /\/api\/congress\/v3\/member\/congress\/119\/IL(\?|$)/.test(u), body: stateMembersIL },
+      { match: (u) => u.includes('/api/state-members/IL'), body: stateMembersIL },
     ]);
 
     const { result } = renderHook(() => useAddressLookup(''));
-
     await act(async () => {
       await result.current.lookup('2000 S State St, Chicago, IL 60616');
     });
-
     await waitFor(() => expect(result.current.status).toBe('success'));
 
     expect(result.current.data).not.toBeNull();
@@ -165,72 +151,71 @@ describe('useAddressLookup', () => {
     expect(senators).toHaveLength(2);
     expect(houseReps).toHaveLength(1);
     expect(houseReps[0]!.district).toBe(7);
-    expect(houseReps[0]!.name).toBe('Davis, Danny K.');
+    expect(houseReps[0]!.bioguideId).toBe('D000096');
   });
 
   it('populates error state when Census returns no match', async () => {
-    routeFetch([
-      { match: (u) => u.includes('/api/census/'), body: censusNoMatch },
-    ]);
+    routeFetch([{ match: (u) => u.includes('/api/census/'), body: censusNoMatch }]);
 
     const { result } = renderHook(() => useAddressLookup(''));
-
     await act(async () => {
       await result.current.lookup('Fake Address').catch(() => {});
     });
-
     await waitFor(() => expect(result.current.status).toBe('error'));
     expect(result.current.error).toBeTruthy();
     expect(result.current.data).toBeNull();
   });
 
+  it('populates error state when state-members route returns 404', async () => {
+    routeFetch([
+      { match: (u) => u.includes('/api/census/'), body: censusChicago },
+      { match: (u) => u.includes('/api/state-members/IL'), body: { error: 'state_members_not_found' }, status: 404 },
+    ]);
+
+    const { result } = renderHook(() => useAddressLookup(''));
+    await act(async () => {
+      await result.current.lookup('2000 S State St, Chicago, IL 60616').catch(() => {});
+    });
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.error).toBeTruthy();
+  });
+
   it('enters loading state while the lookup is in flight', async () => {
     let resolveCensus!: (v: Response) => void;
-    const censusPromise = new Promise<Response>((r) => {
-      resolveCensus = r;
-    });
+    const censusPromise = new Promise<Response>((r) => { resolveCensus = r; });
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => censusPromise);
 
     const { result } = renderHook(() => useAddressLookup(''));
-
-    // Kick off the lookup but do NOT await it inside act — we want to observe
-    // the intermediate state
     let pending!: Promise<void>;
     act(() => {
       pending = result.current.lookup('test address').catch(() => {});
     });
-
-    // The hook sets loading synchronously inside the callback start
     await waitFor(() => expect(result.current.status).toBe('loading'));
-
-    // Finish the pending call with a no-match so the hook ends cleanly
-    resolveCensus(
-      new Response(JSON.stringify(censusNoMatch), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-    await act(async () => {
-      await pending;
-    });
+    resolveCensus(new Response(JSON.stringify(censusNoMatch), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    await act(async () => { await pending; });
   });
 
-  it('uses the apiBase passed in', async () => {
+  it('uses the apiBase passed in for both census and state-members calls', async () => {
     const fetchSpy = routeFetch([
       { match: (u) => u.includes('/api/census/'), body: censusChicago },
-      { match: (u) => u.includes('/api/congress/v3/member/congress/119/IL/7'), body: houseRepIL7 },
-      { match: (u) => u.includes('/api/congress/v3/member/congress/119/IL'), body: stateMembersIL },
+      { match: (u) => u.includes('/api/state-members/IL'), body: stateMembersIL },
     ]);
 
     const hook = renderHook(() => useAddressLookup('/proxy'));
     await act(async () => {
       await hook.result.current.lookup('2000 S State St, Chicago, IL 60616');
     });
-
     await waitFor(() => expect(hook.result.current.status).toBe('success'));
 
     const calledUrls = fetchSpy.mock.calls.map((c) => c[0] as string);
     expect(calledUrls.some((u) => u.startsWith('/proxy/api/census/'))).toBe(true);
-    expect(calledUrls.some((u) => u.startsWith('/proxy/api/congress/'))).toBe(true);
+    expect(calledUrls.some((u) => u.startsWith('/proxy/api/state-members/IL'))).toBe(true);
+    // AC-32.16 / T-042 invariant: no upstream congress/senate calls from
+    // this hook anymore.
+    expect(calledUrls.some((u) => /\/api\/congress\//.test(u))).toBe(false);
+    expect(calledUrls.some((u) => /\/api\/senate\//.test(u))).toBe(false);
   });
 });
