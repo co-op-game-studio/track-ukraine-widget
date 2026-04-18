@@ -289,21 +289,21 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 - AC-23.5: When a member has **≥ 3 abstentions on primary-weight votes** (weight ≥ 0.7), the Ukraine Support Score badge SHALL include a context note — e.g., "Abstained on 3 primary Ukraine votes" — flagging the pattern. Abstention on primary votes is a weak signal of disengagement; voters should see it.
 - AC-23.6: The `UkraineScore.total` count SHALL exclude Did-Not-Serve rows but INCLUDE real abstentions (so the "(N excluded: unstated, procedural, or neutral)" note in the badge accurately reflects abstentions the voter can see).
 
-### FR-24: Baked Vote Rosters (NEW v2.4.0)
+### FR-24: Baked Vote Rosters (REVISED v2.5.0 — see ADR-011)
 
-**Problem.** Opening a rep card currently fires **26–36 HTTP requests** — one for each curated roll-call vote (House members endpoint or Senate XML). Measured at concurrency 3 (our current setting), that's ~1.2 seconds per card. Even at concurrency 8 it's several hundred ms per card via the proxy. First-load performance is noticeably slow.
+**Problem.** Opening a rep card originally fired 26–36 HTTP requests per card (one per curated roll call). The v2.4.0 solution (bundled `ukraineVotes.json` blob on R2) fixed the upstream round-trip problem but introduced a new one: the widget pulled ~790KB on every cold boot to serve ~45 cast lookups per user (~99% waste). See ADR-011 for the full reasoning.
 
-Roll-call vote rosters are *immutable* — a 2022 vote's list of Aye/Nay voters never changes. We're doing live fetches of static historical data.
-
-**Solution.** The curator (`scripts/build-curated-bills.ts`) SHALL additionally fetch the roster of each curated vote at build time and write it to `src/data/ukraineVotes.json`. The widget's `useVotingRecord` hook SHALL read from this bundled JSON first. Runtime network fetches become a fallback only for cache misses (e.g., a brand-new vote referenced in the override YAML that the last curator run missed).
+**Solution (v2.5.0).** The curator SHALL emit **atomic per-member records** into KV (`member:v1:{bioguideId}` — see FR-32 for the storage model). Each member record includes the member's identity, their curated-roll-call votes (pre-joined with roll-call metadata), their Ukraine score, and their sponsored/cosponsored bills. The widget SHALL fetch exactly one member record per rendered rep card — no bulk blob, no client-side joins, no per-roll-call fan-out.
 
 **Acceptance criteria:**
-- AC-24.1: The curator SHALL output `src/data/ukraineVotes.json` containing, for each curated vote, the complete member-vote roster (bioguideId → cast, plus name/party/state). The file is keyed by `${chamber}|${congress}|${session}|${rollCall}`.
-- AC-24.2: The widget SHALL import `ukraineVotes.json` as a bundled asset (or fetch it as a sibling R2 file on boot, depending on bundle-size tradeoff).
-- AC-24.3: `useVotingRecord` SHALL consult the bundled roster map first. A cache hit produces zero runtime HTTP calls for that vote. A cache miss falls back to the existing Senate XML / House `/members` fetch path.
-- AC-24.4: The bundled roster SHALL distinguish "member not in roster" (absent entry) from "member in roster, Not Voting" (present with that cast) so FR-23's Did-Not-Serve logic still works without additional context.
-- AC-24.5: The curator SHALL report diff statistics on the rosters file each run (votes added, voters added/changed) so reviewers can see what changed in the weekly PR.
-- AC-24.6: The widget bundle SHALL remain under **400KB gzipped**. The large `ukraineVotes.json` roster file (~800KB raw, ~200KB gzipped) SHALL be served as a sibling file from the CDN and fetched asynchronously on widget boot. The smaller `ukraineBills.json` metadata file MAY be inlined into the IIFE since the UI depends on it at initial render and delaying render on a separate fetch is a worse UX than the modest size increase. Current measured bundle: ~310KB gzipped.
+- AC-24.1: The curator SHALL write one `member:v1:{bioguideId}` KV record per current-Congress member. Each record SHALL contain all data needed to render that member's rep card. (See FR-32 AC-32.1 for the canonical record shape.)
+- AC-24.2: The widget SHALL fetch `/api/members/{bioguideId}` for each representative resolved from an address lookup or name search. The endpoint SHALL return the corresponding KV record, or 404 if no such record exists.
+- AC-24.3: `useVotingRecord` SHALL read roll-call votes from the fetched member record. The hook SHALL NOT call Congress.gov or Senate.gov for curated roll calls. A network fallback SHALL remain only for non-curated roll calls explicitly requested by the UI (if any such code path exists post-cutover).
+- AC-24.4: A member record's `ukraineVotes[]` SHALL distinguish "member did not serve during this Congress/session" (entry absent from `ukraineVotes`) from "member in office but did not vote" (entry present with `cast = "Not Voting"`) so FR-23's Did-Not-Serve logic remains intact.
+- AC-24.5: The curator SHALL emit a diff summary to stdout on each run: count of member records written, count of bill records written, count of roll-call records written, and total KV-write bytes. The summary SHALL also list any members whose `ukraineScore.value` changed by more than 5 points since the previous run.
+- AC-24.6: The widget bundle SHALL remain under **250KB gzipped**. With `initRosters()` and `src/data/*.json` removed, the expected bundle size is ~200KB gzipped. `bundle-size.test.ts` (in `tests/unit/`) SHALL enforce this ceiling.
+- AC-24.7: `src/data/ukraineBills.json` and `src/data/ukraineVotes.json` files SHALL be removed from the repository. Their content lives in KV exclusively, written by the curator.
+- AC-24.8: `src/services/bundledRosters.ts` and the `initRosters()` API SHALL be removed. Any remaining references in `src/embed.tsx`, `src/main.tsx`, or hooks SHALL be deleted.
 
 ### FR-25: Edge-Cached CORS Proxy (NEW v2.4.0)
 
@@ -460,7 +460,64 @@ Roll-call vote rosters are *immutable* — a 2022 vote's list of Aye/Nay voters 
 - AC-30.7: Stg's R2 data MAY lag prod by up to seven days between syncs. Teams or individuals running the rehearsal for a review that depends on fresh data SHALL re-run `stg:sync-data` before rehearsing. The sync is idempotent — running it twice is safe (the second run just re-copies).
 - AC-30.8: Stg is gated by Cloudflare Access exactly like `dev` and `uat` per FR-29. The same service token (`voter-info-widget-ci`) authenticates the stg-rehearsal workflow. No separate token.
 - AC-30.9: The stg rehearsal workflow SHALL NOT modify prod. Safety is structural — the workflow has no step that writes to prod R2, prod Worker, or prod secrets. Any future change that would introduce such a step MUST first amend this AC with explicit rationale.
-- AC-30.10: Stg holds no persistent state worth preserving. Every R2 object in stg is a transient copy of prod, replaceable at any time by re-running `stg:sync-data`. There is no stg-specific test data, no stg-specific feature flag state, no stg-specific user data. This is the direct consequence of stg's single-purpose framing: adding stg-only persistent state would turn stg into a thing that needs its own backup story, defeating the point. Any future proposal to add persistent stg-only state MUST first amend this AC and justify why a separate environment is not the right answer.
+- AC-30.10: Stg holds no persistent state worth preserving. Every object in stg KV is a transient copy of prod, replaceable at any time by re-running `stg:sync-data` (v2.5.0 — now KV-prefix-level copy, no R2). There is no stg-specific test data, no stg-specific feature flag state, no stg-specific user data. This is the direct consequence of stg's single-purpose framing: adding stg-only persistent state would turn stg into a thing that needs its own backup story, defeating the point. Any future proposal to add persistent stg-only state MUST first amend this AC and justify why a separate environment is not the right answer.
+
+### FR-31: Name-Based Member Search (NEW v2.5.0 — see ADR-011)
+
+**Problem.** The widget currently requires a voter to know their address to see their reps. A voter who just wants to look up "how did Durbin vote on Ukraine" has no entry point. Address lookup is heavyweight (Census geocode + Congress.gov member fetch) for a question that is fundamentally a name lookup.
+
+**Solution.** Add a name-search entry point alongside address lookup. Voter types a fragment of a first or last name; a live, debounced dropdown shows matching current-Congress members. Selecting a result renders the same rep card as the address flow.
+
+**User story (US-7)**: *As a voter, I want to type a representative's name and see their voting record directly, without providing an address.*
+
+**Acceptance criteria:**
+- AC-31.1: The widget SHALL render a **NameSearchInput** component adjacent to or inset within the AddressInput. The two inputs SHALL be visually distinct (different labels, different placeholder text) and operate independently. Submitting one SHALL NOT clear or affect the other's state.
+- AC-31.2: NameSearchInput SHALL debounce keystrokes by 150ms. After the debounce elapses, if the input value has ≥2 characters, the widget SHALL fetch `/api/name-search?q=<value>`.
+- AC-31.3: The widget SHALL render search results below the search input — in the same pane region where address-lookup results would appear. The widget SHALL NOT show address results and name-search results simultaneously. The most recent lookup's results SHALL take the pane.
+- AC-31.4: Each result row SHALL display: member's display name (e.g., "Richard J. Durbin"), chamber ("Senate" or "House"), state (two-letter code), party (single letter). Row ordering SHALL match the Worker's ranking: exact-prefix matches first, then other substring matches, then by chamber (Senate before House), then by state ASC.
+- AC-31.5: Clicking a result row SHALL fetch `/api/members/{bioguideId}` and render that member's rep card using the same `RepCard` / `RepDetail` components as the address flow.
+- AC-31.6: The search SHALL match against **first names and last names**. Typing `"tammy"` SHALL match both Tammy Baldwin and Tammy Duckworth. Typing `"durb"` SHALL match Durbin.
+- AC-31.7: Matching SHALL be case-insensitive and diacritics-insensitive. The Worker normalizes both the query and the indexed `searchKey` by: lowercasing, NFKD-decomposing then stripping combining marks, removing apostrophes and hyphens, collapsing internal whitespace to single spaces.
+- AC-31.8: The search endpoint SHALL return at most 10 results per query. If the match set exceeds 10, the top 10 (per AC-31.4 ranking) SHALL be returned and the response SHALL include a boolean `truncated: true` field.
+- AC-31.9: If the Worker returns 503 (name-index not ready), the widget SHALL disable the NameSearchInput and render a hint: "Name search temporarily unavailable — try address lookup." The hint SHALL be dismissible but SHALL re-appear on the next keystroke if still 503.
+- AC-31.10: If the Worker returns 200 with an empty result list, the widget SHALL render "No members match" below the search input. The widget SHALL NOT render an empty result panel.
+- AC-31.11: NameSearchInput SHALL be keyboard-accessible: Tab into input, Enter to submit (equivalent to clicking first result), Arrow Down/Up to navigate result list, Escape to clear the results dropdown without clearing the input.
+- AC-31.12: The name-search results panel SHALL have `role="listbox"` and each result row `role="option"` with `aria-selected` reflecting keyboard-highlight state. The input SHALL be `role="combobox"` with `aria-expanded` reflecting results-open state and `aria-controls` pointing at the listbox ID.
+
+### FR-32: KV Storage Model (NEW v2.5.0 — see ADR-011)
+
+**Problem.** The v2.4.0 storage story placed curated data on R2 (blob JSON files) and cache responses in KV. ADR-011 supersedes this with a unified KV store where all curated content lives as atomic, per-member records alongside the existing response cache.
+
+**Solution.** Single KV namespace (`KV_VOTER_INFO`) with four prefixes (`member:v1:*`, `bill:v1:*`, `roll-call:v1:*`, `name-index:v1:*`) plus the ADR-009 response cache (`cache:v1:*`). R2 and its `ASSETS` binding for curated data are removed. The widget bundle continues to be served via Worker Sites static assets (not R2, not KV — same binding, different mechanism).
+
+**Acceptance criteria:**
+- AC-32.1: The `member:v1:{bioguideId}` KV record SHALL be a JSON object with the following fields (all required unless marked optional):
+  - `bioguideId: string` (e.g., "D000563")
+  - `first: string`, `last: string`, `officialName: string`
+  - `state: string` (two-letter)
+  - `district: number | null` (null for senators)
+  - `chamber: "Senate" | "House"`
+  - `party: string` (single letter: D, R, I, L, etc.)
+  - `photoUrl: string | null`, `website: string | null`
+  - `searchKey: string` (normalized per AC-31.7; used by name-index)
+  - `ukraineVotes: UkraineVoteEntry[]` — each entry: `{ rollCallId, cast, date, billId, question, result, weight, billTitle }`
+  - `ukraineScore: { value, totalWeighted, supportWeighted, obstructionEvents, didNotServeCount }`
+  - `sponsored: BillSummary[]`, `cosponsored: BillSummary[]` — each: `{ billId, title, introducedDate, latestAction, latestActionDate }`
+  - `generatedAt: string` (ISO-8601)
+  - `schemaVersion: number` (currently 1)
+- AC-32.2: The `bill:v1:{billId}` KV record SHALL be the canonical bill metadata: `{ billId, type, number, congress, title, shortTitle?, introducedDate, latestAction, latestActionDate, summary?, direction, weight, curatedRollCalls[] }`. Member records MAY denormalize a subset of these fields into their `sponsored[]`, `cosponsored[]`, and `ukraineVotes[].billTitle` fields for read-path simplicity; the `bill:v1:*` record remains authoritative.
+- AC-32.3: The `roll-call:v1:{chamber}:{congress}:{session}:{rollCall}` KV record SHALL be the canonical roll-call metadata: `{ rollCallId, chamber, congress, session, rollCall, date, question, result, billId?, totals: { yea, nay, present, notVoting } }`. Member records' `ukraineVotes[]` entries MAY denormalize `date`, `question`, `result` for read-path simplicity.
+- AC-32.4: The `name-index:v1:{letter}` KV record SHALL be `{ letter, generatedAt, entries: NameIndexEntry[] }` where each entry is `{ bioguideId, displayName, first, last, state, chamber, party, searchKeys: string[] }`. A member with first name "Richard" and last name "Durbin" SHALL appear in both `name-index:v1:r` and `name-index:v1:d` shards (first-name-initial index + last-name-initial index).
+- AC-32.5: The Worker SHALL NOT write to any key under the `member:`, `bill:`, `roll-call:`, or `name-index:` prefixes. Only the curator writes these. Any `env.KV_VOTER_INFO.put(k, ...)` call in Worker source SHALL be accompanied by a runtime assertion `assert(k.startsWith('cache:v1:'))`. Violation SHALL throw (fails loud per "Fail loudly" design principle). `tests/unit/kvPrefixes.test.ts` SHALL assert this invariant by grepping `proxy/*.ts` for `KV_VOTER_INFO.put` calls.
+- AC-32.6: The curator SHALL NOT write to any key under the `cache:` prefix. Only the Worker writes the response cache.
+- AC-32.7: The `scripts/kv-purge.mjs` tool (ADR-009) SHALL accept a `--prefix` argument and SHALL fail if the prefix argument is not one of: `cache:v1:`, `member:v1:`, `bill:v1:`, `roll-call:v1:`, `name-index:v1:`. This prevents typo-driven cross-prefix wipes. Purging `cache:v1:` SHALL NOT touch `member:v1:` keys and vice versa. A unit test SHALL assert this by running the tool against a fake KV with mixed-prefix keys.
+- AC-32.8: All four environments (dev, uat, stg, prod) SHALL have their own `KV_VOTER_INFO` namespace binding (separate namespace IDs). The `wrangler.toml` per-env blocks SHALL carry the per-env namespace ID. Namespace IDs SHALL NOT be committed as secrets — they are identifiers, not credentials.
+- AC-32.9: The KV binding in Worker code SHALL be named `KV_VOTER_INFO` (not the v2.4.0 `KV_RESPONSE_CACHE` name from ADR-009). The rename reflects the broader scope. Migration is one-line in `proxy/worker.ts` + one-line per env in `wrangler.toml`.
+- AC-32.10: The `ASSETS` binding (Worker Sites static assets) SHALL continue to serve `index.html` and `voter-info-widget.iife.js`. These files SHALL NOT be moved to KV — Worker Sites is purpose-built for static-asset serving and is more efficient than KV for these.
+- AC-32.11: R2 bindings (`[[r2_buckets]]`, `R2_ASSETS`) SHALL be removed from `wrangler.toml` across all env blocks. The physical R2 buckets MAY be deleted via the Cloudflare dashboard after 48 hours of stable prod operation on the KV-only architecture, but deletion is a manual, out-of-code operation.
+- AC-32.12: The publish-to-kv script SHALL support `--dry-run` which prints the key list and byte counts without executing `KV.put`. `--env <dev|uat|stg|prod>` SHALL select the target namespace.
+- AC-32.13: KV eventual consistency: a `put` is visible globally within ~60 seconds. The widget SHALL accept this bound — a user loading the widget within 60s of a curator run may receive a mix of old and new records. This is acceptable for nightly curator cadence. `docs/deployment.md` SHALL document this SLO.
+- AC-32.14: The name-search endpoint `/api/name-search` and member endpoint `/api/members/{bioguideId}` SHALL return responses with `Cache-Control: public, max-age=60, s-maxage=300`. This lets a browser reuse a result within a user's session without re-hitting the Worker, and lets CF's edge cache amortize across visitors. On a curator update, the next cache eviction picks up the new record within ~5 minutes at the edge.
 
 ### FR-26: Cloudflare Deployment Story (NEW v2.4.0)
 

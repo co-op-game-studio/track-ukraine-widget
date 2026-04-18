@@ -281,11 +281,87 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Traces to**: FR-25, FR-27, design.md §4.4, ADR-006
 - **Status**: [x] Done — 2026-04-17
 
+### T-025e: Staging as Regression Gate (v2.5.0 — revised for KV)
+- **Description**: Same goal as the deferred T-025d but simpler. Copy all curator-written KV prefixes (`member:v1:*`, `bill:v1:*`, `roll-call:v1:*`, `name-index:v1:*`) from prod's KV namespace to stg's, then deploy the stg Worker, then run the test suite against the stg edge (remote mode if present, local mode with warning otherwise per AC-30.5). No R2 copy-then-swap ceremony — KV list-by-prefix + put is naturally idempotent. Cache prefix (`cache:v1:*`) SHALL NOT be copied (stg has its own traffic; cross-contaminating caches would defeat stg's "mirror of prod" purpose for curated data while wrongly preserving stg's response caches).
+- **Dependencies**: T-029, T-031 (KV writes exist and produce records worth copying)
+- **Files**: `scripts/sync-stg-data.mjs` (new — list-by-prefix + put against stg), `.github/workflows/stg-rehearsal.yml` (new), `package.json` (new `stg:sync-data` script entry)
+- **Acceptance Criteria**: AC-30.1–AC-30.10 satisfied (text in FR-30 already updated for KV). Verify: running the workflow copies prod curator prefixes to stg, deploys stg Worker, runs `npm test` with `E2E_TARGET=https://stg.vote.cogs.it.com` + service-token headers, fails on any test failure, emits remote-mode-coverage warning until first remote-mode test lands.
+- **Test Requirements**: Unit test `tests/unit/syncStgData.test.ts` exercises the list-by-prefix/put logic against a fake KV (`KVLike` pattern matching `R2Like` from proxy/lib.ts).
+- **Traces to**: FR-30, ADR-011
+- **Status**: [ ] Pending (replaces T-025d)
+
 ---
 
-## Phase 7: CI/CD (Specification Only — Implementation Deferred)
+## Phase 7: KV Storage Migration (v2.5.0)
 
-### T-026: CI/CD Pipeline Setup
-- **Description**: Implement CI/CD as specified in docs/ci-cd.md
+### T-026: KV Namespaces Created
+- **Description**: Create one `voter-info-widget-kv-<env>` KV namespace per env via `wrangler kv namespace create`. Record namespace IDs and paste into `wrangler.toml` per-env blocks as `KV_VOTER_INFO` binding.
+- **Dependencies**: None
+- **Files**: `wrangler.toml` (add `[[kv_namespaces]]` blocks per env)
+- **Acceptance Criteria**: `wrangler deploy --env <env>` succeeds for all four envs after binding is added. Namespace IDs are persisted in `wrangler.toml` (not secrets; these are identifiers per AC-32.8).
+- **Test Requirements**: None (infrastructure setup)
+- **Traces to**: FR-32, ADR-011
+- **Status**: [x] Done — 2026-04-17 (namespaces created this session; IDs to be pasted)
+
+### T-027: R2 Binding Removal
+- **Description**: Remove all `[[r2_buckets]]` bindings from `wrangler.toml` across all envs. Remove R2-serving code paths from `proxy/worker.ts` and `proxy/lib.ts`. Remove R2 upload steps from `.github/workflows/deploy.yml`.
+- **Dependencies**: T-030, T-031, T-032 (widget and curator must already work without R2 before the binding is removed)
+- **Files**: `wrangler.toml`, `proxy/worker.ts`, `proxy/lib.ts`, `.github/workflows/deploy.yml`
+- **Acceptance Criteria**: AC-32.11. `wrangler deploy` succeeds with no R2 bindings. `grep -r "R2_ASSETS\|r2_buckets\|ukraineVotes.json\|ukraineBills.json" proxy/ src/ wrangler.toml .github/` returns no matches (except historical ADR refs).
+- **Test Requirements**: `tests/unit/worker.test.ts` — remove any test cases that exercised R2 static-asset routes. Add test asserting request to `/ukraineVotes.json` returns 404.
+- **Traces to**: FR-24 (revised), FR-32, ADR-011
+- **Status**: [ ] Pending
+
+### T-028: KV Response Cache Module (`proxy/cache.ts`)
+- **Description**: Implement the ADR-009 response cache as a standalone module consumed by `proxy/lib.ts`'s `handleFetch`. Exports `cachedFetch(env, ctx, request, classLabel)` which: computes cache key per ADR-009's schema, checks KV, on hit returns with `X-Cache: HIT`, on miss does the upstream fetch, writes via `ctx.waitUntil`, and returns with `X-Cache: MISS`. Supports per-class TTL and negative caching per ADR-009 §"Negative caching".
+- **Dependencies**: T-026
+- **Files**: `proxy/cache.ts` (new), `proxy/lib.ts` (wire `cachedFetch` into each cacheable route), `tests/unit/cache.test.ts` (new)
+- **Acceptance Criteria**: Tests cover: hit path, miss path, bypass for 5xx, bypass for oversized body, negative cache on 404 with 1h TTL, negative cache on 429 with 1m TTL, `X-Cache-Age` increments correctly, `cache:v1:` prefix enforced.
+- **Test Requirements**: ~20 unit tests in `tests/unit/cache.test.ts` using fake `KVNamespace` + fake `ExecutionContext`.
+- **Traces to**: ADR-009, ADR-011
+- **Status**: [ ] Pending
+
+### T-029: Curator — Atomic KV Record Writers
+- **Description**: Refactor `scripts/build-curated-bills.ts` and `scripts/build-vote-rosters.ts` to emit in-memory `BillRecord[]`, `RollCallRecord[]`, `MemberProfile[]`, and `NameIndexShard[]` arrays. Add a new `scripts/build-member-profiles.ts` that joins the three. Add `scripts/publish-to-kv.mjs` that takes these arrays and writes atomic KV records via `wrangler kv key put` (or the Cloudflare KV API directly). Old R2 blob output paths are REMOVED from the curator scripts.
+- **Dependencies**: T-026
+- **Files**: `scripts/build-curated-bills.ts` (refactored), `scripts/build-vote-rosters.ts` (refactored), `scripts/build-member-profiles.ts` (new), `scripts/publish-to-kv.mjs` (new), `package.json` (new script entries: `build:kv`, `publish:kv`)
+- **Acceptance Criteria**: Running `npm run build:kv` emits `curator-output.json` (intermediate consolidated file for review/diff). Running `npm run publish:kv -- --env dev --dry-run` prints the key list without writing. Without `--dry-run` it writes to the selected env's namespace. Script exits non-zero on any write failure. AC-32.1–AC-32.7 and AC-32.12 satisfied.
+- **Test Requirements**: `tests/unit/buildMemberProfiles.test.ts` (join logic), `tests/unit/publishToKv.test.ts` (against fake KV), `tests/unit/nameIndexShards.test.ts` (shard correctness: multi-letter entry for members whose first and last start with different letters).
+- **Traces to**: FR-24 (revised), FR-32, ADR-011
+- **Status**: [ ] Pending
+
+### T-030: Worker Route — `/api/members/{bioguideId}`
+- **Description**: Add a new Worker route that reads `member:v1:{bioguideId}` from KV and returns the JSON record with 60s browser cache + 300s edge cache. 404 if missing. Applies ADR-006 security header baseline.
+- **Dependencies**: T-026, T-028 (cache module scaffold — member route does not cache via `cache:*`, but imports the header-helper utilities)
+- **Files**: `proxy/lib.ts` (new route handler), `tests/unit/memberRoute.test.ts` (new)
+- **Acceptance Criteria**: AC-32.1, AC-32.10, AC-32.14. Test: GET returns 200 + record for present key; GET returns 404 for missing; response carries `Cache-Control: public, max-age=60, s-maxage=300` and all AC-27.1 security headers; OPTIONS/HEAD/non-GET methods rejected per ADR-006.
+- **Test Requirements**: ~10 unit tests in `tests/unit/memberRoute.test.ts`.
+- **Traces to**: FR-24 (revised), FR-32, ADR-011
+- **Status**: [ ] Pending
+
+### T-031: Worker Route — `/api/name-search?q=<query>`
+- **Description**: Add a new Worker route that normalizes the query, reads the relevant `name-index:v1:{letter}` shard(s), filters + ranks + dedupes, returns top 10 results with `truncated` boolean. 503 if `name-index:v1:meta` is missing. Applies ADR-006 security header baseline.
+- **Dependencies**: T-026, T-029 (name-index shards must be written for this to return non-empty results)
+- **Files**: `proxy/lib.ts` (new route handler, helpers `normalizeSearchKey`, `rankMatches`), `tests/unit/nameSearchRoute.test.ts` (new)
+- **Acceptance Criteria**: AC-31.1–AC-31.12, AC-32.4, AC-32.14. Tests cover: diacritics normalization, multi-letter query (e.g., "van ho"), ranking order, 10-result truncation with `truncated: true`, 503 on missing meta, empty result 200 with `[]`, dedup of members appearing in multiple shards.
+- **Test Requirements**: ~15 unit tests in `tests/unit/nameSearchRoute.test.ts`.
+- **Traces to**: FR-31, FR-32, ADR-011
+- **Status**: [ ] Pending
+
+### T-032: Widget Cutover — Remove `initRosters`, add `useMemberProfile`, add `NameSearchInput`
+- **Description**: Replace the `initRosters()` + `bundledRosters.ts` blob path with direct `/api/members/{bioguideId}` calls via a new `useMemberProfile` hook. Update `useVotingRecord`, `useSponsoredBills` to read from the member profile instead of making their own Congress.gov calls (where curator data covers the ask). Add `NameSearchInput` component + `useNameSearch` hook + integration in `VoterInfoWidget`.
+- **Dependencies**: T-030, T-031
+- **Files**: `src/services/bundledRosters.ts` (DELETED), `src/services/memberProfile.ts` (new), `src/hooks/useMemberProfile.ts` (new), `src/hooks/useNameSearch.ts` (new), `src/hooks/useVotingRecord.ts` (revised), `src/hooks/useSponsoredBills.ts` (revised), `src/hooks/useAddressLookup.ts` (revised to produce bioguides for useMemberProfile), `src/components/NameSearchInput.tsx` (new), `src/VoterInfoWidget.tsx` (integration), `src/embed.tsx` (remove `initRosters` call), `src/main.tsx` (remove `initRosters` call), `src/data/ukraineVotes.json` (DELETED), `src/data/ukraineBills.json` (DELETED)
+- **Acceptance Criteria**: AC-24.2, AC-24.3, AC-24.8, AC-31.1–AC-31.12. Existing e2e test `tests/e2e/widget.test.tsx` passes with mocked `/api/members/*` + `/api/name-search` instead of mocked rosters. New test `tests/unit/NameSearchInput.test.tsx` covers interaction behavior (keyboard navigation, debounce, result selection). Bundle-size test enforces ≤250KB gzipped.
+- **Test Requirements**: Rewrite ~4 integration tests that used `initRosters` to use fetch mocks; add ~10 new tests for NameSearchInput + useNameSearch.
+- **Traces to**: FR-24 (revised), FR-31, FR-32, ADR-011
+- **Status**: [ ] Pending
+
+---
+
+## Phase 8: CI/CD (Specification Only — Implementation Deferred)
+
+### T-033: CI/CD Pipeline Setup
+- **Description**: Implement CI/CD as specified in docs/ci-cd.md (formerly T-026 — renumbered to make room for the v2.5.0 KV tasks)
 - **Dependencies**: All prior tasks
 - **Status**: [ ] Deferred — specification written, implementation postponed
