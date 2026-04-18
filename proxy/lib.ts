@@ -690,7 +690,12 @@ async function buildProfileFromUpstream(
     startYear?: number;
     endYear?: number;
   }
-  const detail = (await detailRes.json()) as {
+  // Parse via text+JSON.parse rather than response.json() so a truncated
+  // or malformed upstream body surfaces as a clear error instead of the
+  // default "Expected ':' after property name" from the streaming parser.
+  // An upstream connection that drops mid-response (observed in prod on
+  // A000371) would otherwise look like a cryptic parse error.
+  let detail: {
     member: {
       bioguideId: string;
       firstName?: string;
@@ -699,12 +704,17 @@ async function buildProfileFromUpstream(
       state: string;
       district?: number;
       partyHistory?: { partyName: string }[];
-      // /v3/member/{id} returns a flat array; /v3/member?list wraps in {item:[]}.
       terms?: TermEntry[] | { item: TermEntry[] };
       depiction?: { imageUrl?: string };
       officialWebsiteUrl?: string;
     };
   };
+  try {
+    const text = await detailRes.text();
+    detail = JSON.parse(text);
+  } catch {
+    throw new Error('member detail upstream_body_invalid');
+  }
   const m = detail.member;
   const rawTerms = m.terms;
   const terms: TermEntry[] = Array.isArray(rawTerms) ? rawTerms : (rawTerms?.item ?? []);
@@ -724,14 +734,25 @@ async function buildProfileFromUpstream(
         ? 'I'
         : partyName.charAt(0).toUpperCase();
 
-  // sponsored / cosponsored are optional: a timeout (null) or non-OK upstream
-  // yields an empty list rather than failing the whole profile.
-  const sponsored = sponsoredRes && sponsoredRes.ok
-    ? ((await sponsoredRes.json()) as { sponsoredLegislation?: unknown[] }).sponsoredLegislation ?? []
-    : [];
-  const cosponsored = cosponsoredRes && cosponsoredRes.ok
-    ? ((await cosponsoredRes.json()) as { cosponsoredLegislation?: unknown[] }).cosponsoredLegislation ?? []
-    : [];
+  // sponsored / cosponsored are optional: a timeout (null), non-OK upstream,
+  // or a malformed/truncated body yields an empty list rather than failing
+  // the whole profile. A parse failure here previously bubbled out as a 502
+  // on the entire member profile (observed on A000371); isolate it instead.
+  async function parseListOrEmpty<K extends string>(
+    res: Response | null,
+    key: K,
+  ): Promise<unknown[]> {
+    if (!res || !res.ok) return [];
+    try {
+      const text = await res.text();
+      const body = JSON.parse(text) as Record<K, unknown[] | undefined>;
+      return body[key] ?? [];
+    } catch {
+      return [];
+    }
+  }
+  const sponsored = await parseListOrEmpty(sponsoredRes, 'sponsoredLegislation');
+  const cosponsored = await parseListOrEmpty(cosponsoredRes, 'cosponsoredLegislation');
 
   const first = m.firstName ?? '';
   const last = m.lastName ?? '';
