@@ -98,7 +98,7 @@ export function BillList({
                         setExpandedKey((curr) => (curr === key ? null : key))
                       }
                     >
-                      <td>
+                      <td data-label="Bill">
                         <a
                           href={sanitizeUrl(b.congressGovUrl) ?? '#'}
                           target="_blank"
@@ -122,9 +122,9 @@ export function BillList({
                           </span>
                         )}
                       </td>
-                      <td className="viw-billlist-title">{b.title}</td>
-                      <td>{b.dateIntroduced ? formatDate(b.dateIntroduced) : '—'}</td>
-                      <td className="viw-billlist-action">
+                      <td className="viw-billlist-title" data-label="Title">{b.title}</td>
+                      <td data-label="Introduced">{b.dateIntroduced ? formatDate(b.dateIntroduced) : '—'}</td>
+                      <td className="viw-billlist-action" data-label="Latest Action">
                         {b.latestAction}{' '}
                         <span className="viw-billlist-expand-hint">
                           {expanded ? '▾' : '▸'}

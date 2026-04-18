@@ -104,7 +104,7 @@ function VoteRow({
 
   return (
     <tr className={cls}>
-      <td className="viw-votelist-bill">
+      <td className="viw-votelist-bill" data-label="Bill & Vote">
         <div className="viw-votelist-billnum">
           {row.bill.featured && <span className="viw-billlist-featured" aria-hidden>★</span>}
           {row.bill.type === 'HRES' || row.bill.type === 'SRES' ? '' : ''}
@@ -139,13 +139,13 @@ function VoteRow({
           </button>
         )}
       </td>
-      <td className="viw-votelist-date">{safeDate(row.vote.date)}</td>
-      <td>
+      <td className="viw-votelist-date" data-label="Date">{safeDate(row.vote.date)}</td>
+      <td data-label="Position">
         <span className={`viw-vote viw-vote-valence-${valenceCss(row.valence)}`}>
           {displayPosition(row)}
         </span>
       </td>
-      <td className="viw-vote-outcome">
+      <td className="viw-vote-outcome" data-label="Outcome">
         {row.bill.becameLaw ? 'Became law' : shortenAction(row.vote.action)}
       </td>
     </tr>

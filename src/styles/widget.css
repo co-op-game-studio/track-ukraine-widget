@@ -681,6 +681,54 @@
 /* Vote/bill tables */
 .viw-votelist-scroll { overflow-x: auto; }
 
+/* Mobile: stack each row vertically. Each <td> becomes a block and its
+ * data-label renders as a small uppercase heading. The <thead> hides since
+ * each cell carries its own label. No inner row borders — the parent
+ * detail card already frames the list. */
+@media (max-width: 640px) {
+  .viw-votelist-scroll { overflow-x: visible; }
+  .viw-votelist thead,
+  .viw-billlist thead { display: none; }
+  .viw-votelist,
+  .viw-votelist tbody,
+  .viw-votelist tr,
+  .viw-votelist td,
+  .viw-billlist,
+  .viw-billlist tbody,
+  .viw-billlist tr,
+  .viw-billlist td { display: block; width: 100%; }
+  .viw-votelist tr,
+  .viw-billlist tr {
+    border-top: 2px solid var(--viw-black);
+    padding: 0.75rem 0;
+    background: transparent;
+  }
+  .viw-votelist tbody tr:first-child,
+  .viw-billlist tbody tr:first-child { border-top: 0; }
+  .viw-votelist td,
+  .viw-billlist td {
+    padding: 0.35rem 0;
+    border-bottom: 1px solid var(--viw-border-soft);
+  }
+  .viw-votelist tr td:last-child,
+  .viw-billlist tr td:last-child { border-bottom: 0; }
+  .viw-votelist td[data-label]::before,
+  .viw-billlist td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--viw-font);
+    font-weight: 900;
+    font-style: italic;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.62rem;
+    color: var(--viw-muted);
+    margin-bottom: 0.2rem;
+  }
+  .viw-votelist td.viw-votelist-bill::before { display: none; }
+  .viw-vote-row-procedural { background: rgba(0,0,0,0.025); }
+}
+
 .viw-votelist,
 .viw-billlist {
   width: 100%;
