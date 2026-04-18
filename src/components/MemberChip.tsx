@@ -5,6 +5,7 @@
  * Traces to: US-7 (v2.2.0) AC-7.1–7.7, US-8, US-9 (design system).
  */
 import type { Representative } from '../types/domain';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 export interface MemberChipProps {
   representative: Representative;
@@ -40,9 +41,9 @@ export function MemberChip({ representative, selected, onClick }: MemberChipProp
       aria-pressed={selected}
     >
       <div className="viw-chip-photo-wrap">
-        {representative.photoUrl ? (
+        {sanitizeUrl(representative.photoUrl) ? (
           <img
-            src={representative.photoUrl}
+            src={sanitizeUrl(representative.photoUrl)!}
             alt={representative.name}
             className="viw-chip-photo"
             loading="lazy"

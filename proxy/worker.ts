@@ -20,9 +20,13 @@
 
 import { handleFetch, type ProxyEnv } from './lib';
 
-type Env = Omit<ProxyEnv, 'KV_VOTER_INFO' | 'ASSETS'> & {
+type Env = Omit<ProxyEnv, 'KV_VOTER_INFO' | 'ASSETS' | 'RATE_LIMITER'> & {
   KV_VOTER_INFO: KVNamespace;
   ASSETS: Fetcher;
+  /** Cloudflare Workers Rate Limiting API binding (AC-27.21). Per-env
+   *  limits configured in wrangler.toml. Absent in local / wrangler-dev
+   *  builds; the Worker fails open when undefined. */
+  RATE_LIMITER?: RateLimit;
 };
 
 export default {
