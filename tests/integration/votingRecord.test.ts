@@ -282,5 +282,57 @@ describe('useVotingRecord (v2.5.2 \u2014 KV roll-call rosters)', () => {
         expect(row.memberVote).toBe('Aye');
       }
     });
+
+    it('returns null-member entries (Did Not Serve) when the roster omits the senator', async () => {
+      routeFetch([
+        {
+          match: (u) => /\/api\/roll-call-rosters\/senate\//.test(u),
+          body: senateRosterFor('SomeoneElse', 'WI', 'Yea'),
+        },
+      ]);
+      const { result } = renderHook(() => useVotingRecord(senator, ''));
+      await act(async () => { await result.current.load(); });
+      await waitFor(() => expect(result.current.status).toBe('success'));
+      expect(result.current.data!.flat).toHaveLength(0);
+    });
+  });
+
+  describe('lifecycle', () => {
+    it('reset() clears data/status/error back to idle', async () => {
+      routeFetch([
+        {
+          match: (u) => /\/api\/roll-call-rosters\/house\//.test(u),
+          body: houseRosterFor(houseRep.bioguideId, 'Yea'),
+        },
+      ]);
+      const { result } = renderHook(() => useVotingRecord(houseRep, ''));
+      await act(async () => { await result.current.load(); });
+      await waitFor(() => expect(result.current.status).toBe('success'));
+      act(() => result.current.reset());
+      expect(result.current.status).toBe('idle');
+      expect(result.current.data).toBeNull();
+      expect(result.current.error).toBeNull();
+    });
+
+    it('load() is a no-op when member is null', async () => {
+      const spy = vi.spyOn(globalThis, 'fetch');
+      const { result } = renderHook(() => useVotingRecord(null, ''));
+      await act(async () => { await result.current.load(); });
+      expect(spy).not.toHaveBeenCalled();
+      expect(result.current.status).toBe('idle');
+    });
+
+    it('treats a transient roster fetch error as Did Not Serve for that bill (no error status)', async () => {
+      // Return 500 on every roster fetch; the hook's per-row try/catch
+      // converts each into a Did Not Serve row, which gets filtered out.
+      // Overall status still resolves to success with an empty flat list.
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response('boom', { status: 500 }),
+      );
+      const { result } = renderHook(() => useVotingRecord(houseRep, ''));
+      await act(async () => { await result.current.load(); });
+      await waitFor(() => expect(result.current.status).toBe('success'));
+      expect(result.current.data!.flat).toHaveLength(0);
+    });
   });
 });

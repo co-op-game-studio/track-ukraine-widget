@@ -218,4 +218,50 @@ describe('useAddressLookup (v2.5.2 — state-members KV)', () => {
     expect(calledUrls.some((u) => /\/api\/congress\//.test(u))).toBe(false);
     expect(calledUrls.some((u) => /\/api\/senate\//.test(u))).toBe(false);
   });
+
+  it('reset() clears data, status, and error back to idle', async () => {
+    routeFetch([
+      { match: (u) => u.includes('/api/census/'), body: censusChicago },
+      { match: (u) => u.includes('/api/state-members/IL'), body: stateMembersIL },
+    ]);
+    const { result } = renderHook(() => useAddressLookup(''));
+    await act(async () => {
+      await result.current.lookup('2000 S State St, Chicago, IL 60616');
+    });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    act(() => result.current.reset());
+    expect(result.current.status).toBe('idle');
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('errors when Census returns a match but the CD layer is empty (no district)', async () => {
+    // Census response with a matched address but no '119th Congressional
+    // Districts' entry \u2014 geocodeAddress throws internally with a specific
+    // message. The lookup hook surfaces that as the error state.
+    const noDistrict = {
+      result: {
+        addressMatches: [
+          {
+            matchedAddress: 'X',
+            coordinates: { x: 0, y: 0 },
+            addressComponents: { city: '', state: '', zip: '', streetName: '' },
+            geographies: {
+              States: [{ STATE: '17', NAME: 'Illinois', GEOID: '17', BASENAME: 'Illinois', FUNCSTAT: 'A' }],
+              // No 119th Congressional Districts key.
+            },
+          },
+        ],
+      },
+    };
+    routeFetch([
+      { match: (u) => u.includes('/api/census/'), body: noDistrict },
+    ]);
+    const { result } = renderHook(() => useAddressLookup(''));
+    await act(async () => {
+      await result.current.lookup('X').catch(() => {});
+    });
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.error?.message).toMatch(/congressional district/i);
+  });
 });
