@@ -6,6 +6,8 @@
  * Traces to: FR-12 (REVISED v2.5.2), FR-32 AC-32.15, ADR-012, design.md §3.2.4.
  */
 
+import { throwFromResponse } from './errorEnvelope';
+
 export interface HouseRollCallRoster {
   rollCallId: string;
   chamber: 'house';
@@ -81,7 +83,7 @@ export async function fetchRollCallRoster(
   const res = await fetch(url);
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw new Error(`roll-call roster ${res.status} for ${chamberPath}/${congress}/${session}/${rollCall}`);
+    await throwFromResponse(res, `roll-call roster ${chamberPath}/${congress}/${session}/${rollCall}`);
   }
   return (await res.json()) as RollCallRoster;
 }

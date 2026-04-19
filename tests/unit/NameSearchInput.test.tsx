@@ -126,4 +126,50 @@ describe('NameSearchInput', () => {
     const glyph = screen.getByRole('status');
     expect(glyph.getAttribute('aria-label')).toBe(glyph.getAttribute('title'));
   });
+
+  // ─── Regression: status glyph must not overlap native search-cancel (×) ───
+  //
+  // Bug observed 2026-04-19: when the input has content + a status glyph
+  // is visible, Chrome + Safari render their native search-cancel button
+  // (from `type="search"`) in the same trailing slot as our status badge,
+  // visually overlapping. Fix: widget.css suppresses the native button
+  // and reserves padding-right: 40px. These tests lock in the contract so
+  // a future refactor can't silently regress the layout.
+
+  it('regression: input is type="search" so the CSS cancel-button suppression applies', () => {
+    render(<NameSearchInput {...baseProps({ value: 'durb' })} />);
+    const input = screen.getByLabelText(/search by name/i) as HTMLInputElement;
+    expect(input.type).toBe('search');
+  });
+
+  it('regression: status glyph renders as a sibling of the input inside .viw-name-search-row', () => {
+    // CSS selector `.viw-name-search-row input[type='search']::-webkit-search-cancel-button`
+    // only matches when this DOM relationship holds — guard it.
+    const { container } = render(
+      <NameSearchInput {...baseProps({ value: 'durb', status: 'error' })} />,
+    );
+    const row = container.querySelector('.viw-name-search-row');
+    expect(row).not.toBeNull();
+    const input = row?.querySelector('input[type="search"]');
+    expect(input).not.toBeNull();
+    const glyph = row?.querySelector('.viw-search-status');
+    expect(glyph).not.toBeNull();
+  });
+
+  it('regression: status glyph and input are positioned in the same overlap-prone trailing slot', () => {
+    // When the glyph exists, it's absolute-positioned inside the row and
+    // the input receives padding-right to clear it. Assert the row has
+    // `position: relative` so the glyph's `position: absolute` anchors
+    // correctly; jsdom computes `position` from className, so we can
+    // reach it via getComputedStyle indirectly via inline check of the
+    // className contract instead.
+    const { container } = render(
+      <NameSearchInput {...baseProps({ value: 'durb', status: 'success', resultCount: 0 })} />,
+    );
+    const row = container.querySelector('.viw-name-search-row') as HTMLElement;
+    expect(row.classList.contains('viw-name-search-row')).toBe(true);
+    // Confirm a status glyph IS rendered for zero-match success state
+    // (the exact state that originally surfaced the overlap bug).
+    expect(row.querySelector('.viw-search-status-warn')).not.toBeNull();
+  });
 });

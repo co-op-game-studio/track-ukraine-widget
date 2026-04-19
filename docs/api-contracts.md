@@ -295,18 +295,74 @@ All external API calls are routed through a unified proxy. The proxy adds CORS h
 ### 4.2 Proxy Response Headers
 
 ```
-Access-Control-Allow-Origin: * (or specific embed domain)
-Access-Control-Allow-Methods: GET, OPTIONS
-Access-Control-Allow-Headers: Content-Type
+Access-Control-Allow-Origin: <matched allowlist entry>
+Access-Control-Allow-Methods: GET, HEAD, OPTIONS
+Access-Control-Allow-Headers: Content-Type, X-Trace-Id
+Access-Control-Expose-Headers: X-Trace-Id, X-Cache, X-Cache-Tier, Retry-After
+Vary: Origin
+X-Trace-Id: tr_<16hex>                              # FR-36 — every response
+X-Cache: HIT | MISS                                 # FR-40 — cacheable routes
+X-Cache-Tier: edge | kv | r2 | upstream             # FR-40 — cacheable routes
 ```
 
-### 4.3 Error Handling
+`X-Trace-Id` is set on every response. `X-Cache` and `X-Cache-Tier` appear on responses served via the tiered cache pipeline (`serveCached` from `proxy/cache/pipeline.ts`); they are absent on non-cacheable routes like `OPTIONS` preflights and the preview HTML.
 
-The proxy MUST:
-- Strip API keys from any error response bodies
-- Return `502 Bad Gateway` for upstream failures
-- Return `429 Too Many Requests` if upstream returns rate limit errors
-- Pass through upstream HTTP status codes otherwise
+### 4.3 Canonical Error Envelope (v2.6.0 — FR-37)
+
+Every non-2xx, non-304 Worker response with a body uses this envelope:
+
+```json
+{
+  "error": {
+    "code": "<enum>",
+    "message": "<operator-facing detail>",
+    "userMessage": "<end-user-safe message>",
+    "upstream": "congress" | "senate" | "census" | null,
+    "retryable": true | false,
+    "traceId": "tr_<16hex>"
+  }
+}
+```
+
+**Closed enumeration of `code` values** (FR-37 AC-37.2):
+
+| `code` | HTTP status | `retryable` | Meaning |
+|--------|-------------|-------------|---------|
+| `bad_request` | 400 | false | Malformed client input (bad path, bad query param) |
+| `origin_not_allowed` | 403 | false | CORS origin allowlist rejected the request |
+| `rate_limited` | 429 | true | In-Worker or upstream rate limit hit; carries `Retry-After` header |
+| `not_found` | 404 | false | Requested KV key or R2 object absent; no upstream fallback applied |
+| `upstream_4xx` | 502 (gateway-style) | false | Upstream returned 4xx other than 429; not retryable at the widget level |
+| `upstream_5xx` | 502 | true | Upstream returned 5xx |
+| `upstream_timeout` | 504 | true | Upstream fetch exceeded 15s abort timeout |
+| `upstream_parse_error` | 502 | false | Upstream response body failed to parse (truncation, malformed JSON/XML) |
+| `internal_error` | 500 | true | Uncaught exception at Worker level |
+
+**Widget contract (FR-37 AC-37.5, AC-37.8):**
+- On `response.ok === false`, the widget parses the envelope.
+- On `retryable: true`, the widget renders a "Try again" button that re-issues the original request.
+- On `retryable: false`, the widget renders `userMessage` with no retry affordance.
+- The widget SHALL display the trace ID below the error message in the form `Reference: tr_<id>` — muted, monospace, selectable.
+- The widget SHALL NOT display `error.message` (operator context).
+
+**Removed (v2.6.0):** The legacy shape `{ error: 'upstream_error', status, upstream }` used prior to v2.6.0 is gone. No dual-shape compatibility window — the widget is the sole consumer.
+
+### 4.4 Trace-ID Header (v2.6.0 — FR-36)
+
+- The Worker generates `X-Trace-Id: tr_<16hex>` on every inbound request. Clients MAY supply `X-Trace-Id` on the request; the Worker echoes the supplied value if it matches `/^tr_[0-9a-f]{16}$/`, else generates a new one (client-supplied IDs of any other shape are silently replaced).
+- The trace ID is forwarded as `X-Trace-Id` on every upstream fetch the Worker makes on behalf of the request.
+- The trace ID appears in every structured log line (`proxy/observability/log.ts`) and every Analytics Engine data point (`proxy/observability/analytics.ts`) for the request.
+
+### 4.5 Cache Tier Header (v2.6.0 — FR-40)
+
+`X-Cache-Tier` is set on every response served through the tiered cache pipeline:
+
+- `edge` — `caches.default` hit (per-POP).
+- `kv` — `KV_VOTER_INFO` hit (global).
+- `r2` — `R2_STATIC` hit (global, durable archive).
+- `upstream` — all tiers missed; response came from live upstream.
+
+Paired with `X-Cache: HIT` (tiers 0–2) or `X-Cache: MISS` (upstream).
 
 ---
 

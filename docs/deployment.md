@@ -70,6 +70,35 @@ Static assets (the bundle, SRI sidecar, curated JSON) are NOT stored in
 KV — they ship as Worker Sites static assets from `./dist`, handled
 automatically by `wrangler deploy`.
 
+### 2b. R2 static archive bucket (v2.6.0 — FR-41)
+
+Create **one R2 bucket per env** to serve as the durable tier-2 archive
+for byte-level-static upstream responses (closed-session Senate XML,
+House rosters, aged bill-actions/summaries). Scope is narrow; see FR-41
+in `docs/spec.md` for the full data-type eligibility matrix.
+
+```bash
+# Per env — name pattern: voter-info-widget-archive-${env}
+npx wrangler r2 bucket create voter-info-widget-archive-prod
+npx wrangler r2 bucket create voter-info-widget-archive-dev
+npx wrangler r2 bucket create voter-info-widget-archive-uat
+npx wrangler r2 bucket create voter-info-widget-archive-stg
+```
+
+Bindings are already declared in `wrangler.toml` as `R2_STATIC` per env;
+**if the bucket does not exist at deploy time, `wrangler deploy` fails
+fast** — AC-41.11 intentional. No auto-creation.
+
+**Steady-state footprint: ~13 MB per env** (~200 Senate XML + ~200 House
+rosters + ~200 House vote-detail + ~27 bill-actions + ~27 bill-summaries).
+At R2 storage pricing $0.015/GB/month, cost is <$0.001/month per env.
+Egress within Cloudflare (Worker → R2) is free.
+
+**Do NOT reuse the retired `R2_ASSETS` binding from the ADR-011-era
+static-asset serving path.** That binding was removed when static assets
+moved to Worker Sites. `R2_STATIC` is a distinct binding with a distinct
+purpose (upstream-bytes archive, not widget bundle serving).
+
 ### 3. Domain
 
 Pick a domain **you** own. Example used in config: `vote.cogs.it.com`.
