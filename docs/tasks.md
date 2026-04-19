@@ -695,20 +695,20 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 ### T-080: `serveCached` Integration Test (tier 2)
 - **Description**: New `tests/integration/serveCached.test.ts` composing a real `TieredCache<string>` + real `EdgeTier` + real `KvTier` + real `R2Tier` + real `createUpstreamRegistry`, with only bindings faked (fake KV, fake R2, fake `caches.default`, stubbed `fetch`). Covers: cold-all-tiers → upstream → writes all eligible; edge hit; KV hit + promote to edge; R2 hit + promote to KV + edge; R2-ineligible route (member-detail) never writes to R2; upstream 429 → FR-37 envelope; upstream 5xx → retryable envelope; contentType roundtrip through tiers.
 - **Dependencies**: All Phase 11 tasks (T-055..T-062) — already landed.
-- **Files**: `tests/integration/serveCached.test.ts` (new).
-- **Acceptance Criteria**: AC-44.1. ~12 tests.
+- **Files**: `tests/integration/serveCached.test.ts` (new) + `tests/integration/fixtures/fake-bindings.ts` (shared fake-bindings helper, split out to respect FR-42 AC-42.2 300-line cap).
+- **Acceptance Criteria**: AC-44.1. 13 tests (target was ~12).
 - **Test Requirements**: Itself — this IS the integration test.
 - **Traces to**: FR-44, FR-40, ADR-014, ADR-016
-- **Status**: [ ] Pending
+- **Status**: [x] Done — 2026-04-19. Authored via subagent, verified locally (full suite green, typecheck + lint clean). Split file at 244 + 118 lines respects the cap.
 
 ### T-081: `matchRoute` × `serveCached` Integration Test (tier 2)
 - **Description**: New `tests/integration/matchRoute.test.ts` driving 20+ sample `/api/*` paths through `matchRoute` → `serveCached` → fake tiers + stubbed fetch. Asserts header shape (`X-Cache`, `X-Cache-Tier`, `X-Trace-Id`) and FR-37 envelope on error for every CacheKind.
 - **Dependencies**: T-080 (shares fixture pattern).
 - **Files**: `tests/integration/matchRoute.test.ts` (new).
-- **Acceptance Criteria**: AC-44.2.
+- **Acceptance Criteria**: AC-44.2. 24 tests across 9 describe blocks.
 - **Test Requirements**: Itself.
 - **Traces to**: FR-44
-- **Status**: [ ] Pending
+- **Status**: [x] Done — 2026-04-19. Authored via subagent, verified locally. File is exactly 300 lines (at cap). Every CacheKind matchRoute handles is covered; negative cases confirm KV-backed routes (members, bills, roll-call-rosters, name-search) correctly return null.
 
 ### T-082: Local E2E Worker Harness (tier 3)
 - **Description**: Boot `wrangler dev --env preview` on a random free port. Stand up a Node fixture HTTP server on a second port returning canned Congress/Senate/Census responses. Point the Worker's upstream URLs at the fixture server via an `UPSTREAM_OVERRIDE_*` env var set. Expose helpers (`startWorker`, `startFixtureServer`, `teardown`) for e2e tests to consume.
