@@ -214,6 +214,34 @@
   color: inherit; font-family: inherit;
 }
 
+/* v2.6.0 — trace ID reference line (FR-36 AC-36.5). Muted, monospace,
+ * user-selectable so bug reporters can copy it from the UI. */
+.viw-error-banner-trace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: #6b7280;
+  user-select: text;
+  align-self: center;
+}
+
+/* v2.6.0 — "Try again" button rendered on retryable errors (FR-37 AC-37.5). */
+.viw-error-banner-retry {
+  background: var(--viw-black);
+  color: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  padding: 0.35rem 0.85rem;
+  font-family: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  align-self: center;
+}
+.viw-error-banner-retry:hover {
+  background: var(--viw-white);
+  color: var(--viw-black);
+}
+
 /* ── Results state heading ── */
 
 .viw-results { margin-top: 0.5rem; }

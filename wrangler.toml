@@ -57,6 +57,13 @@ simple = { limit = 60, period = 60 }
 [observability]
 enabled = true
 
+# FR-38 AC-38.1 — Workers Analytics Engine binding per env.
+# Dataset names follow the `voter_info_widget_${env}` convention so a single
+# query in the CF dashboard can slice across envs via the `env` blob field.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_prod"
+
 # ─── DEV (branch: develop) ───────────────────────────────────────────────────
 [env.dev]
 name = "voter-info-widget-proxy-dev"
@@ -89,6 +96,10 @@ simple = { limit = 600, period = 60 }
 [env.dev.observability]
 enabled = true
 
+[[env.dev.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_dev"
+
 # ─── UAT (branch: uat) ───────────────────────────────────────────────────────
 [env.uat]
 name = "voter-info-widget-proxy-uat"
@@ -118,6 +129,10 @@ simple = { limit = 120, period = 60 }
 
 [env.uat.observability]
 enabled = true
+
+[[env.uat.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_uat"
 
 # ─── STG (branch: stg) ───────────────────────────────────────────────────────
 [env.stg]
@@ -149,6 +164,10 @@ simple = { limit = 60, period = 60 }
 [env.stg.observability]
 enabled = true
 
+[[env.stg.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_stg"
+
 # ─── Local preview (wrangler dev) ────────────────────────────────────────────
 [env.preview]
 name = "voter-info-widget-proxy-preview"
@@ -175,3 +194,7 @@ name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1005"
 simple = { limit = 600, period = 60 }
+
+[[env.preview.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_preview"
