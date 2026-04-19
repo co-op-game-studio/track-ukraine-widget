@@ -170,11 +170,11 @@ async function main() {
     const { house, senate } = collectCuratedVotes();
     console.log(`Curated votes: ${house.length} house, ${senate.length} senate`);
     tasks.push({
-      label: '/api/congress/v3/house-vote/*/members',
+      label: '/api/roll-call-rosters/house/*',
       items: house.map((v) => ({ key: `h:${v.congress}:${v.session}:${v.rollCall}`, url: houseVoteUrl(v) })),
     });
     tasks.push({
-      label: '/api/senate/…xml',
+      label: '/api/roll-call-rosters/senate/*',
       items: senate.map((v) => ({ key: `s:${v.congress}:${v.session}:${v.rollCall}`, url: senateVoteUrl(v) })),
     });
   }
