@@ -121,13 +121,88 @@ describe('computeUkraineScore', () => {
     expect(r.lowConfidence).toBe(true);
     expect(r.contributing).toBe(1);
 
-    // 3+ contributing actions — not low confidence
+    // 3+ contributing actions — not low confidence (binary legacy alias)
     const r2 = computeUkraineScore([
       { valence: 'voted-pro', weight: 1.0 },
       { valence: 'voted-pro', weight: 1.0 },
       { valence: 'voted-pro', weight: 1.0 },
     ]);
     expect(r2.lowConfidence).toBe(false);
+  });
+
+  // FR-43 AC-43.1, AC-43.2: tri-state confidence tier.
+  describe('confidenceTier (FR-43 AC-43.1)', () => {
+    function tierFor(n: number): 'low' | 'moderate' | 'full' {
+      const actions = Array.from({ length: n }, () => ({ valence: 'voted-pro' as const, weight: 1.0 }));
+      return computeUkraineScore(actions).confidenceTier;
+    }
+
+    it('tier=low for 1 action', () => {
+      expect(tierFor(1)).toBe('low');
+    });
+    it('tier=low for 2 actions', () => {
+      expect(tierFor(2)).toBe('low');
+    });
+    it('tier=moderate for exactly LOW_CONFIDENCE_THRESHOLD (3)', () => {
+      expect(tierFor(3)).toBe('moderate');
+    });
+    it('tier=moderate for 7 actions', () => {
+      expect(tierFor(7)).toBe('moderate');
+    });
+    it('tier=full for exactly MODERATE_CONFIDENCE_THRESHOLD (8)', () => {
+      expect(tierFor(8)).toBe('full');
+    });
+    it('tier=full for 9 actions', () => {
+      expect(tierFor(9)).toBe('full');
+    });
+    it('tier=low when zero contributing actions and score is null', () => {
+      const r = computeUkraineScore([]);
+      expect(r.score).toBeNull();
+      expect(r.confidenceTier).toBe('low');
+    });
+    it('lowConfidence alias mirrors (tier==="low" && contributing>0), AC-43.2', () => {
+      for (const n of [0, 1, 2, 3, 7, 8, 9]) {
+        const actions = Array.from({ length: n }, () => ({ valence: 'voted-pro' as const, weight: 1.0 }));
+        const r = computeUkraineScore(actions);
+        expect(r.lowConfidence).toBe(r.confidenceTier === 'low' && r.contributing > 0);
+      }
+    });
+  });
+
+  // FR-43 AC-43.1: continuous confidence index.
+  describe('confidence (continuous, AC-43.1)', () => {
+    function confidenceFor(n: number): number {
+      const actions = Array.from({ length: n }, () => ({ valence: 'voted-pro' as const, weight: 1.0 }));
+      return computeUkraineScore(actions).confidence;
+    }
+
+    it('zero contributing → confidence 0', () => {
+      expect(confidenceFor(0)).toBe(0);
+    });
+    it('1 action → confidence 0.125', () => {
+      expect(confidenceFor(1)).toBeCloseTo(0.125, 4);
+    });
+    it('4 actions → confidence 0.5', () => {
+      expect(confidenceFor(4)).toBe(0.5);
+    });
+    it('7 actions → confidence 0.875', () => {
+      expect(confidenceFor(7)).toBeCloseTo(0.875, 4);
+    });
+    it('exactly 8 actions (MODERATE_CONFIDENCE_THRESHOLD) → confidence 1.0', () => {
+      expect(confidenceFor(8)).toBe(1);
+    });
+    it('clamps at 1.0 for counts above threshold', () => {
+      expect(confidenceFor(20)).toBe(1);
+      expect(confidenceFor(1000)).toBe(1);
+    });
+    it('confidence is monotonic non-decreasing over contributing count', () => {
+      let prev = -Infinity;
+      for (let n = 0; n <= 12; n++) {
+        const c = confidenceFor(n);
+        expect(c).toBeGreaterThanOrEqual(prev);
+        prev = c;
+      }
+    });
   });
 
   it('Lankford-style regression: mostly anti-UA votes produce deep negative score', () => {

@@ -604,6 +604,17 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 1rem;
+  /* FR-43 AC-43.4: header wraps on narrow viewports so the context slug
+     falls below the number but above the gradient bar. */
+  flex-wrap: wrap;
+}
+
+.viw-score-header > .viw-score-context {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.viw-score-header > .viw-score-value {
+  flex: 0 0 auto;
 }
 
 .viw-score-title {
@@ -616,6 +627,16 @@
   color: var(--viw-black);
 }
 
+/* FR-43 AC-43.5: enlarged title treatment. Title acts as a section header
+   rather than a tiny caption. Clamps so it never dominates at huge
+   viewports while still stepping up from the current 0.75rem. */
+.viw-score-title-lg {
+  display: block;
+  font-size: clamp(1rem, 2.2vw, 1.4rem);
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
 .viw-score-value {
   font-family: var(--viw-font);
   font-weight: 900;
@@ -623,6 +644,9 @@
   font-size: 1.75rem;
   letter-spacing: -0.02em;
   color: var(--viw-black);
+  /* FR-43 AC-43.3: saturation filter animates smoothly when confidence
+     shifts between renders (e.g., after more votes land). */
+  transition: filter 200ms ease-out;
 }
 
 .viw-score-bar { margin: 0.6rem 0 0.4rem; }

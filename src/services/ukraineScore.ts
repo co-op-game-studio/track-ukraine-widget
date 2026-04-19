@@ -26,14 +26,25 @@ import {
  *  so we only need to exclude zero-weight entries. */
 export const PROCEDURAL_THRESHOLD = 0;
 
-/** Fewer than this many contributing actions = low confidence. */
+/** Fewer than this many contributing actions = low confidence (binary clamp).
+ *  Kept for FR-16's scoreLabel "Limited record" copy branch — the nuance for
+ *  mid-rangers is carried by the continuous `confidence` field + saturation
+ *  gradient per FR-43. */
 export const LOW_CONFIDENCE_THRESHOLD = 3;
+
+/** Contributing actions at or above this count = full confidence.
+ *  FR-43 AC-43.1: the continuous `confidence` field scales linearly from
+ *  0 (no actions) to 1 (this many or more). Mid-rangers fall onto the
+ *  [0, 1] gradient naturally instead of the old binary clamp. */
+export const MODERATE_CONFIDENCE_THRESHOLD = 8;
 
 export interface ScoreInput {
   valence: Valence;
   /** Weight in [0, 1] — from the curated JSON for votes, or 1.0 for sponsorship. */
   weight: number;
 }
+
+export type ConfidenceTier = 'low' | 'moderate' | 'full';
 
 export interface UkraineScore {
   /** Normalized score in [-1, +1], or null if no signed contributions. */
@@ -43,10 +54,37 @@ export interface UkraineScore {
   /** Count of actions considered (including those excluded). */
   total: number;
   /**
-   * True when contributing < LOW_CONFIDENCE_THRESHOLD. The UI should
-   * de-emphasize the score label in this case (e.g., always say "Limited record").
+   * @deprecated use `confidenceTier === 'low'` instead. Removed in v2.7.0.
+   * Kept for one release so existing callers don't break (AC-43.2).
    */
   lowConfidence: boolean;
+  /**
+   * FR-43 AC-43.1: continuous confidence index in [0, 1].
+   * `min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD)`.
+   * Drives the UkraineScoreBadge saturation filter so mid-rangers look
+   * visually distinct from both first-timers and long-serving members.
+   */
+  confidence: number;
+  /**
+   * FR-43 AC-43.1: discretized tier derived from the same signal. Used by
+   * `scoreLabel` ("Limited record" copy) and by tests that branch on a
+   * named category. `'low'` below LOW_CONFIDENCE_THRESHOLD, `'full'` at
+   * or above MODERATE_CONFIDENCE_THRESHOLD, `'moderate'` between.
+   */
+  confidenceTier: ConfidenceTier;
+}
+
+/** Compute the tier name from a raw contributing count. Exported for reuse
+ *  by test helpers + curator debug tools. */
+export function deriveConfidenceTier(contributing: number): ConfidenceTier {
+  if (contributing < LOW_CONFIDENCE_THRESHOLD) return 'low';
+  if (contributing < MODERATE_CONFIDENCE_THRESHOLD) return 'moderate';
+  return 'full';
+}
+
+/** Compute the continuous confidence index from a raw contributing count. */
+export function deriveConfidence(contributing: number): number {
+  return Math.min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD);
 }
 
 export function computeUkraineScore(actions: ScoreInput[]): UkraineScore {
@@ -71,11 +109,14 @@ export function computeUkraineScore(actions: ScoreInput[]): UkraineScore {
   }
 
   const score = denominator === 0 ? null : numerator / denominator;
+  const confidenceTier = deriveConfidenceTier(contributing);
   return {
     score,
     contributing,
     total: actions.length,
-    lowConfidence: contributing > 0 && contributing < LOW_CONFIDENCE_THRESHOLD,
+    lowConfidence: confidenceTier === 'low' && contributing > 0,
+    confidence: deriveConfidence(contributing),
+    confidenceTier,
   };
 }
 
