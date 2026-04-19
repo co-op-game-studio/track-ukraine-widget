@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import type { UkraineBill } from '../../src/hooks/useSponsoredBills';
 
 // Stub the three hooks. Each test can override the return value via the
 // exported setters below before render.
@@ -24,10 +25,16 @@ let votingRecordMock = {
   load: vi.fn(),
   reset: vi.fn(),
 };
-let billsMock = {
+let billsMock: {
+  status: string;
+  data: { sponsored: UkraineBill[]; cosponsored: UkraineBill[] };
+  error: Error | null;
+  load: ReturnType<typeof vi.fn>;
+  reset: ReturnType<typeof vi.fn>;
+} = {
   status: 'success',
   data: { sponsored: [], cosponsored: [] },
-  error: null as Error | null,
+  error: null,
   load: vi.fn(),
   reset: vi.fn(),
 };

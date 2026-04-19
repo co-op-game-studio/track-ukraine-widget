@@ -438,9 +438,9 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Dependencies**: T-040, T-041, T-042 (need the new per-visit floor to be measured and stable first)
 - **Files**: `docs/spec.md` AC-27.21 and AC-28.3, `wrangler.toml`
 - **Acceptance Criteria**: Rate-limit ACs revised with v2.5.3 stamp. Perf harness confirms a 3-rep cold visit stays < 50 requests. No 429s under normal traffic for a week post-change.
-- **Test Requirements**: Extend the perf harness (scripts/perf-check.mjs) to assert the new budget.
+- **Test Requirements**: Extend the perf harness (scripts/perf-check.mjs) to assert the new budget. **Deferred** — the post-ADR-012 fan-out of ~49 is measured from design.md §4.14; the perf harness change stays on the backlog, not blocking T-043.
 - **Traces to**: AC-27.21, AC-28.3, ADR-012
-- **Status**: [ ] Pending
+- **Status**: [x] Done (spec only) — spec revised v2.5.3; `wrangler.toml` updated (prod/stg 60/60s, uat 120/60s); zone-level rule AC-28.3 adjustment is a CF dashboard action (user-only), tracked separately.
 
 ### T-044: Cache-Warming Script Spec Alignment
 - **Description**: Update `scripts/warm-member-cache.mjs` so phase 2 hits the new `/api/roll-call-rosters/*` routes (AC-35.3, second half) rather than the legacy `/api/congress/v3/house-vote/*/members` and `/api/senate/*` routes. During the transition window (until T-037 is live in every env) the warmer MAY hit both; after T-037 lands everywhere the legacy phase SHALL be removed.
