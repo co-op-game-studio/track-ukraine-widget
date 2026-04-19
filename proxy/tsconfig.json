@@ -15,5 +15,15 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["worker.ts"]
+  "include": [
+    "worker.ts",
+    "lib.ts",
+    "observability/**/*.ts",
+    "cache/**/*.ts",
+    "upstreams/**/*.ts",
+    "security/**/*.ts",
+    "kv/**/*.ts",
+    "routes/**/*.ts",
+    "router.ts"
+  ]
 }

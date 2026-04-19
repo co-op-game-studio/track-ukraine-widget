@@ -214,6 +214,34 @@
   color: inherit; font-family: inherit;
 }
 
+/* v2.6.0 — trace ID reference line (FR-36 AC-36.5). Muted, monospace,
+ * user-selectable so bug reporters can copy it from the UI. */
+.viw-error-banner-trace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: #6b7280;
+  user-select: text;
+  align-self: center;
+}
+
+/* v2.6.0 — "Try again" button rendered on retryable errors (FR-37 AC-37.5). */
+.viw-error-banner-retry {
+  background: var(--viw-black);
+  color: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  padding: 0.35rem 0.85rem;
+  font-family: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  align-self: center;
+}
+.viw-error-banner-retry:hover {
+  background: var(--viw-white);
+  color: var(--viw-black);
+}
+
 /* ── Results state heading ── */
 
 .viw-results { margin-top: 0.5rem; }
@@ -576,6 +604,17 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 1rem;
+  /* FR-43 AC-43.4: header wraps on narrow viewports so the context slug
+     falls below the number but above the gradient bar. */
+  flex-wrap: wrap;
+}
+
+.viw-score-header > .viw-score-context {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.viw-score-header > .viw-score-value {
+  flex: 0 0 auto;
 }
 
 .viw-score-title {
@@ -588,6 +627,16 @@
   color: var(--viw-black);
 }
 
+/* FR-43 AC-43.5: enlarged title treatment. Title acts as a section header
+   rather than a tiny caption. Clamps so it never dominates at huge
+   viewports while still stepping up from the current 0.75rem. */
+.viw-score-title-lg {
+  display: block;
+  font-size: clamp(1rem, 2.2vw, 1.4rem);
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
 .viw-score-value {
   font-family: var(--viw-font);
   font-weight: 900;
@@ -595,6 +644,9 @@
   font-size: 1.75rem;
   letter-spacing: -0.02em;
   color: var(--viw-black);
+  /* FR-43 AC-43.3: saturation filter animates smoothly when confidence
+     shifts between renders (e.g., after more votes land). */
+  transition: filter 200ms ease-out;
 }
 
 .viw-score-bar { margin: 0.6rem 0 0.4rem; }
@@ -1108,6 +1160,32 @@
   position: relative;
   align-items: stretch;
 }
+
+/* Suppress the browser-native search-cancel ("×") button on type="search"
+ * inputs. The status glyph (.viw-search-status) sits in the same trailing
+ * slot and was overlapping the native button on Chrome + Safari. We don't
+ * expose an explicit clear affordance today — users can select-all +
+ * delete. If we want one, render it in the React component so we own its
+ * positioning deterministically. */
+.viw-name-search-row input[type='search']::-webkit-search-cancel-button,
+.viw-name-search-row input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+.viw-name-search-row input[type='search']::-ms-clear,
+.viw-name-search-row input[type='search']::-ms-reveal {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Reserve horizontal space on the right so text never runs beneath the
+ * status glyph, even on long names like "Hoeven" or a typed state list. */
+.viw-name-search-row input[type='search'] {
+  padding-right: 40px;
+}
+
 .viw-search-status {
   position: absolute;
   right: 10px;

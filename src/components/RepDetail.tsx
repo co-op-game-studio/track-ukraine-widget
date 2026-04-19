@@ -15,6 +15,7 @@ import { VoteList } from './VoteList';
 import { BillList } from './BillList';
 import { UkraineScoreBadge } from './UkraineScoreBadge';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
+import { getEnvelopeFromError } from '../services/errorEnvelope';
 
 export interface RepDetailProps {
   representative: Representative;
@@ -175,7 +176,18 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
             <VoteList
               clusters={votingRecord.data?.clusters ?? []}
               loading={votingRecord.status === 'loading'}
-              error={votingRecord.error?.message ?? null}
+              error={(() => {
+                const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                return env?.userMessage ?? votingRecord.error?.message ?? null;
+              })()}
+              errorTraceId={(() => {
+                const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                return env?.traceId;
+              })()}
+              errorOnRetry={(() => {
+                const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                return env?.retryable ? () => votingRecord.load() : undefined;
+              })()}
             />
           ))}
         {tab === 'bills' && (
@@ -183,7 +195,18 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
             sponsored={bills.data?.sponsored ?? []}
             cosponsored={bills.data?.cosponsored ?? []}
             loading={bills.status === 'loading'}
-            error={bills.error?.message ?? null}
+            error={(() => {
+              const env = bills.error ? getEnvelopeFromError(bills.error) : null;
+              return env?.userMessage ?? bills.error?.message ?? null;
+            })()}
+            errorTraceId={(() => {
+              const env = bills.error ? getEnvelopeFromError(bills.error) : null;
+              return env?.traceId;
+            })()}
+            errorOnRetry={(() => {
+              const env = bills.error ? getEnvelopeFromError(bills.error) : null;
+              return env?.retryable ? () => bills.load() : undefined;
+            })()}
           />
         )}
       </div>

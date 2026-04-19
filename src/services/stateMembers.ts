@@ -6,6 +6,8 @@
  * Traces to: FR-1, FR-2, FR-32 AC-32.16, ADR-012, design.md §4.14.
  */
 
+import { throwFromResponse } from './errorEnvelope';
+
 export interface StateMemberSummary {
   bioguideId: string;
   first: string;
@@ -43,7 +45,7 @@ export async function fetchStateMembers(
   const res = await fetch(url);
   if (res.status === 404) return null;
   if (!res.ok) {
-    throw new Error(`state-members ${res.status} for ${stateCode}`);
+    await throwFromResponse(res, `state-members ${stateCode}`);
   }
   return (await res.json()) as StateMembersRecord;
 }
