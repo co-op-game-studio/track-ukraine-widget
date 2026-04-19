@@ -90,3 +90,64 @@ export function toUserFacingError(env: ErrorEnvelope): UserFacingError {
     retryable: env.retryable,
   };
 }
+
+/**
+ * Error subclass that carries an FR-37 envelope alongside the standard
+ * `message` field. Services throw these via `throwFromResponse` so hooks
+ * and components can surface `userMessage` + `traceId` + `retryable`
+ * without reparsing the body.
+ *
+ * The `message` we pass to `super()` is the ENVELOPE's `userMessage` when
+ * available so `err.message` is always safe to show (AC-37.8). Operator
+ * context (the envelope's `message` field) stays inside `.envelope`.
+ *
+ * Traces: FR-37 AC-37.1, AC-37.5, AC-37.8.
+ */
+export class EnvelopedError extends Error {
+  public readonly envelope: ErrorEnvelope;
+  constructor(envelope: ErrorEnvelope) {
+    super(envelope.userMessage);
+    this.name = 'EnvelopedError';
+    this.envelope = envelope;
+  }
+}
+
+/**
+ * Retrieve the envelope attached to an Error (via `EnvelopedError`) or
+ * null if no envelope is present. Accepts `unknown` because `catch`
+ * clauses inherit type unknown in strict mode; narrows internally.
+ */
+export function getEnvelopeFromError(err: unknown): ErrorEnvelope | null {
+  if (err instanceof EnvelopedError) return err.envelope;
+  return null;
+}
+
+/**
+ * Turn a non-ok Response into a thrown Error. Best-effort attempt to
+ * parse an FR-37 envelope from the body; on success, throws an
+ * `EnvelopedError` carrying the envelope. On failure (non-JSON body,
+ * shape mismatch, empty body), throws a plain `Error` with a fallback
+ * message like "Senate.gov returned 502" — preserving the pre-v2.6.0
+ * error-message contract for upstream surfaces that don't speak FR-37.
+ *
+ * Always returns never (throws). Never resolves.
+ *
+ * Traces: FR-37 AC-37.5.
+ */
+export async function throwFromResponse(
+  res: Response,
+  upstreamLabel: string,
+): Promise<never> {
+  let envelope: ErrorEnvelope | null = null;
+  try {
+    const text = await res.text();
+    if (text) {
+      const parsed = JSON.parse(text);
+      envelope = parseErrorEnvelope(parsed);
+    }
+  } catch {
+    // body wasn't JSON; fall through to plain Error.
+  }
+  if (envelope) throw new EnvelopedError(envelope);
+  throw new Error(`${upstreamLabel} returned ${res.status}`);
+}

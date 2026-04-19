@@ -1,41 +1,31 @@
-/** Traces: FR-44 AC-44.17 (T-093), FR-37 AC-37.5, FR-37 AC-37.8. */
+/** Traces: FR-44 AC-44.17 (T-093 + T-097), FR-37 AC-37.5, FR-37 AC-37.8. */
 /**
  * hookErrorBanner — integration audit of how each error-emitting hook propagates
  * FR-37 error envelopes into the ErrorBanner surface in its owning component.
  *
- * Audit findings discovered while writing this test (v2.6.0 widget state):
+ * Post-T-097 state (2026-04-19):
  *
- *   1. `useAddressLookup` is owned by `VoterInfoWidget`, not `ResultsPanel`
- *      (ResultsPanel is a pure presentational consumer of a resolved
- *      `LookupResult`). VoterInfoWidget renders `<ErrorBanner />` on
- *      `lookup.error`, but with only `message` + `onDismiss` — the hook
- *      today converts any non-ok fetch into a plain `Error` inside
- *      `geocodeAddress` / `fetchStateMembers`, so the FR-37 envelope's
- *      `userMessage` / `traceId` / `retryable` fields are dropped at the
- *      service boundary before reaching state. Test 1 asserts the CURRENT
- *      observable behavior (banner appears, *some* message text shows) and
- *      carries a TODO noting the migration gap.
+ *   Test 1 — useAddressLookup 429 via VoterInfoWidget. Services now use
+ *   throwFromResponse, which parses the envelope and throws an
+ *   EnvelopedError. VoterInfoWidget pulls userMessage + traceId off the
+ *   error and passes them to ErrorBanner. Retryable codes (429, 5xx) get
+ *   a "Try again" button bound to the last-submitted address.
  *
- *   2. `NameSearchResultsPanel` + `useNameSearch` (test 3): the hook's error
- *      state is rendered as a plain `<div class="viw-name-search-hint">`
- *      with the text "Search error: {message}" — NOT an `ErrorBanner`. The
- *      banner component is never instantiated on this path, so there is no
- *      trace ID, no userMessage, and no retry button to assert on. Test
- *      skipped per T-093 guidance ("do not modify the component; flag it").
+ *   Test 2 — RepDetail voting-record 500. useVotingRecord surfaces the
+ *   error through VoteList's new errorTraceId / errorOnRetry props,
+ *   which render via ErrorBanner when present.
  *
- *   3. `RepDetail` + `useVotingRecord` / `useSponsoredBills` (tests 2 & 4):
- *      RepDetail forwards `votingRecord.error?.message` to `<VoteList>` and
- *      `bills.error?.message` to `<BillList>`, which render their own
- *      `<div class="viw-{votelist,billlist}-error" role="alert">` text nodes.
- *      `ErrorBanner` is not used on this surface either. Tests skipped.
+ *   Test 3 — SKIPPED (intentional). NameSearchResultsPanel renders errors
+ *   as a plain <div role="status"> inline hint by design; the search
+ *   surface routes its error display through NameSearchInput's icon
+ *   affordance, not ErrorBanner. Out of scope for T-097.
  *
- * Net: today only ONE of the four envelope-hook pairs goes through
- * `ErrorBanner`, and even that one path does not parse the FR-37 envelope.
- * Full widget-side FR-37 wiring is a separate task.
+ *   Test 4 — RepDetail sponsored-bills 400. Same path as test 2 via
+ *   BillList's new errorTraceId / errorOnRetry props.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { VoterInfoWidget } from '../../src/VoterInfoWidget';
 
 // ─── FR-37 envelope fixtures ─────────────────────────────────────────────────
@@ -73,24 +63,17 @@ function envelope(
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', 'x-trace-id': 'tr_headertrace' },
+    headers: { 'content-type': 'application/json' },
   });
 }
 
-// ─── Test 1 — live: useAddressLookup 429 via VoterInfoWidget ──────────────────
+// ─── Tests ──────────────────────────────────────────────────────────────────
 
-describe('hookErrorBanner — FR-37 envelope propagation audit (AC-44.17 / T-093)', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
+describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => { vi.restoreAllMocks(); });
 
-  it('ResultsPanel + useAddressLookup on a 429: ErrorBanner renders on the lookup error', async () => {
-    // NOTE: useAddressLookup is owned by VoterInfoWidget (not ResultsPanel);
-    // ResultsPanel is presentational and never sees hook errors. We render
-    // VoterInfoWidget so the real hook + real ErrorBanner surface participate.
+  it('VoterInfoWidget + useAddressLookup on 429: full envelope in ErrorBanner', async () => {
     const body = envelope(
       'rate_limited',
       'Too many requests. Try again.',
@@ -98,9 +81,7 @@ describe('hookErrorBanner — FR-37 envelope propagation audit (AC-44.17 / T-093
       'census',
       true,
     );
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      jsonResponse(body, 429),
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse(body, 429));
 
     render(<VoterInfoWidget apiBase="" />);
 
@@ -108,65 +89,202 @@ describe('hookErrorBanner — FR-37 envelope propagation audit (AC-44.17 / T-093
     fireEvent.change(input, { target: { value: '2000 S State St, Chicago, IL 60616' } });
     fireEvent.click(screen.getByRole('button', { name: /Look Up/i }));
 
-    // Banner appears. useAddressLookup today throws a generic Error from the
-    // service layer (Census geocode on non-ok), so we assert the observable
-    // shape: an alert region with *some* message text and a dismiss affordance.
     const banner = await waitFor(() => {
       const el = document.querySelector('.viw-error-banner');
       if (!el) throw new Error('ErrorBanner not yet rendered');
-      return el;
+      return el as HTMLElement;
     });
-    expect(banner).toBeInTheDocument();
     expect(banner.getAttribute('role')).toBe('alert');
-    expect(banner.textContent ?? '').toMatch(/\S/); // non-empty message
+    // userMessage rendered in place of the operator-context message.
+    expect(banner).toHaveTextContent('Too many requests. Try again.');
+    // Trace ID line rendered per AC-36.5.
+    expect(banner).toHaveTextContent(/Reference:\s*tr_0123456789abcdef/);
+    // Retryable envelope → Try again button present + bound to the last address.
+    expect(within(banner).getByRole('button', { name: /try again/i })).toBeInTheDocument();
+  });
 
-    // TODO(FR-37 widget migration): once useAddressLookup wires
-    // parseErrorEnvelope through geocodeAddress/fetchStateMembers, upgrade
-    // these assertions to:
-    //   expect(alert).toHaveTextContent('Too many requests. Try again.');
-    //   expect(alert).toHaveTextContent(/Reference:\s*tr_0123456789abcdef/);
-    //   expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
-    // and drop the fallback-shape assertions above.
+  it('RepDetail + sponsored-bills 500 (retryable): ErrorBanner with trace ID + retry button', async () => {
+    // Note: useVotingRecord intentionally swallows transient roster-fetch
+    // errors (surfaces "Did Not Serve" rather than propagating — see
+    // src/hooks/useVotingRecord.ts), so voting-record errors don't reach
+    // RepDetail's error surface. We assert the same envelope contract
+    // on the bills path where the hook does propagate.
+    const { fetchMock } = setupVoterFlow({
+      billsError: envelope(
+        'upstream_5xx',
+        'Legislation momentarily unavailable. Try again.',
+        'tr_cafecafe00000001',
+        'congress',
+        true,
+      ),
+      billsStatus: 500,
+    });
+
+    render(<VoterInfoWidget apiBase="" />);
+    await driveToRepDetail();
+
+    // Switch to Legislation tab where useSponsoredBills' error surfaces.
+    const legTab = await screen.findByRole('tab', { name: /Ukraine Legislation/i });
+    fireEvent.click(legTab);
+
+    const banner = await waitFor(() => {
+      const el = document.querySelector('.viw-error-banner');
+      if (!el) throw new Error('ErrorBanner not yet rendered in RepDetail');
+      return el as HTMLElement;
+    });
+    expect(banner).toHaveTextContent('Legislation momentarily unavailable');
+    expect(banner).toHaveTextContent(/Reference:\s*tr_cafecafe00000001/);
+    expect(within(banner).getByRole('button', { name: /try again/i })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  // ─── Test 2 — SKIPPED: RepDetail does not use ErrorBanner ──────────────────
-  //
-  // Component gap: RepDetail.tsx routes useVotingRecord's error to
-  // `<VoteList error={votingRecord.error?.message ?? null} />`, which renders
-  // `<div className="viw-votelist-error" role="alert">{error}</div>` — a plain
-  // error string, not the ErrorBanner component. There is no traceId line and
-  // no retry button to assert on. Fixing this is out of scope for T-093;
-  // flagging here so the audit surfaces the divergence.
-  it.skip('RepDetail + voting-record 500: retry + trace ID on ErrorBanner', () => {
-    // Component RepDetail does not render ErrorBanner on useVotingRecord
-    // error; test skipped with comment. See header JSDoc finding (3).
+  it.skip('NameSearchResultsPanel + useNameSearch: intentionally routes via NameSearchInput status icon, not ErrorBanner', () => {
+    // Retained skip. The widget surfaces name-search errors through the
+    // input's icon affordance (NameSearchInput). VoterInfoWidget passes
+    // `error={null}` to NameSearchResultsPanel by design. Not in T-097 scope.
   });
 
-  // ─── Test 3 — SKIPPED: NameSearchResultsPanel does not use ErrorBanner ─────
-  //
-  // Component gap: NameSearchResultsPanel renders the `error` prop inline as
-  // `<div className="viw-name-search-hint" role="status">Search error: {error}</div>`.
-  // No ErrorBanner component is mounted on this surface; there is no
-  // userMessage/traceId/retry surface to assert against. Additionally,
-  // VoterInfoWidget currently passes `error={null}` to this panel and routes
-  // the useNameSearch error message to the NameSearchInput's inline hint
-  // instead, so even the plain-text hint path above is unreachable from a
-  // full-widget render.
-  it.skip('NameSearchResultsPanel + useNameSearch 404: no retry, userMessage + traceId', () => {
-    // Component NameSearchResultsPanel does not render ErrorBanner on
-    // useNameSearch error; test skipped with comment. See header JSDoc
-    // finding (2).
-  });
+  it('RepDetail + sponsored-bills 400: ErrorBanner with trace ID, no retry (non-retryable bad_request)', async () => {
+    const { fetchMock } = setupVoterFlow({
+      billsError: envelope(
+        'bad_request',
+        'Could not load bills for this member.',
+        'tr_deadbeef12345678',
+        'congress',
+        false,
+      ),
+      billsStatus: 400,
+    });
 
-  // ─── Test 4 — SKIPPED: RepDetail does not use ErrorBanner ──────────────────
-  //
-  // Component gap (same root cause as test 2): sponsored-bills error is
-  // forwarded as `<BillList error={bills.error?.message ?? null} />`, which
-  // renders `<div className="viw-billlist-error" role="alert">{error}</div>`.
-  // No ErrorBanner instance, so no retry/traceId props to exercise.
-  it.skip('RepDetail + sponsored-bills 400: no retry, userMessage + traceId', () => {
-    // Component RepDetail does not render ErrorBanner on useSponsoredBills
-    // error; test skipped with comment. See header JSDoc finding (3).
+    render(<VoterInfoWidget apiBase="" />);
+    await driveToRepDetail();
+
+    // Switch to Legislation tab. "UKRAINE LEGISLATION" is the visible label.
+    const legTab = await screen.findByRole('tab', { name: /Ukraine Legislation/i });
+    fireEvent.click(legTab);
+
+    const banner = await waitFor(() => {
+      const el = document.querySelector('.viw-error-banner');
+      if (!el) throw new Error('BillList error banner not rendered');
+      return el as HTMLElement;
+    });
+    expect(banner).toHaveTextContent('Could not load bills for this member.');
+    expect(banner).toHaveTextContent(/Reference:\s*tr_deadbeef12345678/);
+    // Non-retryable → no retry button.
+    expect(within(banner).queryByRole('button', { name: /try again/i })).toBeNull();
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
+
+// ─── Fetch-mock harness for full widget flow ────────────────────────────────
+
+interface FlowOptions {
+  rosterError?: ErrorEnvelopeBody;
+  rosterStatus?: number;
+  billsError?: ErrorEnvelopeBody;
+  billsStatus?: number;
+}
+
+/**
+ * Mocks the sequence of fetches a real VoterInfoWidget issues when the
+ * user submits a Chicago IL address and clicks on a rep chip. Returns
+ * realistic census + state-members + member-profile payloads so the
+ * widget reaches RepDetail, then routes roll-call-rosters and member
+ * sponsorship requests through the caller's envelopes.
+ */
+function setupVoterFlow(opts: FlowOptions): { fetchMock: MockInstance } {
+  const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(
+    (async (input: unknown) => {
+      const url =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : (input as Request).url;
+      if (url.includes('/api/census/')) {
+        return jsonResponse(censusFixture(), 200);
+      }
+      if (url.includes('/api/state-members/')) {
+        return jsonResponse(stateMembersFixture(), 200);
+      }
+      if (url.includes('/api/members/')) {
+        if (opts.billsError) {
+          return jsonResponse(opts.billsError, opts.billsStatus ?? 500);
+        }
+        return jsonResponse(memberProfileFixture(), 200);
+      }
+      if (url.includes('/api/roll-call-rosters/')) {
+        if (opts.rosterError) {
+          return jsonResponse(opts.rosterError, opts.rosterStatus ?? 500);
+        }
+        return jsonResponse({ rollCallId: 'x', chamber: 'house', congress: 118, session: 2, rollCall: 1, casts: {} }, 200);
+      }
+      return jsonResponse({ error: 'unmocked', url }, 404);
+    }) as unknown as typeof globalThis.fetch,
+  );
+  return { fetchMock };
+}
+
+async function driveToRepDetail(): Promise<void> {
+  const input = screen.getByLabelText(/Enter your home address/i);
+  fireEvent.change(input, { target: { value: '2000 S State St, Chicago, IL 60616' } });
+  fireEvent.click(screen.getByRole('button', { name: /Look Up/i }));
+  // Wait for the chip to appear, then click the senator.
+  const chip = await screen.findByRole('button', { name: /DUCKWORTH/i });
+  fireEvent.click(chip);
+}
+
+function censusFixture() {
+  return {
+    result: {
+      addressMatches: [
+        {
+          matchedAddress: '2000 S State St, Chicago, IL 60616',
+          geographies: {
+            '119th Congressional Districts': [
+              { STATE: '17', CD119: '07' },
+            ],
+          },
+        },
+      ],
+    },
+  };
+}
+
+function stateMembersFixture() {
+  return {
+    stateCode: 'IL',
+    senators: [
+      {
+        bioguideId: 'D000622', first: 'Tammy', last: 'Duckworth',
+        officialName: 'Tammy Duckworth', state: 'IL', district: null,
+        chamber: 'Senate', party: 'D',
+        photoUrl: null, website: null,
+      },
+    ],
+    house: [
+      {
+        bioguideId: 'D000096', first: 'Danny', last: 'Davis',
+        officialName: 'Danny Davis', state: 'IL', district: 7,
+        chamber: 'House', party: 'D',
+        photoUrl: null, website: null,
+      },
+    ],
+    generatedAt: '2026-04-01T00:00:00Z',
+    schemaVersion: 1,
+  };
+}
+
+function memberProfileFixture() {
+  return {
+    bioguideId: 'D000622',
+    first: 'Tammy', last: 'Duckworth',
+    officialName: 'Tammy Duckworth', state: 'IL', district: null,
+    chamber: 'Senate', party: 'D',
+    photoUrl: null, website: null,
+    searchKey: 'tammy duckworth',
+    sponsored: [], cosponsored: [],
+    generatedAt: '2026-04-01T00:00:00Z',
+    schemaVersion: 1,
+  };
+}

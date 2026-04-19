@@ -8,6 +8,7 @@ import type { UkraineBill } from '../hooks/useSponsoredBills';
 import type { Valence } from '../services/valence';
 import { formatDate } from '../utils/formatters';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
+import { ErrorBanner } from './ErrorBanner';
 
 const PAGE_SIZE = 5;
 
@@ -16,6 +17,10 @@ export interface BillListProps {
   cosponsored: UkraineBill[];
   loading?: boolean;
   error?: string | null;
+  /** Optional FR-37 envelope fields — when `errorTraceId` is present,
+   *  errors render via `ErrorBanner` instead of the legacy inline div. */
+  errorTraceId?: string;
+  errorOnRetry?: () => void;
 }
 
 export function BillList({
@@ -23,6 +28,8 @@ export function BillList({
   cosponsored,
   loading = false,
   error = null,
+  errorTraceId,
+  errorOnRetry,
 }: BillListProps) {
   // AC-4.6: default to the non-empty tab when the primary (Sponsored) has no
   // entries but Cosponsored does. Stable fallback otherwise.
@@ -45,6 +52,15 @@ export function BillList({
     return <div className="viw-billlist-empty">Loading Ukraine legislation…</div>;
   }
   if (error) {
+    if (errorTraceId || errorOnRetry) {
+      return (
+        <ErrorBanner
+          message={error}
+          traceId={errorTraceId}
+          onRetry={errorOnRetry}
+        />
+      );
+    }
     return <div className="viw-billlist-error" role="alert">{error}</div>;
   }
 

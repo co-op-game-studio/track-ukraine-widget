@@ -7,18 +7,38 @@ import { useState } from 'react';
 import type { ClusteredMemberVoteWithValence, MemberVoteRow } from '../hooks/useVotingRecord';
 import type { Valence } from '../services/valence';
 import { formatDate } from '../utils/formatters';
+import { ErrorBanner } from './ErrorBanner';
 
 export interface VoteListProps {
   clusters: ClusteredMemberVoteWithValence[];
   loading?: boolean;
   error?: string | null;
+  /** Optional FR-37 envelope fields — when `traceId` is present, errors
+   *  render via `ErrorBanner` instead of the legacy inline div. */
+  errorTraceId?: string;
+  errorOnRetry?: () => void;
 }
 
-export function VoteList({ clusters, loading = false, error = null }: VoteListProps) {
+export function VoteList({
+  clusters,
+  loading = false,
+  error = null,
+  errorTraceId,
+  errorOnRetry,
+}: VoteListProps) {
   if (loading && clusters.length === 0) {
     return <div className="viw-votelist-empty">Loading Ukraine votes…</div>;
   }
   if (error) {
+    if (errorTraceId || errorOnRetry) {
+      return (
+        <ErrorBanner
+          message={error}
+          traceId={errorTraceId}
+          onRetry={errorOnRetry}
+        />
+      );
+    }
     return <div className="viw-votelist-error" role="alert">{error}</div>;
   }
   if (clusters.length === 0) {

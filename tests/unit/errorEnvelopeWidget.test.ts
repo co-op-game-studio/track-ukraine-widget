@@ -83,3 +83,68 @@ describe('toUserFacingError — AC-37.8: operator context never reaches UI', () 
     expect(Object.values(view)).not.toContain('Operator internal: congress.gov 503');
   });
 });
+
+describe('EnvelopedError + throwFromResponse (T-097)', () => {
+  it('throwFromResponse awaits envelope JSON body and attaches it to the Error', async () => {
+    const { throwFromResponse, getEnvelopeFromError } = await import(
+      '../../src/services/errorEnvelope'
+    );
+    const body = {
+      error: {
+        code: 'rate_limited',
+        message: 'op detail',
+        userMessage: 'Too many requests. Wait a moment.',
+        upstream: 'congress',
+        retryable: true,
+        traceId: 'tr_0123456789abcdef',
+      },
+    };
+    const res = new Response(JSON.stringify(body), {
+      status: 429,
+      headers: { 'Content-Type': 'application/json' },
+    });
+    let caught: Error | undefined;
+    try {
+      await throwFromResponse(res, 'Census geocoder');
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toContain('Too many requests');
+    const env = getEnvelopeFromError(caught!);
+    expect(env?.code).toBe('rate_limited');
+    expect(env?.retryable).toBe(true);
+    expect(env?.traceId).toBe('tr_0123456789abcdef');
+  });
+
+  it('throwFromResponse falls back to a plain Error when body is not FR-37 shaped', async () => {
+    const { throwFromResponse, getEnvelopeFromError } = await import(
+      '../../src/services/errorEnvelope'
+    );
+    const res = new Response('<html>oops</html>', {
+      status: 502,
+      headers: { 'Content-Type': 'text/html' },
+    });
+    let caught: Error | undefined;
+    try {
+      await throwFromResponse(res, 'Senate.gov');
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught).toBeDefined();
+    expect(caught?.message).toMatch(/Senate\.gov.*502/);
+    expect(getEnvelopeFromError(caught!)).toBeNull();
+  });
+
+  it('getEnvelopeFromError returns null for a plain Error', async () => {
+    const { getEnvelopeFromError } = await import('../../src/services/errorEnvelope');
+    expect(getEnvelopeFromError(new Error('nothing here'))).toBeNull();
+  });
+
+  it('getEnvelopeFromError returns null for non-Error values', async () => {
+    const { getEnvelopeFromError } = await import('../../src/services/errorEnvelope');
+    expect(getEnvelopeFromError('string')).toBeNull();
+    expect(getEnvelopeFromError(undefined)).toBeNull();
+    expect(getEnvelopeFromError(null)).toBeNull();
+  });
+});
