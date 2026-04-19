@@ -718,6 +718,64 @@ This is a **35%** reduction from the v2.5.1 worst case (~70+ per fully cold visi
 
 ---
 
+### 4.15 Tiered Cache + R2 Static Archive (v2.6.0 — ADR-014)
+
+See FR-40 + FR-41 for the spec. This section describes the runtime topology.
+
+**Tier hierarchy (fastest → slowest):**
+
+```
+[request in]
+    │
+    ▼
+┌─────────────────────────┐
+│  Tier 0: EdgeTier       │  caches.default, per-POP, ~5 ms
+│  (caches.default)       │
+└─────────────────────────┘
+    │ miss
+    ▼
+┌─────────────────────────┐
+│  Tier 1: KvTier         │  KV_VOTER_INFO, global, ~30 ms
+│  cache:v1:{kind}:{...}  │
+└─────────────────────────┘
+    │ miss
+    ▼
+┌─────────────────────────┐
+│  Tier 2: R2Tier         │  R2_STATIC bucket, global, ~50 ms
+│  archive/{kind}/{...}   │  gated: immutable policy + frozen session
+└─────────────────────────┘
+    │ miss (or ineligible for R2)
+    ▼
+┌─────────────────────────┐
+│  UpstreamFetcher        │  senate.gov / api.congress.gov / geocoding
+│  (one per upstream)     │  400–1200 ms, rate-limited
+└─────────────────────────┘
+```
+
+**Read path.** `TieredCache.get(key)` iterates tiers top-down, returns the first hit, records `servedBy`.
+
+**Promote on hit.** When tier N serves, `promote` writes the entry to tiers 0..N-1 via `ctx.waitUntil` — never blocks the response. Next request gets a faster-tier hit.
+
+**Store on miss.** When all tiers miss and the upstream fetcher resolves, `storeFromUpstream` writes to every writable tier whose `policy.eligibleTiers` permits, via `ctx.waitUntil`. The R2Tier's own `put` additionally gates on `policy.immutable && entry.sessionStatus === 'frozen'` — open-session data flowing through the same pipeline is silently skipped at the R2 boundary (not an error; it's the right semantics for non-frozen data).
+
+**Single pipeline.** `serveCached(request, key, cache, fetcher, policy, ctx, env)` is the only code path any cacheable route uses. Per-route policy lives in `proxy/routes/cache-config.ts`. Handlers do not call upstream directly; they supply a `CacheKey` and an `UpstreamFetcher`.
+
+**No curator.** Prewarming (`scripts/warm.ts`, T-063) issues standard GETs to the Worker's public API. Each GET flows through `serveCached`, triggering the same store-on-miss logic a real visitor's request would. R2 gets populated as a byproduct of traffic — organic or synthetic. There is no second write path.
+
+**Data-type eligibility matrix.** See FR-41 exhaustively. Summary:
+
+- **R2-eligible (tier 0+1+2):** Senate roll-call XML, House roll-call rosters, House roll-call details (all gated by session-closed). Bill actions/summaries (gated by `latestActionDate > 180d ago`).
+- **No R2 (tier 0+1 only):** Member detail, sponsored-legislation, cosponsored-legislation, census geocoder, bill metadata.
+- **KV-owner (tier 1 only, domain records):** `member:v1:*`, `bill:v1:*`, `roll-call-roster:v1:*`, `state-members:v1:*`, `name-index:v1:*`. These are curator-projected domain records, not response cache entries — same backing (KV), different abstraction layer.
+
+**Parse-on-demand for Senate XML.** When a request for `/api/roll-call-rosters/senate/...` misses KV but hits R2 (raw XML bytes), the R2 tier returns the XML; the pipeline parses it via `proxy/upstreams/senate-xml-parser.ts` into the JSON roster shape, responds to the client, and writes the parsed `RollCallRosterRecord` to KV via `ctx.waitUntil` for the next request (AC-41.7).
+
+**Session-status computation.** `proxy/upstreams/congress-calendar.ts` exposes pure helpers `currentCongress(now)`, `currentSession(now)`. A roll-call is frozen when `(congress, session) < (currentCongress, currentSession)` at fetch time. Bill actions are frozen when `latestActionDate + 180d < now`. The session-status value is computed by the upstream fetcher and carried on the `CacheEntry`; every tier treats it the same way.
+
+**Observability.** Every response served via `serveCached` carries `X-Cache: HIT|MISS` and `X-Cache-Tier: edge|kv|r2|upstream`. The `cacheTier` value also lands in the `blobs[4]` slot of the per-request Analytics Engine data point (FR-38) for aggregate queries like "what percent of Senate XML requests are served from R2 today?"
+
+---
+
 ## 5. Design Decisions
 
 | Decision | Choice | Rationale | ADR |
@@ -747,3 +805,7 @@ This is a **35%** reduction from the v2.5.1 worst case (~70+ per fully cold visi
 | Non-voting delegate | Show card normally but disable Votes tab with note: "Non-voting delegate" |
 | Rate limit exceeded | Show banner: "Too many requests. Please wait a moment and try again." |
 | Network timeout | Retry once after 3 seconds, then show error |
+
+### 6.1 Canonical Error Envelope (v2.6.0 — FR-37)
+
+As of v2.6.0 every error emission from the Worker uses a single envelope (see FR-37 for ACs). The table above describes what the user sees; it's backed by the envelope's `userMessage` field. The widget parses `error.code` and `error.retryable` to decide whether to render a "Try again" affordance. The trace ID (`error.traceId`) renders as a muted, monospace, selectable "Reference: tr_..." line below the user message, so users can quote it when reporting a bug. Operator-internal detail (`error.message`, upstream identity, status code) ends up in Workers Logs and the Analytics Engine data point for the request — not the UI.

@@ -8,7 +8,10 @@ import { UkraineScoreBadge } from '../../src/components/UkraineScoreBadge';
 import type { UkraineScore } from '../../src/services/ukraineScore';
 
 function score(value: number | null, total = 10, contributing = 10, lowConfidence = false): UkraineScore {
-  return { score: value, total, contributing, lowConfidence };
+  const confidence = Math.min(1, contributing / 8);
+  const confidenceTier: UkraineScore['confidenceTier'] =
+    contributing < 3 ? 'low' : contributing < 8 ? 'moderate' : 'full';
+  return { score: value, total, contributing, lowConfidence, confidence, confidenceTier };
 }
 
 describe('UkraineScoreBadge', () => {
@@ -105,5 +108,64 @@ describe('UkraineScoreBadge', () => {
     expect(screen.getByText(/1 counted action$/i)).toBeInTheDocument();
     rerender(<UkraineScoreBadge score={score(0.5, 2, 2)} />);
     expect(screen.getByText(/2 counted actions$/i)).toBeInTheDocument();
+  });
+
+  // FR-43: data-surety visual treatment.
+  describe('FR-43 data-surety visual treatment', () => {
+    it('AC-43.3: applies filter: saturate(1.0) at confidence=1.0 (tier=full)', () => {
+      const { container } = render(<UkraineScoreBadge score={score(0.5, 20, 20)} />);
+      const value = container.querySelector('.viw-score-value') as HTMLElement;
+      const filter = value.style.filter;
+      expect(filter).toMatch(/saturate\(1\b/);
+    });
+
+    it('AC-43.3: applies filter: saturate(0.6) at confidence=0.5 (tier=moderate)', () => {
+      const { container } = render(<UkraineScoreBadge score={score(0.5, 4, 4)} />);
+      const value = container.querySelector('.viw-score-value') as HTMLElement;
+      // 0.2 + 0.8 * 0.5 = 0.6
+      expect(value.style.filter).toMatch(/saturate\(0\.6\b/);
+    });
+
+    it('AC-43.3: applies filter: saturate(~0.3) at low-confidence 1 action', () => {
+      const { container } = render(<UkraineScoreBadge score={score(0.5, 1, 1, true)} />);
+      const value = container.querySelector('.viw-score-value') as HTMLElement;
+      // 0.2 + 0.8 * 0.125 = 0.3
+      expect(value.style.filter).toMatch(/saturate\(0\.3\b/);
+    });
+
+    it('AC-43.3: N/A rendering does NOT apply a saturation filter (no color to modulate)', () => {
+      const { container } = render(<UkraineScoreBadge score={null} />);
+      const value = container.querySelector('.viw-score-value') as HTMLElement;
+      expect(value?.style.filter ?? '').toBe('');
+    });
+
+    it('AC-43.4: context slug renders on the same row as the number and BEFORE it (left side)', () => {
+      const { container } = render(<UkraineScoreBadge score={score(0.5, 15, 15)} />);
+      const header = container.querySelector('.viw-score-header') as HTMLElement;
+      expect(header).not.toBeNull();
+      // The context slug lives inside the header row now.
+      const contextInHeader = header.querySelector('.viw-score-context');
+      expect(contextInHeader).not.toBeNull();
+      // DOM order: context first (left), number second (right).
+      const value = header.querySelector('.viw-score-value');
+      expect(contextInHeader!.compareDocumentPosition(value!)
+        & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('AC-43.5: title carries the enlarged-size class viw-score-title-lg', () => {
+      const { container } = render(<UkraineScoreBadge score={score(0.5, 15, 15)} />);
+      const title = container.querySelector('.viw-score-title') as HTMLElement;
+      expect(title?.classList.contains('viw-score-title-lg')).toBe(true);
+    });
+
+    it('AC-43.7: "Limited record" copy still shows at tier=low (moderate+ uses normal labels)', () => {
+      const { rerender, container } = render(<UkraineScoreBadge score={score(0.9, 2, 2, true)} />);
+      expect(container.querySelector('.viw-score-context strong')?.textContent)
+        .toMatch(/Limited record/);
+      // 4 contributing → moderate tier → normal label again.
+      rerender(<UkraineScoreBadge score={score(0.5, 4, 4)} />);
+      expect(container.querySelector('.viw-score-context strong')?.textContent)
+        .toBe('Supporter');
+    });
   });
 });

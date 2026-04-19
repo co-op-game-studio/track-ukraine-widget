@@ -1,9 +1,11 @@
 # Software Requirements Specification (SRS)
 # Voter Information Widget — Ukraine Focus
 
-**Version**: 2.5.1
-**Date**: 2026-04-17
+**Version**: 2.6.0
+**Date**: 2026-04-19
 **Status**: Active
+
+**v2.6.0 changelog (2026-04-19).** Introduces a unified **tiered cache architecture** (FR-40), an **R2 static archive tier** for session-frozen roll-call data (FR-41), **first-class observability** via request tracing + Workers Analytics Engine + structured logs (FR-36, FR-38, FR-39), a **canonical error envelope** (FR-37), and a **proxy module decomposition** that replaces the 1500-line `proxy/lib.ts` god module with composed OOP interfaces (FR-42). ADR-011's "no R2" stance is narrowed, not reversed: R2 is reintroduced **only** as a byte-level archive for static upstream responses (closed-session roll-call XML + rosters), never as a curator-record store. The scheduled "curator" script is retired — prewarming becomes an ordinary client of the cache, populating tiers via the same code path real request traffic uses (ADR-015).
 
 ---
 
@@ -493,7 +495,7 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 
 - AC-30.1: stg Worker configuration (`[env.stg]` in `wrangler.toml`) SHALL be identical to prod's top-level block, except for the bucket name (`voter-info-widget-assets-stg`) and the Worker name (`voter-info-widget-proxy-stg`). Specifically: same `ALLOWED_ORIGINS`, same absence of `ALLOW_LOCALHOST`, same observability flag, same compatibility date. Any divergence from prod SHALL be called out in-line in `wrangler.toml` with a dated comment explaining why.
 - AC-30.2: The stg Worker's Congress.gov API key (`CONGRESS_API_KEY` Worker secret) is set once per env via `wrangler secret put CONGRESS_API_KEY --env stg` and is NOT touched by the sync workflow. Out of scope for this FR — managed manually, same as prod. Stg MAY have a distinct Congress.gov key from prod; both consume from the same 5000-req/hour budget. Rationale: distinct keys can be revoked independently if one leaks.
-- AC-30.3: A new npm script `npm run stg:sync-data` SHALL perform a **copy-then-swap** of prod's three R2 objects into stg's R2 bucket:
+- AC-30.3 (SUPERSEDED 2026-04-19 by FR-44 AC-44.6 — kept as historical marker): A new npm script `npm run stg:sync-data` SHALL perform a **copy-then-swap** of prod's three R2 objects into stg's R2 bucket:
   1. Fetch each of `voter-info-widget.iife.js`, `ukraineBills.json`, `ukraineVotes.json` from `voter-info-widget-assets` (prod bucket).
   2. Write each to `voter-info-widget-assets-stg/<key>.pending` (a staging location inside stg's bucket).
   3. Verify all three `.pending` objects exist with expected content-type and non-zero size.
@@ -506,7 +508,7 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
   3. Deploy the Worker to stg via `wrangler deploy --env stg`.
   4. Run **the entire test suite against the deployed stg Worker edge** (`E2E_TARGET=https://stg.vote.cogs.it.com`, carrying the service-token headers from `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET` per FR-29).
   5. If any step fails, the workflow SHALL fail loud and the run's summary SHALL identify which AC was not satisfied.
-- AC-30.5: The "full test suite" referenced in AC-30.4 is **interpretation (A)**: the suite runs against stg's deployed Worker at its real edge (`https://stg.vote.cogs.it.com`), not against a locally-booted `wrangler dev` copy. Today the suite is unit + existing mocked-service integration tests (`npm test`); neither currently traverses a remote edge. Therefore: AC-30.5 is **aspirational** until at least one test file is refactored to run in "remote mode" (per AC-29.9 patterns) against `E2E_TARGET`. Until then, the stg rehearsal workflow SHALL run `npm test` (local mode) after deploy as a placeholder, and the workflow SHALL emit a visible warning in its run summary: "`stg rehearsal ran unit tests only; no remote-mode coverage yet`". This warning SHALL be resolved by the first merged remote-mode test.
+- AC-30.5 (SUPERSEDED 2026-04-19 by FR-44 AC-44.5 — kept as historical marker): The "full test suite" referenced in AC-30.4 is **interpretation (A)**: the suite runs against stg's deployed Worker at its real edge (`https://stg.vote.cogs.it.com`), not against a locally-booted `wrangler dev` copy. Today the suite is unit + existing mocked-service integration tests (`npm test`); neither currently traverses a remote edge. Therefore: AC-30.5 is **aspirational** until at least one test file is refactored to run in "remote mode" (per AC-29.9 patterns) against `E2E_TARGET`. Until then, the stg rehearsal workflow SHALL run `npm test` (local mode) after deploy as a placeholder, and the workflow SHALL emit a visible warning in its run summary: "`stg rehearsal ran unit tests only; no remote-mode coverage yet`". This warning SHALL be resolved by the first merged remote-mode test.
 - AC-30.6: The stg rehearsal workflow SHALL block any prod deploy that is materially different from the last-green stg rehearsal. Enforcement: the `prod` branch's GitHub environment protection rule SHALL require a reviewer who has seen a green `stg-rehearsal.yml` run from the same commit SHA. This is an honor-system check initially (reviewer eyeballs the SHA match); automated enforcement is deferred until a small GitHub Actions script (or the GitHub API) cross-references the runs.
 - AC-30.7: Stg's R2 data MAY lag prod by up to seven days between syncs. Teams or individuals running the rehearsal for a review that depends on fresh data SHALL re-run `stg:sync-data` before rehearsing. The sync is idempotent — running it twice is safe (the second run just re-copies).
 - AC-30.8: Stg is gated by Cloudflare Access exactly like `dev` and `uat` per FR-29. The same service token (`voter-info-widget-ci`) authenticates the stg-rehearsal workflow. No separate token.
@@ -628,15 +630,15 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 - AC-34.5: **No nested card borders in stacked mode.** When the vote-list or bill-list is rendered inside the `.viw-detail` card (always, in the current UX), the stacked rows SHALL NOT carry their own full `border: 2px solid` — only a top border separating rows — to avoid a card-in-card visual. The outer `.viw-detail` card supplies the frame; row cards would nest into it.
 - AC-34.6: **Horizontal scroll fallback.** The wrapping `<div class="viw-votelist-scroll">` SHALL have `overflow-x: visible` on viewports ≤ 640px (so the stacked layout doesn't produce a scroll gutter). On > 640px it SHALL have `overflow-x: auto` (current behavior, a safety net if the table's natural width exceeds its container).
 
-### FR-35: Cache Warming Procedure (NEW v2.5.2)
+### FR-35: Cache Warming Procedure (NEW v2.5.2, REVISED v2.6.0)
 
 **Problem.** The widget's per-visit cold-cache cost is dominated by (a) the Worker's read-through population of `member:v1:{bioguideId}` on first lookup of a given member (one Congress.gov detail call + two legislation calls) and (b) the widget's per-roll-call roster fetches (FR-12, FR-32 AC-32.15). The first visitor to open a given member or a given roll-call pays this cost; subsequent visitors hit cache and pay ~nothing. On a fresh deploy or fresh KV namespace every visitor is "first" until the cache fills organically, which produced visible latency and 429 pressure during the 2026-04-18 go-live. A deliberate pre-warming step after each deploy moves this cost off the visitor path.
 
-**Solution.** Ship `scripts/warm-member-cache.mjs` as the post-deploy warming procedure. The script walks the current-Congress member directory, then issues one `GET /api/members/{bioguideId}` per member and one roster-route GET per curated House and Senate roll-call, with bounded concurrency and inter-request pacing so it stays within AC-27.21's per-IP budget. The script supports CF Access service-token headers so it can run against gated non-prod Workers.
+**Solution (v2.6.0 — unified with FR-40 / FR-42).** Prewarming SHALL be an ordinary client of the tiered cache (FR-40), not a privileged side channel. `scripts/warm.ts` issues `GET` requests to the target Worker's public API for every prewarmable key. Each request flows through the standard `serveCached` pipeline: edge miss → KV miss → R2 miss (if eligible) → upstream → `storeFromUpstream` writes to all tiers the policy allows. No transformation logic lives in the warmer. No bulk `wrangler kv put` writes. No separate curator. The warmer is exactly the same code path a real visitor's browser exercises, at a controlled rate. This eliminates the curator/warmer drift risk that existed in v2.5.2 (where `publish-to-kv.ts` could encode records differently than the Worker's read-through path).
 
 **Acceptance Criteria:**
 
-- AC-35.1: `scripts/warm-member-cache.mjs` SHALL accept these flags:
+- AC-35.1: `scripts/warm.ts` SHALL accept these flags:
   - `--host <https://env.vote.cogs.it.com>` — required, the target Worker origin.
   - `--concurrency <N>` — default 4; bounded pool size for each phase.
   - `--delay-ms <N>` — default 250; per-worker inter-request pause (so effective steady-state RPS stays ≤ `concurrency / (delay-ms/1000)` ≈ 16 rps at defaults, comfortably under AC-27.21's 300/60s prod ceiling).
@@ -651,6 +653,375 @@ A freshman senator who joined in 2025 ends up with "Did Not Vote" on every 2022 
 - AC-35.4: The warmer SHALL report a summary on completion: `{ phase, ok_count, failure_count, sample_failures[] }`. A non-zero failure count SHALL cause the script to exit 1 (so CI integrations surface it).
 - AC-35.5: `docs/deployment.md` SHALL document the warming procedure: which env to run it against, expected runtime at default flags (~3-5 minutes for ~540 members + ~44 roll-calls), and the invocation one-liners for each env. The weekly `.github/workflows/refresh-data.yml` MAY invoke the warmer as a post-curator step in a future iteration; initial v2.5.2 rollout keeps it manual.
 - AC-35.6: The warmer SHALL NOT be invoked from Worker code or from the widget runtime — it is an ops-side Node.js script. It SHALL NOT be bundled into `dist/`. Its acceptance tests (if any) SHALL live under `tests/ops/` — a new sub-tree if none exists — to keep it out of the widget's test budget.
+
+### FR-36: Request Tracing (NEW v2.6.0)
+
+**Problem.** When a user reports "the widget is slow" or "it errored out," we have no way to correlate their browser-side action with the Worker's logs or upstream latency. Workers Logs is on, but each line is an island — we cannot reconstruct "this user's click triggered these seven upstream fetches." Debugging production issues devolves into pattern-matching timestamps.
+
+**Solution.** A **per-request trace ID** that originates at the Worker's edge (or is echoed from a client-supplied header), is propagated through every upstream fetch the Worker makes on that request's behalf, and is stamped into every structured log line and analytics data point emitted during the request's lifetime. Scope is per-request (one inbound HTTP request = one trace), not per-user-action — simpler, sufficient for debugging, no widget-side state to thread.
+
+**Acceptance Criteria:**
+
+- AC-36.1: On every inbound request, the Worker SHALL generate a trace ID of form `tr_` + 16 hex bytes derived from `crypto.randomUUID()` (stripped of dashes, truncated to 16 chars). If the inbound request carries an `X-Trace-Id` header matching `/^tr_[0-9a-f]{16}$/`, the Worker SHALL echo that value instead of generating a new one. Any header that fails the pattern SHALL be ignored and replaced (no client-controlled trace IDs with arbitrary shape).
+- AC-36.2: Every response emitted by the Worker — success, error, redirect, 304 — SHALL carry `X-Trace-Id: <id>`. This header SHALL be listed in `Access-Control-Expose-Headers` on `/api/*` responses so browser JS can read it.
+- AC-36.3: Every `fetch()` call the Worker makes to an upstream (Congress.gov, Senate.gov, Census geocoder) SHALL forward the trace ID as `X-Trace-Id`. Upstream may ignore the header; that is fine — having it in the outbound traffic capture is the purpose.
+- AC-36.4: Every structured log line (FR-39) and every Workers Analytics Engine data point (FR-38) emitted during a request SHALL include the trace ID as a dedicated field (`traceId` in logs; `indexes: [traceId]` in analytics).
+- AC-36.5: When the widget surfaces an error state (address lookup failed, rep fetch failed, name search failed, roster fetch failed), the error UI SHALL display the trace ID inline in the form `Reference: tr_abc123def4567890` so a user reporting a bug can quote it. This SHALL be readable but visually subordinate (muted color, monospace font, selectable).
+- AC-36.6: Trace IDs SHALL NOT be generated by the widget. The widget reads the trace ID off the first `X-Trace-Id` response header it receives for a given user action and carries it forward to any error UI for that action. If no fetch has completed yet when the error surfaces (e.g., a network failure), the widget MAY display `Reference: (unavailable)`.
+- AC-36.7: Trace IDs SHALL NOT be used as cache keys, user identifiers, session tokens, or any form of state. They are observability-only.
+
+### FR-37: Canonical Error Envelope (NEW v2.6.0)
+
+**Problem.** The Worker today emits several error shapes: `{ error: 'upstream_error', status, upstream }` for upstream failures, raw `Response` bodies with short text strings for rate-limit / origin-deny / 404, and free-form `new Response('...')` for edge cases. The widget cannot branch reliably on error cause — it reads `response.ok` and falls back to a generic "something went wrong." There is no retryability signal, no stable error-code enumeration, no trace-ID surface.
+
+**Solution.** A single canonical error envelope for every non-2xx response emitted by the Worker (except 304). Closed enumeration of error codes. The widget parses the envelope and branches UI accordingly. No legacy dual-shape window — this is a fall-over deployment and there are no external consumers of the Worker's error bodies beyond our own widget.
+
+**Acceptance Criteria:**
+
+- AC-37.1: Every non-2xx, non-304 response from the Worker that carries a body SHALL use the envelope:
+  ```json
+  {
+    "error": {
+      "code": "<enum>",
+      "message": "<human-readable operator message>",
+      "userMessage": "<human-readable end-user message>",
+      "upstream": "<'congress' | 'senate' | 'census' | null>",
+      "retryable": <boolean>,
+      "traceId": "tr_<16hex>"
+    }
+  }
+  ```
+  Content-Type `application/json; charset=utf-8`. The envelope SHALL be the top-level shape — no wrapping, no metadata siblings.
+- AC-37.2: `error.code` SHALL be one of this closed enumeration: `bad_request`, `origin_not_allowed`, `rate_limited`, `not_found`, `upstream_4xx`, `upstream_5xx`, `upstream_timeout`, `upstream_parse_error`, `internal_error`. Adding a new code is a spec change.
+- AC-37.3: `error.retryable` SHALL be:
+  - `true` for `rate_limited`, `upstream_5xx`, `upstream_timeout`, `internal_error`
+  - `false` for `bad_request`, `origin_not_allowed`, `not_found`, `upstream_4xx`, `upstream_parse_error`
+- AC-37.4: `error.userMessage` SHALL be suitable for direct display to an end user. Operator-internal details (upstream hostname, stack traces, internal paths) SHALL NOT appear in `userMessage`; they belong in `error.message` and structured logs.
+- AC-37.5: The widget SHALL parse the envelope when `response.ok === false`. On retryable errors the widget SHALL render a "Try again" button that re-issues the original request. On non-retryable errors the widget SHALL render the `userMessage` with no retry affordance.
+- AC-37.6: The prior shape `{ error: 'upstream_error', status, upstream }` used by `normalizeUpstreamErrorBody` (ADR-006) SHALL be removed. No compatibility alias. Every existing caller in the Worker SHALL migrate to the new envelope in the same commit that lands FR-37's implementation.
+- AC-37.7: 429 Too Many Requests responses SHALL use `code: 'rate_limited'` and SHALL additionally carry a `Retry-After` header in seconds, derived from the rate-limit binding's window if available or a conservative default of 60 otherwise.
+- AC-37.8: The widget SHALL NOT log `error.message` to the user-facing UI — only `error.userMessage` + trace ID. `error.message` is operator context, carried through to error-reporting sinks (Analytics Engine, `console.error`) but never shown.
+
+### FR-38: Workers Analytics Engine Instrumentation (NEW v2.6.0)
+
+**Problem.** Workers Logs gives us line-by-line visibility but is not aggregable. We cannot answer "what is our 429 rate this week by upstream?" or "which bioguide profile builds are the slowest?" without pulling the entire log stream and computing outside CF. Workers Analytics Engine exposes write-time-series storage with per-dataset SQL queries directly in the CF dashboard, at no external infrastructure cost.
+
+**Solution.** A per-env Workers Analytics Engine binding. Every `/api/*` request writes exactly one data point at response time via `ctx.waitUntil`, carrying the fields that answer our known operator questions. Curator-like prewarming flows (FR-35 revised) also emit data points under a `curator` route class so cold-warm costs are visible in the same dataset.
+
+**Acceptance Criteria:**
+
+- AC-38.1: `wrangler.toml` SHALL declare an `[[analytics_engine_datasets]]` binding named `ANALYTICS` per env, with dataset name `voter_info_widget_${ENV_NAME}` (e.g., `voter_info_widget_prod`, `voter_info_widget_uat`).
+- AC-38.2: Every `/api/*` request — hit, miss, error, OPTIONS preflight — SHALL emit exactly one `env.ANALYTICS.writeDataPoint(...)` call at response time with these fields:
+  - `blobs: [routeClass, upstreamName, errorCode, env, cacheTier]`
+    - `routeClass` ∈ {`census`, `senate-xml`, `congress-v3`, `members`, `name-search`, `roll-call-roster`, `state-members`, `bills`, `other`}
+    - `upstreamName` ∈ {`senate`, `congress`, `census`, `none`}
+    - `errorCode` = one of FR-37 AC-37.2 values or `ok`
+    - `env` = `prod | stg | uat | dev | preview`
+    - `cacheTier` ∈ {`edge`, `kv`, `r2`, `upstream`, `n/a`} — which tier served the response (or `upstream` on miss-all, `n/a` for non-cacheable routes)
+  - `doubles: [totalLatencyMs, upstreamLatencyMs, statusCode, rateLimitRemaining]`
+    - `totalLatencyMs` — wall-clock from request arrival to response flush
+    - `upstreamLatencyMs` — ms spent in upstream `fetch()` calls; `0` when served from any cache tier
+    - `statusCode` — HTTP status emitted to the client
+    - `rateLimitRemaining` — integer tokens remaining in the binding window if known, else `-1`
+  - `indexes: [traceId]` — single index, enables point queries for a specific request
+- AC-38.3: The `writeDataPoint` call SHALL be wrapped in `ctx.waitUntil(...)` so it never extends perceived client latency.
+- AC-38.4: Widget-side surfaces (the browser embed) SHALL NOT write to Analytics Engine directly. All instrumentation originates in the Worker.
+- AC-38.5: The prewarming script (FR-35 revised) SHALL emit one analytics data point per warming request via `ctx.waitUntil` in the Worker it calls — i.e., the warmer itself does nothing special, it hits the Worker like any other client, and the Worker's standard AE write fires for each call. `blobs.env` = the target env; `blobs.routeClass` = whatever route the warmer hit. This gives one unified time series for real and synthetic traffic.
+- AC-38.6: On a Worker exception caught by the top-level error handler, the AE write SHALL still occur with `errorCode: 'internal_error'`, `statusCode: 500`, and the other fields filled with best-effort values. A telemetry write SHALL NEVER throw (wrap in try/catch; a failed telemetry write logs via FR-39 but does not crash the request).
+
+### FR-39: Structured Worker Logs (NEW v2.6.0)
+
+**Problem.** Existing log statements in the Worker are free-form strings. They are readable to a human tailing `wrangler tail` but not filterable, not aggregatable, and not correlated to trace IDs.
+
+**Solution.** A single `logEvent(ctx, { event, level, ...fields })` helper that emits one JSON line per call via `console.log(JSON.stringify(...))`. Workers Logs auto-indexes top-level JSON fields, so `event:rate_limit_denied AND env:prod` is a one-line filter in the CF dashboard. Levels follow the standard enumeration; success paths emit nothing by default.
+
+**Acceptance Criteria:**
+
+- AC-39.1: A helper `logEvent(ctx: LogContext, payload: { event: string; level: 'debug' | 'info' | 'warn' | 'error'; [k: string]: unknown })` SHALL live in `proxy/observability/log.ts` and emit exactly one `console.log(JSON.stringify({ ts: <iso>, env: ctx.env, traceId: ctx.traceId, ...payload }))` call.
+- AC-39.2: Every error path in the Worker (rate-limit denial, origin denial, upstream failure, parse failure, KV read failure, R2 read failure, exception caught at top level) SHALL call `logEvent` at `warn` or `error` with (a) the trace ID, (b) the FR-37 error `code`, (c) enough structured context to reproduce the failure (e.g., `upstream: 'senate'`, `kvKey: 'roll-call-roster:v1:...'`, `status: 429`).
+- AC-39.3: Success paths SHALL emit no logs at `info`+. A feature-flag-style `DEBUG_LOG=true` env var MAY be introduced later to enable per-request success logs during incident investigation; it is out of scope for v2.6.0.
+- AC-39.4: `logEvent` SHALL NOT throw. Serialization errors (circular references) SHALL be caught and replaced with a `{ event: 'log_serialization_error', original_event: <string> }` fallback line.
+- AC-39.5: Log payloads SHALL NOT contain secrets. The `CONGRESS_API_KEY` redactor currently in `redactSecrets` (proxy/lib.ts) SHALL be applied to every stringified field in `logEvent` as defense-in-depth.
+
+### FR-40: Tiered Cache Architecture (NEW v2.6.0)
+
+**Problem.** Today's proxy has three overlapping caches: the Cloudflare edge cache (per-POP), a per-member KV write-through in `handleMemberProfile`, and a bag of `[[curator-written]]` KV prefixes populated by `scripts/publish-to-kv.ts`. Each lives in a different code path. The widget's fan-out depends on which cache happens to be warm. Cold-KV cold-edge requests fall all the way through to upstream and hit rate limits. There is no single answer to "where does this response come from?"
+
+**Solution.** A unified **tiered cache layer** with a single `CacheTier<V>` interface implemented by three concrete tiers (`EdgeTier`, `KvTier`, `R2Tier`), composed by a `TieredCache<V>` class that reads tier-by-tier and **promotes on hit** (write-back) + **stores on miss** (write-through). Every route that wants caching goes through `serveCached(request, key, cache, fetcher, policy, ctx, env)`. The prewarming flow is an ordinary client of this layer — no second code path.
+
+This supersedes ADR-009's standalone "KV response cache" plan: the KV cache still exists but is now the tier-2 implementation of a three-tier system, not a standalone module. R2 is introduced as tier 3, **only** for data that qualifies as byte-level-static (FR-41).
+
+**Cache tiers, fastest to slowest:**
+
+| Tier | Backing | Scope | Typical hit latency | Writable? |
+|------|---------|-------|---------------------|-----------|
+| 0 (edge) | `caches.default` | per-POP | ~5 ms | yes |
+| 1 (kv) | `KV_VOTER_INFO` | global, eventually consistent | ~30 ms | yes |
+| 2 (r2) | `R2_STATIC` (new) | global, durable | ~50 ms | yes, but gated by FR-41 eligibility |
+| 3 (upstream) | Senate.gov / Congress.gov / Census | live | 400–1200 ms | N/A (read-through only) |
+
+**Acceptance Criteria:**
+
+- AC-40.1: A TypeScript interface `CacheTier<V>` SHALL be defined in `proxy/cache/tier.ts`:
+  ```typescript
+  export interface CacheTier<V> {
+    readonly name: 'edge' | 'kv' | 'r2';
+    readonly canWrite: boolean;
+    get(key: CacheKey): Promise<CacheEntry<V> | null>;
+    put(key: CacheKey, entry: CacheEntry<V>, policy: WritePolicy): Promise<void>;
+  }
+  ```
+  Each concrete tier SHALL live in its own file: `proxy/cache/edge-tier.ts`, `proxy/cache/kv-tier.ts`, `proxy/cache/r2-tier.ts`. No tier may reach into another tier's internals.
+- AC-40.2: `CacheKey` SHALL be a structured domain object (not a string):
+  ```typescript
+  export interface CacheKey {
+    readonly kind: 'senate-xml' | 'house-roster' | 'house-vote-detail' | 'bill-actions' | 'member-detail' | 'member-sponsored' | 'member-cosponsored' | 'census-geocoder' | 'bill-record' | 'roll-call-roster' | 'state-members' | 'member-profile' | 'name-index-shard';
+    readonly params: Record<string, string | number>;
+  }
+  ```
+  Each tier SHALL define its own `serialize(key): string` for its native storage format (URL for edge, dotted-prefix string for KV, path-style for R2). Serializers SHALL be pure, total functions with unit tests.
+- AC-40.3: `CacheEntry<V>` SHALL carry:
+  ```typescript
+  export interface CacheEntry<V> {
+    readonly value: V;
+    readonly contentType: string;
+    readonly fetchedAt: number;           // ms epoch
+    readonly sourceUpstream: 'senate' | 'congress' | 'census' | 'synthetic';
+    readonly sessionStatus?: 'frozen' | 'live';
+  }
+  ```
+- AC-40.4: `WritePolicy` SHALL carry:
+  ```typescript
+  export interface WritePolicy {
+    readonly maxAge: number;       // seconds
+    readonly immutable: boolean;
+    readonly eligibleTiers: readonly ('edge' | 'kv' | 'r2')[];
+  }
+  ```
+  `eligibleTiers` names which tiers a given route allows writes to. The pipeline SHALL NOT write to a tier whose name is absent from this list, regardless of that tier's own `put()` behavior. This is the policy-layer gate; each tier's own gating (e.g., R2 session-status check) is an additional defense.
+- AC-40.5: A `TieredCache<V>` class SHALL compose an ordered array of tiers and expose:
+  ```typescript
+  get(key): Promise<{ entry, servedBy } | null>
+  promote(key, entry, servedBy, ctx, policy): void    // writes to faster tiers via ctx.waitUntil
+  storeFromUpstream(key, entry, ctx, policy): void    // writes to every eligible writable tier via ctx.waitUntil
+  ```
+  `promote` and `storeFromUpstream` SHALL NOT block the response. Both SHALL be idempotent (re-running with the same inputs is safe).
+- AC-40.6: A `serveCached<V>(request, key, cache, fetcher, policy, ctx, env)` pipeline function SHALL be the single code path any cacheable route uses. On hit: promote + return with `X-Cache-Tier: <tier>` and `X-Cache: HIT`. On miss: fetch upstream, store, return with `X-Cache-Tier: upstream` and `X-Cache: MISS`. On fetcher error: emit FR-37 envelope + FR-39 log + FR-38 data point. No route SHALL call upstream directly — every upstream call is mediated by a registered `UpstreamFetcher`.
+- AC-40.7: `UpstreamFetcher<V>` SHALL be an interface with `canHandle(key) → boolean` and `fetch(key, env) → Promise<CacheEntry<V>>`. Each upstream gets its own implementation (`SenateXmlFetcher`, `HouseRosterFetcher`, `HouseVoteDetailFetcher`, `BillActionsFetcher`, `MemberDetailFetcher`, `CensusGeocoderFetcher`). Each lives in its own file under `proxy/upstreams/`.
+- AC-40.8: **Route-to-cache-config mapping.** Each existing route SHALL declare a static `CacheConfig` entry specifying its `WritePolicy` + its `UpstreamFetcher`. This mapping lives in `proxy/routes/cache-config.ts` and is the single source of truth for "which tiers does this route use and with what TTL." No cache decision lives in per-route code.
+- AC-40.9: **Header contract.** Every response served via `serveCached` SHALL carry `X-Cache-Tier: <edge|kv|r2|upstream>` and `X-Cache: HIT|MISS`. On promote-from-slower-tier the header reflects the **tier that served the hit**, not the destination of the write-back. `Access-Control-Expose-Headers` SHALL list both.
+- AC-40.10: **Testability.** Each tier SHALL have a `FakeTier<V>` in `tests/fakes/` that is a `Map<string, CacheEntry<V>>`. `TieredCache` unit tests SHALL run with three fake tiers and verify tier-order-reads, promote-on-hit, store-on-miss, policy filtering, and waitUntil dispatch. Integration tests SHALL run with the real runtime bindings.
+
+### FR-41: R2 Static Archive Tier (NEW v2.6.0)
+
+**Problem.** Closed-session roll-call XML (Senate) and roll-call rosters (House) never change after the Congress adjourns. Historically we have re-fetched these from senate.gov / api.congress.gov every time the edge + KV caches cycled, contributing to 429 pressure observed on 2026-04-18. A durable, globally-replicated byte-level archive costs fractions of a cent per month and eliminates upstream contact for this data entirely.
+
+**Solution.** A single Cloudflare R2 bucket per env (`voter-info-widget-archive-${env}`), wired as tier 3 of the tiered cache (FR-40). **Only byte-level-static upstream responses** are eligible. The R2 tier's `put()` internally gates on `policy.immutable === true` AND `entry.sessionStatus === 'frozen'` — any other entry is silently skipped at the R2 boundary. Served bytes are verbatim with original content-type (XML stays XML, JSON stays JSON); the cache is content-agnostic.
+
+**ADR-014 reconciliation.** ADR-011 ("KV is the sole datastore") is narrowed, not reversed. KV remains the sole store for *curator-shaped domain records* (`member:v1:*`, `bill:v1:*`, `roll-call-roster:v1:*`, `state-members:v1:*`, `name-index:v1:*`, etc.). R2 stores **raw upstream bytes** of static responses, which are a different abstraction layer. The two do not overlap in ownership: a `roll-call-roster:v1:*` KV record is the domain projection; the R2 archive of `vote_117_2_00078.xml` is the byte-level source those projections were built from.
+
+**Data-type eligibility matrix (exhaustive):**
+
+| Data type | Tier layout | Static? | Rationale |
+|-----------|-------------|---------|-----------|
+| Senate roll-call XML (`vote_{c}_{s}_{rc}.xml`) | edge → kv → **r2** → upstream | **Yes, after session close** | Historical XML is frozen; observed zero mutations post-session in project history. R2 is the right durable floor. |
+| House roll-call members (`/v3/house-vote/{c}/{s}/{rc}/members`) | edge → kv → **r2** → upstream | **Yes, after session close** | Same as Senate. The Worker parses this into `roll-call-roster:v1:*` but the raw bytes are the authoritative record; parsing is a projection. |
+| House roll-call detail (`/v3/house-vote/{c}/{s}/{rc}`) | edge → kv → **r2** → upstream | **Yes, after session close** | Same. |
+| Bill actions (`/v3/bill/{c}/{type}/{num}/actions`) | edge → kv → **r2** (only if `latestActionDate > 180d ago`) → upstream | **Partial.** Most bills static after signing; recent bills still accrue actions. | Age-gated: once `latestActionDate` is >180 days old, mark frozen. Before then, edge+KV only. |
+| Bill summaries (`/v3/bill/{c}/{type}/{num}/summaries`) | edge → kv → **r2** (same age gate) → upstream | **Partial.** CRS summaries are revised in the weeks after introduction, then freeze. | Same age-gate as bill actions. |
+| Bill metadata (`/v3/bill/{c}/{type}/{num}`) | edge → kv → upstream | No R2 | Small payload. Latest-action field can change arbitrarily. KV sufficient. |
+| Member detail (`/v3/member/{bioguideId}`) | edge → kv → upstream | **No R2** | Member status can change mid-Congress (death, resignation, party switch). Freshness > performance. |
+| Member sponsored-legislation (`/v3/member/{id}/sponsored-legislation`) | edge → kv → upstream | **No R2** | Rotating. New sponsorships daily while in session. |
+| Member cosponsored-legislation (`/v3/member/{id}/cosponsored-legislation`) | edge → kv → upstream | **No R2** | Same. |
+| Census geocoder (`/geographies/addressbatch`) | edge → kv → upstream | **No R2** | Address-specific; hit rate per key ~1; R2 would explode storage for zero benefit. |
+| Our own KV-projected records (`member:v1:*`, `bill:v1:*`, `roll-call-roster:v1:*`, `state-members:v1:*`, `name-index:v1:*`) | kv (sole) | — | Not upstream responses. Owned by the prewarmer which also writes via the cache pipeline (FR-35 revised). No R2. |
+
+**Acceptance Criteria:**
+
+- AC-41.1: Per env, one R2 bucket named `voter-info-widget-archive-${env}` SHALL be provisioned and bound in `wrangler.toml` as `R2_STATIC`.
+- AC-41.2: `R2Tier` SHALL serialize a `CacheKey` to a path of shape:
+  - `senate-xml` → `archive/senate/xml/vote_{c}_{s}_{rc}.xml`
+  - `house-roster` → `archive/congress/house-vote/{c}/{s}/{rc}/members.json`
+  - `house-vote-detail` → `archive/congress/house-vote/{c}/{s}/{rc}.json`
+  - `bill-actions` → `archive/congress/bill/{c}/{type}/{num}/actions.json`
+  - `bill-summaries` → `archive/congress/bill/{c}/{type}/{num}/summaries.json`
+  R2 SHALL NOT store any other key kinds. The serializer SHALL throw on unsupported kinds (fail-loud per CLAUDE.md conventions).
+- AC-41.3: `R2Tier.put()` SHALL gate writes on `policy.immutable === true` **AND** `entry.sessionStatus === 'frozen'`. Non-frozen entries SHALL be silently skipped — not an error, not a log, the right behavior for open-session data flowing through the same pipeline.
+- AC-41.4: **Session-status determination.** `sessionStatus` SHALL be computed at fetch time by the upstream fetcher:
+  - For Senate XML + House roster/detail: `frozen` if `congress < currentCongress` OR (`congress === currentCongress` AND `session < currentSession`); otherwise `live`.
+  - For bill actions/summaries: `frozen` if the parsed response's `latestAction.actionDate` is >180 days before now; otherwise `live`.
+  `currentCongress` / `currentSession` SHALL be computed from the current date via a pure helper in `proxy/upstreams/congress-calendar.ts` (119th Congress = 2025-01-03 to 2027-01-03; session 1 odd years, session 2 even years). A unit test SHALL cover the boundary dates.
+- AC-41.5: R2 object metadata SHALL include `{ fetchedAt, sourceUpstream, sessionStatus, sha256 }` as custom metadata. No encryption (data is public by source). No versioning (immutable by definition).
+- AC-41.6: R2 bytes SHALL be served verbatim with the original `contentType` from the stored `CacheEntry`. The Worker SHALL NOT reparse XML to JSON on the serving path. If a caller wants the parsed form, they read the KV-projected record (`roll-call-roster:v1:*`).
+- AC-41.7: **Parse-on-demand, defer-convert-save.** When a request hits R2 for Senate XML, the response is served as-is. If and only if the request was for the JSON-projected route (`/api/roll-call-rosters/senate/...`) **and** the KV projection is absent, the Worker SHALL parse the R2 XML into the `RollCallRosterRecord` shape, respond to the client, and write the parsed record to KV via `ctx.waitUntil` so the next request for the JSON route hits KV directly. The XML parser used on the Worker SHALL live in `proxy/upstreams/senate-xml-parser.ts` and be shared with any future curator-like prewarming flow.
+- AC-41.8: **Population model.** R2 is populated **only** by the `storeFromUpstream` path of the tiered cache. There is no separate R2 uploader script. A prewarmer that hits the Worker's public API for every eligible key exercises the same path real traffic does — `serveCached` → upstream miss → `storeFromUpstream` → tiers (including R2 when gated policy allows). Over time this populates R2 naturally. A one-shot "prewarm everything" command is a documented operational procedure (FR-35 revised), not a special code path.
+- AC-41.9: **Tier fallthrough rules for static routes.** On tier-3 miss AND tier-4 (upstream) success, the result SHALL be stored in all three writable tiers (edge, KV, R2 if gated). On tier-3 miss AND tier-4 rate-limit (429), the Worker SHALL emit an FR-37 `rate_limited` envelope; it SHALL NOT fabricate a response from another source.
+- AC-41.10: **Never serve stale-frozen with suspicion.** Once a response is in R2 with `sessionStatus === 'frozen'`, no mechanism in the Worker invalidates or rewrites it. Corrections to historical Senate XML (rare, only observed during the post-cast correction window which is always `live`) would enter via the upstream path and be written to KV only, never to R2. If human-in-the-loop evidence shows a frozen record is wrong, the operator deletes the R2 object via `wrangler r2 object delete`; the next request rebuilds it from upstream.
+- AC-41.11: **Deployment dependency.** Each env's R2 bucket SHALL be created before that env's Worker deploys. The deploy workflow SHALL fail fast if `R2_STATIC` binding is configured in `wrangler.toml` but the underlying bucket does not exist (fail-loud). No auto-creation.
+- AC-41.12: **Cost and scale.** Estimated steady-state R2 footprint: ~200 Senate XML × 20 KB + ~200 House rosters × 30 KB + ~200 House vote-detail × 5 KB + ~27 bill-actions × 15 KB + ~27 bill-summaries × 8 KB ≈ **13 MB per env**. Four envs = ~52 MB total. R2 storage at $0.015/GB/month = **<$0.001/month total**. Egress within CF is free. This AC is informational — no gate — but any future design that inflates the footprint by >10× SHALL revisit the cost calculation.
+
+### FR-42: Proxy Module Composition (NEW v2.6.0)
+
+**Problem.** `proxy/lib.ts` is 1569 lines. It holds routing, CORS, security headers, rate limiting, origin allowlisting, KV helpers, R2-era dead comments, member-profile build-through, name-search ranking, and every route handler. It is untested as a composed whole — tests are 1678 lines of route-shaped integration-style assertions against the god module. Any change risks invisible regressions in unrelated code.
+
+**Solution.** Decompose into named OOP modules each with a single responsibility, composed at the Worker entry point. TypeScript is the language — use interfaces, classes, and dependency injection the way the language was designed for. No global state; every module receives its dependencies.
+
+**Target topology:**
+
+```
+proxy/
+  worker.ts                              — thin shim: bind runtime, instantiate, dispatch
+  router.ts                              — matches Request to a Route; no handler logic
+  routes/
+    api-congress.ts                      — handler class per route family
+    api-senate.ts
+    api-census.ts
+    api-members.ts
+    api-name-search.ts
+    api-roll-call-rosters.ts
+    api-state-members.ts
+    api-bills.ts
+    preview.ts
+    not-found.ts
+    cache-config.ts                      — static CacheConfig map (FR-40 AC-40.8)
+  cache/
+    tier.ts                              — CacheTier<V> interface, CacheKey, CacheEntry, WritePolicy
+    tiered-cache.ts                      — TieredCache<V> class
+    edge-tier.ts                         — EdgeTier
+    kv-tier.ts                           — KvTier
+    r2-tier.ts                           — R2Tier
+    pipeline.ts                          — serveCached() function
+  upstreams/
+    fetcher.ts                           — UpstreamFetcher<V> interface
+    senate-xml-fetcher.ts
+    senate-xml-parser.ts
+    house-roster-fetcher.ts
+    house-vote-detail-fetcher.ts
+    bill-actions-fetcher.ts
+    bill-summaries-fetcher.ts
+    member-detail-fetcher.ts
+    census-geocoder-fetcher.ts
+    congress-calendar.ts                 — currentCongress/session helpers (FR-41 AC-41.4)
+  security/
+    origin-allowlist.ts                  — isOriginAllowed, isPreviewEnv, isSameOriginBypass
+    cors.ts                              — CORS reflection headers, preflight handler
+    headers.ts                           — applySecurityHeaders, stripFingerprintingHeaders
+    rate-limit.ts                        — RateLimitGate class wrapping RATE_LIMITER binding
+    query-filter.ts                      — allowlist filtering, cache-key canonicalization
+    url-validator.ts                     — isValidUpstreamPath, sanitizeHttpUrl
+  observability/
+    trace.ts                             — traceId generation/echo (FR-36)
+    log.ts                               — logEvent helper (FR-39)
+    analytics.ts                         — writeDataPoint helper (FR-38)
+    error-envelope.ts                    — ErrorEnvelope type, normalizers, asResponse (FR-37)
+  kv/
+    prefixes.ts                          — KV_PREFIXES constant
+    member-profile.ts                    — MemberProfile type, profile shape, parser
+    name-index.ts                        — NameIndexEntry type, normalizeSearchKey, rankMatches
+```
+
+**Acceptance Criteria:**
+
+- AC-42.1: After the refactor, `proxy/lib.ts` SHALL be deleted. `proxy/worker.ts` SHALL be the only entry point, and it SHALL be ≤ 100 lines (wiring only, no business logic).
+- AC-42.2: **File size cap.** No file under `proxy/` SHALL exceed **300 lines**. Files approaching this cap SHALL be split by responsibility. Current offenders beyond the refactor's direct scope (e.g., `tests/unit/worker.test.ts` at 1678 lines) SHALL also be split, by route family, into `tests/unit/routes/*.test.ts`.
+- AC-42.3: Every class in the refactored proxy SHALL accept its dependencies via constructor injection. No module-scope mutable state. No singleton access to `env`, `ctx`, or `caches.default` — these are parameters, not globals.
+- AC-42.4: Each route handler SHALL implement:
+  ```typescript
+  export interface RouteHandler {
+    readonly pattern: RegExp | string;
+    readonly methods: readonly HttpMethod[];
+    handle(ctx: RequestContext): Promise<Response>;
+  }
+  ```
+  where `RequestContext` carries `{ request, env, ctx, traceId, url, logger, analytics }`. The router iterates registered handlers, matches on `pattern`, and dispatches. Handlers SHALL NOT cross-call each other; shared logic lives in lower layers (cache, security, observability).
+- AC-42.5: `TieredCache`, each `CacheTier`, each `UpstreamFetcher`, and each `RouteHandler` SHALL have a dedicated test file named for it. Tests SHALL use the corresponding `FakeTier` / fake fetcher / mock `RequestContext` — no cross-module integration reach-throughs in unit tests.
+- AC-42.6: **Public API stability.** The refactor SHALL NOT change any externally observable behavior: every existing `/api/*` route keeps its response shape, status codes (once migrated to FR-37 envelope), cache-control values, and CORS headers. The refactor is pure decomposition.
+- AC-42.7: **Migration approach.** The refactor SHALL proceed by (a) introducing the new module layout empty, (b) moving code module-by-module with tests updated in the same commit, (c) deleting the old `proxy/lib.ts` only after every caller has been migrated. Each intermediate commit SHALL be green (full suite passes, typecheck clean).
+- AC-42.8: **Prewarming is a client.** The script formerly known as `scripts/publish-to-kv.ts` + `scripts/warm-member-cache.mjs` SHALL be replaced by a single `scripts/warm.ts` that issues HTTP `GET` requests to the target Worker for each prewarmable key. It SHALL contain no transformation logic; all transformation lives in the Worker's `UpstreamFetcher` implementations. Per FR-41 AC-41.8, this populates every tier (including R2) via the standard `serveCached` pipeline. The old scripts SHALL be deleted once `warm.ts` covers their ACs.
+- AC-42.9: **No cross-layer leakage.** `proxy/routes/*` SHALL NOT import from `proxy/cache/*-tier.ts` directly — only from `proxy/cache/pipeline.ts` and `proxy/cache/tiered-cache.ts`. `proxy/cache/*` SHALL NOT import from `proxy/routes/*`. `proxy/upstreams/*` SHALL NOT import from `proxy/routes/*` or `proxy/cache/*-tier.ts`. Circular imports SHALL NOT exist; `tsc --noEmit` + `madge` SHALL confirm.
+
+### FR-43: Data-Surety Visual Treatment for the Score Badge (NEW v2.6.0)
+
+**Problem.** The Ukraine Support Score number renders at full saturation regardless of how much data underlies it. A first-term member with 2 curated-vote actions gets the same visual weight as a 4-term member with 30. The existing `lowConfidence` flag (FR-16) is a binary clamp — a member at 2 counted actions and a member at 2,999,999 counted actions are the only two states. The "Based on N counted actions" context line is buried beneath the number where voters often miss it. Per the 2026-04-19 design call, the score's *visual confidence* (saturation) should reflect how much the member's record actually supports the number, without changing the score itself.
+
+**Solution.** Three design changes:
+
+1. **Continuous confidence index + derived tier.** Replace the binary `lowConfidence: boolean` on `UkraineScore` with two new fields: `confidence: number` in `[0, 1]` (continuous) and `confidenceTier: 'low' | 'moderate' | 'full'` (discretized). The continuous index is derived as `confidence = min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD)` — so 0 contributing → 0.0, 4 → 0.5, 8+ → 1.0 (clamped). The tier is a cheap discretization of the same signal for readable tests and label-copy branches: `< LOW_CONFIDENCE_THRESHOLD` → `'low'`, `< MODERATE_CONFIDENCE_THRESHOLD` → `'moderate'`, else `'full'`. The existing `lowConfidence` boolean remains as a derived alias (`tier === 'low'`) for one release, then removes. Giving downstream code both forms lets the UI interpolate smoothly while tests + label logic branch on the named tier.
+2. **Color-saturation modulation on the score number (continuous).** CSS filter `saturate(...)` scales the number's red/yellow/green color by `confidence`: `saturation = 0.2 + 0.8 * confidence`. A member at `confidence = 0.125` (1 action) sits at ~0.30 saturation; `confidence = 0.5` (4 actions) sits at 0.60; `confidence = 1.0` (8+) sits at 1.0. This covers the three discrete tiers as corner cases of a smooth gradient, so a member at 4 contributing actions and a member at 7 look different, not identical. Desaturation moves the hue toward neutral grey without changing brightness — preserves WCAG AA 4.5:1 contrast against the widget background at every level. `scoreLabel` continues to emit "Limited record — leans X" copy at `tier === 'low'`; at `'moderate'` and above it emits the normal label (the continuous visual signal carries the nuance).
+3. **Layout: slug adjacent to number + enlarged title.** The `MIXED · Based on 15 counted actions (12 excluded…)` context slug moves **to the immediate left** of the score number on the same row (no longer a separate line below the bar). The `UKRAINE SUPPORT SCORE` title enlarges to ~1.4× its current size (`clamp(1rem, 2.2vw, 1.4rem)`, uppercase, weight 900 italic per AC-9.3) so it reads as the section header it is.
+
+**Acceptance criteria:**
+
+- AC-43.1: `UkraineScore.confidenceTier` SHALL be `'low'` when `contributing < LOW_CONFIDENCE_THRESHOLD`, `'moderate'` when `contributing < MODERATE_CONFIDENCE_THRESHOLD`, `'full'` otherwise. `UkraineScore.confidence` (continuous) SHALL be `Math.min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD)`. `LOW_CONFIDENCE_THRESHOLD` stays at 3 (existing). `MODERATE_CONFIDENCE_THRESHOLD` = 8. When `contributing === 0` the tier is `'low'`, `confidence === 0`, and the score itself is already `null`.
+- AC-43.2: `UkraineScore.lowConfidence` SHALL remain exported as the boolean alias `(confidenceTier === 'low' && contributing > 0)` for v2.6.0 compatibility, flagged `@deprecated` in the TypeScript doc comment. The `contributing > 0` guard matches pre-v2.6.0 behavior so the empty-state UI path (N/A rendering) is unchanged. Direct consumers MAY migrate to `confidenceTier` at their pace; the alias SHALL be removed in v2.7.0.
+- AC-43.3: The score number in `UkraineScoreBadge` SHALL render with `filter: saturate(X)` where `X = 0.2 + 0.8 * score.confidence`. At `confidence = 0` → `X = 0.2`; at `confidence = 0.5` → `X = 0.6`; at `confidence = 1.0` → `X = 1.0`. The filter SHALL apply ONLY to the `.viw-score-value` element; surrounding text + the gradient bar SHALL remain at full saturation (they convey categorical information, not confidence).
+- AC-43.4: The context slug (`{label} · Based on N counted actions…`) SHALL render on the same row as the score number, positioned to the LEFT of the number. On viewports ≤ 640px where the row would wrap, the slug SHALL fall below the number but above the gradient bar (no longer at the bottom).
+- AC-43.5: The `Ukraine Support Score` title SHALL render at `font-size: clamp(1rem, 2.2vw, 1.4rem)`, uppercase, weight 900 italic, matching the host's heading treatment per AC-9.3. Color stays as-is (inherits `var(--viw-black)`).
+- AC-43.6: No AA contrast regression. Every tier/color combination of the score number against the card background (`var(--viw-white)` = `#ffffff`) SHALL maintain ≥4.5:1 per WCAG AA. Verification: the tested fixture set covers the three tier values × three band colors (red/yellow/green) = 9 combinations, all ≥4.5:1.
+- AC-43.7: The `lowConfidence` clamp on `scoreLabel` (FR-16) SHALL remain — at `'low'` tier the label reads "Limited record" variants as today. At `'moderate'` the label reads as the full-tier would; the moderate desaturation is the only visual signal of partial confidence. This is intentional: the binary-clamp label change was itself part of Kaziem's "degrades mid-rangers" feedback — moving the nuance from copy to color is the design intent.
+- AC-43.8: Tests in `tests/unit/UkraineScoreBadge.test.tsx` SHALL cover: tier derivation boundaries (0, 1, 2, 3, 7, 8, 9 counted actions); saturation CSS applied per tier; slug rendering position relative to the number; title size class applied; the existing abstention/obstruction note paths continue to render.
+
+### FR-44: Test Ladder, CI/CD Gating, and Stress Testing (NEW v2.6.0)
+
+**Problem.** Today the test suite is overwhelmingly unit tests with a handful of hook-level "integration" tests that mock `fetch` at the service boundary. What ADR-011/ADR-012/ADR-014 actually ship — the Worker composing a router, CORS gate, rate limiter, tiered cache, R2 tier, KV tier, edge tier, upstream fetchers, and observability — has **no test that composes those real modules together with only bindings faked**. The existing `tests/e2e/widget.test.tsx` exercises the full React component tree but still mocks every `/api/*` response at the service boundary; it has never seen a real `serveCached` pipeline. FR-30's "run the suite against the stg edge" clause has been aspirational since it was written (AC-30.5 "until at least one remote-mode test lands" has never been resolved). The 2026-04-18 go-live produced 429s that no test could have caught because no test exercised the upstream fan-out.
+
+**Solution.** Formalize a four-tier test ladder, make every tier a merge-blocking CI gate, and pair stg with two new ops: a full prod-KV mirror sync before the stg rehearsal, and a stress run that matches the upstream rate limits the widget actually pushes against.
+
+**Four tiers:**
+
+| Tier | Scope | Network | Where runs | Gates |
+|------|-------|---------|------------|-------|
+| 1. Unit | Single module under test, all collaborators faked | None | Every PR (pr.yml) + locally | Blocks merge to `main` |
+| 2. Integration | Multiple modules composed (e.g. `serveCached` with real `TieredCache` + all three tier impls + real `UpstreamRegistry`), only **bindings** faked (fake KV, fake R2, fake `caches.default`, stubbed `fetch`) | Stubbed | Every PR + locally | Blocks merge to `main` |
+| 3. E2E (local Worker) | Full Worker booted via `wrangler dev`, widget SPA pointed at `http://localhost:8787`, real HTTP roundtrip, **mocked upstreams** (Congress/Senate/Census) via a local test-fixtures server | Real local HTTP | On push to `develop`/`uat`/`stg`/`prod` | Blocks promotion ladder |
+| 4. E2E (remote edge) | Full suite against the deployed stg Worker (`https://stg.vote.cogs.it.com`), **real upstream data** via prod-mirrored KV, real Access service token | Real WAN | Stg rehearsal workflow, manual trigger | Blocks prod promotion |
+
+**Stress testing (stg only):**
+
+- Runs AFTER the remote-edge suite in the stg rehearsal workflow.
+- Simulates realistic visitor patterns (address lookup → 3-rep fan-out → click through detail panels) at configured concurrency for a configured duration, against stg's real edge.
+- Targets both cold-cache (first visitor) and warm-cache steady-state profiles.
+- Asserts three budgets: (a) p95 latency ≤ 5s per visitor flow, (b) zero 5xx from the Worker, (c) upstream 429 count stays within a declared tolerance (0 on warm, ≤5 on cold for a 50-concurrent 60s burst).
+- Uses Cloudflare's ratelimit + the `RATE_LIMITER` binding as guardrails; service token bypasses the per-IP limit so stress can exceed 60/60s/IP.
+
+**Stg KV mirror (v2.6.0 — tightened from FR-30 AC-30.3):**
+
+- At rehearsal start, every curator-owned KV prefix (`member:v1:*`, `bill:v1:*`, `roll-call:v1:*`, `name-index:v1:*`, `roll-call-roster:v1:*`, `state-members:v1:*`) is copied verbatim from prod's KV namespace to stg's.
+- `cache:v1:*` (tiered-cache response cache) is NOT copied — stg must exercise its own cold-cache path every rehearsal, otherwise the stress test is meaningless.
+- R2 static archive objects (`archive/**`) are NOT copied for the same reason — stg must re-populate its R2 during the rehearsal so the cold-R2-miss → upstream → write-R2 path runs under real conditions.
+- Sync is a pre-flight step: if it fails (prod KV unreachable, stg namespace full, token expired), the rehearsal aborts before deploy.
+
+**Acceptance criteria:**
+
+- AC-44.1 (integration tier): `tests/integration/` SHALL gain `serveCached.test.ts` composing a real `TieredCache<string>` with real `EdgeTier`, `KvTier`, `R2Tier` instances, a real `createUpstreamRegistry`, and a fake `fetch` that returns fixture responses. Test cases SHALL cover: cold-all-tiers → upstream → writes to all eligible tiers; edge hit; KV hit + promotes to edge; R2 hit + promotes to KV + edge; R2-ineligible route (member-detail) never writes to R2; upstream 429 → FR-37 envelope; upstream 5xx → FR-37 envelope with `retryable: true`. ~12 tests. This closes the "no test composes the real cache pipeline" gap.
+- AC-44.2 (integration tier): `tests/integration/matchRoute.test.ts` SHALL pair `matchRoute` + `serveCached` + the registry against 20+ sample `/api/*` paths covering every CacheKind, asserting round-trip header shape (`X-Cache`, `X-Cache-Tier`, `X-Trace-Id`) and FR-37 envelope on upstream error.
+- AC-44.3 (e2e local): The `tests/e2e/` directory SHALL gain `worker-local.test.ts` that: boots the Worker via `wrangler dev --env preview` on a random free port, stands up a fixture HTTP server on a second port returning canned Congress/Senate/Census responses, points the Worker's upstream URLs at the fixture server via a `STRESS_MODE=true` env var + override, and drives the widget SPA through its golden flows (address lookup, name search, rep detail) asserting end-to-end response bodies + headers. At least one test SHALL assert that a second request for the same roll-call serves from a cache tier (`X-Cache-Tier: edge` or `kv`).
+- AC-44.4 (e2e local): `worker-local.test.ts` SHALL run in CI via `npm run test:e2e:local` gated on a `pr.yml` job that installs wrangler, starts the fixture server, runs the Worker, waits for health, executes the test file, and tears down. Duration budget: ≤90 seconds.
+- AC-44.5 (e2e remote): The stg-rehearsal workflow SHALL run a `tests/e2e/remote.test.ts` file against `E2E_TARGET=https://stg.vote.cogs.it.com` with CF Access service-token headers. The same test file SHALL be runnable locally against any env via `E2E_TARGET=https://... npm run test:e2e:remote`. At least the golden-flow test from AC-44.3 SHALL have a remote-mode twin. This resolves AC-30.5.
+- AC-44.6 (stg KV mirror): `scripts/sync-stg-data.ts` (extended from T-025e scaffold) SHALL copy every curator prefix listed in FR-30's revised scope to stg's KV namespace before the rehearsal deploys. SHALL skip `cache:v1:*` and any R2-backed archive. SHALL fail loud on any write error (no silent partial copy). Supports `--dry-run`.
+- AC-44.7 (stg KV mirror): The stg rehearsal workflow SHALL invoke the sync as its first post-checkout step, BEFORE `wrangler deploy --env stg`. A failed sync aborts the rehearsal.
+- AC-44.8 (stress): `tests/stress/visitor-flow.stress.ts` (new directory `tests/stress/`) SHALL exercise a parametrized concurrent-visitors workload against `E2E_TARGET`. Two scenarios: **cold** (fresh R2 + KV, 50 concurrent visitors, 60-second burst) and **warm** (after cold, another 50 concurrent for 60s). Assertions per AC-44 solution text: p95 ≤ 5s, 0 Worker 5xx, upstream 429 ≤ 0 (warm) / ≤ 5 (cold). Uses the same service token as remote e2e.
+- AC-44.9 (stress): The stg-rehearsal workflow SHALL invoke the stress scenarios AFTER the remote-edge e2e suite passes. Stress failure fails the rehearsal exactly like e2e failure. Duration budget: ≤4 minutes for both scenarios combined.
+- AC-44.10 (ci gating): `pr.yml` SHALL run tiers 1 and 2 (unit + integration) as required status checks. `deploy.yml` (on push to `develop` or `uat`) SHALL run tier 3 (e2e local) before invoking `wrangler deploy`. The `stg` branch's deploy workflow SHALL additionally invoke the stg-rehearsal workflow (tiers 3 + 4 + stress) as a required pre-deploy step. The `prod` branch's environment protection rule SHALL require a reviewer who has verified the latest stg-rehearsal run was green **at the same SHA being promoted** (AC-30.6 honor-system check, not yet automated).
+- AC-44.11 (ci gating): A PR against `main` that touches ANY file under `proxy/**` or `src/services/**` or `scripts/publish-to-kv.ts` or `scripts/warm.ts` SHALL be marked failing if integration tier coverage drops below 80% branches on the affected module(s). Coverage threshold is enforced by `npx vitest run --coverage --coverage.thresholds.branches=80` scoped to the changed-paths glob.
+- AC-44.12 (ci gating): The stress tier's output SHALL be captured in the workflow run summary (req/sec, p95, error rate, upstream 429 count, cache-hit ratio by tier). This gives operators a numeric history of rehearsal runs to spot regressions before they become incidents. A future dashboard MAY ingest these (out of scope for v2.6.0).
+- AC-44.13 (remote-mode ergonomics): Remote-mode test files SHALL consult `process.env.E2E_TARGET` at module top. When unset, the suite SHALL skip the file with a console note ("remote-mode test skipped: E2E_TARGET not set") — NOT fail — so developers running `npm test` locally aren't blocked. Required-runs in CI set `E2E_TARGET` explicitly.
+- AC-44.14 (harness): A single `tests/e2e/harness.ts` SHALL provide helpers used by both local and remote e2e tests: `fetchApi(path, { env })` with Access headers wired, `assertCacheTier(resp, tier)`, `assertErrorEnvelope(resp, code, retryable)`. Keeps golden-flow tests readable.
+
+**Additional integration seams (AC-44.15..AC-44.20 — derived from the 2026-04-19 audit against the Phase 11 tree).** Each closes a specific composition-level wiring bug that tier-1 unit tests cannot catch because the seams involve real modules on both sides of the boundary.
+
+- AC-44.15 (integration — registry completeness): `tests/integration/upstreamRegistry.test.ts` SHALL verify that every `CacheKind` returned by `matchRoute` has a registered fetcher in `createUpstreamRegistry`. The test enumerates matchRoute's full sample set (senate-xml, house-roster, house-vote-detail, bill-actions, bill-summaries, member-detail, census-geocoder), constructs a CacheKey for each, and asserts `registry.getFor(key)` returns a non-null fetcher whose `canHandle(key)` is true. This catches the class of bug where a new kind is added to cache-config but the corresponding fetcher wiring is forgotten — the pipeline would silently hit the `fetcher is null` path and fail with an obscure error. Target: 3 tests (enumeration + boundary + negative case for unhandled `member-profile` kind).
+- AC-44.16 (integration — voting-record chain): `tests/integration/votingRecord.valence.test.ts` SHALL compose `useVotingRecord` hook + real `rollCallRosters` service + real `valence` + real `ukraineScore` against fake fetch returning realistic House and Senate roster shapes. Asserts: Senate `Yea` normalizes to `Aye` before valence lookup; House roster `bioguideID` → `Aye`/`Nay` map flows correctly to `voted-pro`/`voted-anti` valence; mixed roster (member votes on some rolls, not others) produces the expected `Did Not Vote` marker; `ukraineScore.contributing` count matches the non-excluded actions. Target: 5 tests. Closes the unit-test gap where `valence` and `ukraineScore` are tested in isolation but never with the roster-shape inputs they actually receive in production.
+- AC-44.17 (integration — hook error propagation): `tests/integration/hookErrorBanner.test.tsx` SHALL compose each error-emitting hook (`useAddressLookup`, `useNameSearch`, `useMemberProfile`) against a fake fetch that returns a realistic FR-37 envelope for status 429, 500, 404, and 400. Renders the real component that owns the error state (`ResultsPanel`, `NameSearchResultsPanel`, `RepDetail`) and asserts: ErrorBanner renders with `userMessage` visible, `traceId` rendered, "Try again" button present iff `retryable: true`. Target: 4 tests (one per error code × one per component owner). Catches the class of bug where a hook sets error state but the component's error-rendering path is dead code.
+- AC-44.18 (integration — sanitizeUrl at render boundaries): `tests/integration/sanitizeUrlBoundary.test.tsx` SHALL render `MemberChip`, `BillList`, and `RepDetail` with malicious URL values (`javascript:alert(1)`, `data:text/html,...`, `vbscript:...`, `file://...`) in every href/src field the component emits. Asserts: no `<a href>` or `<img src>` in the rendered DOM retains the dangerous scheme; `sanitizeUrl` is applied at the render boundary, not just at fetch time. Target: 4 tests (one per component + one negative case for a valid `https://` URL that MUST pass through). Catches the class of bug where upstream data is trusted at render but sanitized only at fetch.
+- AC-44.19 (integration — observability thread): `tests/integration/observabilityThread.test.ts` SHALL compose a fake request flowing through `resolveTraceId` → `serveCached` → (forced upstream error) → `asErrorResponse` → `logEvent` → `writeAnalyticsPoint`. Asserts: the same trace ID appears in (a) the response `X-Trace-Id` header, (b) the FR-37 envelope `error.traceId` field, (c) the captured `console.log` JSON line, (d) the Analytics Engine data point's `indexes[0]`. Target: 3 tests (success path, upstream-error path, top-level-exception path). Catches the class of bug where trace ID is generated per-request but lost at one of the 4 integration points.
+- AC-44.20 (integration — Senate XML parser error resilience): `tests/integration/senateXmlFetcherResilience.test.ts` SHALL exercise `SenateXmlFetcher` against fake fetch returning (a) a valid XML body, (b) an HTML error page with Content-Type text/html, (c) a truncated XML body (first 200 bytes of a valid body), (d) an empty 200 response. Asserts: (a) succeeds; (b)-(d) throw errors that the pipeline would translate to `upstream_parse_error` envelopes rather than uncaught exceptions. Target: 3 tests. Catches the class of bug where the bespoke XML parser works on happy-path input but crashes the Worker on upstream weirdness.
+
+**Reconciliation with existing specs:**
+
+- **FR-30 AC-30.3** references copying three R2 objects (`.iife.js`, `ukraineBills.json`, `ukraineVotes.json`). Post-ADR-011, those objects don't exist on the R2-as-datastore surface (widget bundle is served from Worker Sites; ukraineVotes.json was removed; ukraineBills.json is bundle-embedded). FR-44 AC-44.6 SUPERSEDES AC-30.3 with the KV-prefix-mirror semantics. AC-30.3 is retained as a historical marker with a ("superseded by FR-44 AC-44.6") note — see the task-list reconciliation.
+- **FR-30 AC-30.5** explicitly defers remote-mode coverage until "the first merged remote-mode test lands." FR-44 AC-44.5 is that first merged remote-mode test. AC-30.5's warning emission requirement sunsets when AC-44.5 is implemented.
+- **FR-30 AC-30.10** ("stg holds no persistent state worth preserving") is preserved exactly — FR-44's sync is always transient.
 
 ### FR-26: Cloudflare Deployment Story (NEW v2.4.0)
 

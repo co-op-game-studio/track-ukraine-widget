@@ -42,6 +42,17 @@ ENV_NAME = "prod"
 binding = "KV_VOTER_INFO"
 id = "72d3dbce1a1d4ea4aec74b305d7995e6"
 
+# FR-41 — R2 static archive bucket for byte-level-static upstream responses
+# (closed-session Senate XML, House rosters, aged bill-actions/summaries).
+# Must be provisioned via `wrangler r2 bucket create voter-info-widget-archive-prod`
+# BEFORE deploy; worker fails fast if binding configured but bucket absent
+# (AC-41.11). Binding name R2_STATIC is distinct from the retired R2_ASSETS
+# (ADR-011) which served static widget bundles and has been fully replaced
+# by Worker Sites.
+[[r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-prod"
+
 # AC-27.21 (RE-TIGHTENED v2.5.3) — in-Worker per-IP rate limit. After
 # ADR-012 moved roll-call rosters and state-members into KV, per-visit
 # fan-out dropped from ~70 req (v2.5.2 interim) to ~49 req worst case
@@ -56,6 +67,13 @@ simple = { limit = 60, period = 60 }
 
 [observability]
 enabled = true
+
+# FR-38 AC-38.1 — Workers Analytics Engine binding per env.
+# Dataset names follow the `voter_info_widget_${env}` convention so a single
+# query in the CF dashboard can slice across envs via the `env` blob field.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_prod"
 
 # ─── DEV (branch: develop) ───────────────────────────────────────────────────
 [env.dev]
@@ -79,6 +97,10 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "743b2feda53648cd8242d3b89538bfac"
 
+[[env.dev.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-dev"
+
 # Dev: 600 req / 60 s / IP — local harnesses iterate fast.
 [[env.dev.unsafe.bindings]]
 name = "RATE_LIMITER"
@@ -88,6 +110,10 @@ simple = { limit = 600, period = 60 }
 
 [env.dev.observability]
 enabled = true
+
+[[env.dev.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_dev"
 
 # ─── UAT (branch: uat) ───────────────────────────────────────────────────────
 [env.uat]
@@ -108,6 +134,10 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "3756142363984d218d5f489151716b30"
 
+[[env.uat.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-uat"
+
 # UAT: 120 req / 60 s / IP — reviewers iterate faster than prod.
 # RE-TIGHTENED v2.5.3 alongside prod/stg.
 [[env.uat.unsafe.bindings]]
@@ -118,6 +148,10 @@ simple = { limit = 120, period = 60 }
 
 [env.uat.observability]
 enabled = true
+
+[[env.uat.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_uat"
 
 # ─── STG (branch: stg) ───────────────────────────────────────────────────────
 [env.stg]
@@ -138,6 +172,10 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "4ff9a8e54b82489fb9a300466bd68686"
 
+[[env.stg.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-stg"
+
 # Stg: 60 req / 60 s / IP — mirrors prod per FR-30 AC-30.1.
 # RE-TIGHTENED v2.5.3 alongside prod.
 [[env.stg.unsafe.bindings]]
@@ -148,6 +186,10 @@ simple = { limit = 60, period = 60 }
 
 [env.stg.observability]
 enabled = true
+
+[[env.stg.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_stg"
 
 # ─── Local preview (wrangler dev) ────────────────────────────────────────────
 [env.preview]
@@ -169,9 +211,17 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "743b2feda53648cd8242d3b89538bfac"
 
+[[env.preview.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-dev"
+
 # Preview: 600 req / 60 s / IP — same posture as dev.
 [[env.preview.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1005"
 simple = { limit = 600, period = 60 }
+
+[[env.preview.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_preview"
