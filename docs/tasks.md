@@ -632,7 +632,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.1, AC-42.2, AC-42.3, AC-42.6.
 - **Test Requirements**: Port existing tests from `worker.test.ts` into per-module test files.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — Shims in proxy/security/* re-export from lib.ts today. Physical extraction lands atomically with T-075 (route-handler migration) because both changes share the god-module teardown path. Tests pass through the shims with no path change.
 
 ### T-072: Migrate `proxy/observability/*` Modules
 - **Description**: Move Phase 10 observability code (already in its own files by T-046..T-049) into the final topology + tighten interfaces.
@@ -641,7 +641,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.1, AC-42.2, AC-42.3.
 - **Test Requirements**: Existing Phase 10 tests remain green.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — proxy/observability/* already owns its implementations as of Phase 10. No code migration required; the task closes when T-075 updates call-sites to use the direct paths instead of lib.ts re-exports.
 
 ### T-073: Migrate `proxy/kv/*` Helpers
 - **Description**: Move `KV_PREFIXES` constant, `MemberProfile` type, `NameIndexEntry`, `normalizeSearchKey`, `rankMatches` into `proxy/kv/`.
@@ -650,7 +650,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.1, AC-42.2, AC-42.3.
 - **Test Requirements**: Port existing tests.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — Shims in proxy/kv/{name-index,member-profile}.ts re-export from lib.ts. KV_PREFIXES is not yet exposed; lands with T-075.
 
 ### T-074: Migrate Cache + Upstream Modules (Phase 11 outputs)
 - **Description**: Phase 11's cache + upstream modules (T-055..T-061) land in the final topology. This task is the acceptance gate that the Phase 11 tree conforms to FR-42 constraints (file sizes, cross-layer import rules, dependency injection).
@@ -659,7 +659,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.1 through AC-42.7, AC-42.9.
 - **Test Requirements**: `madge --circular proxy/` returns no cycles. `tsc --noEmit` clean.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — proxy/cache/* and proxy/upstreams/* already own their implementations. Acceptance gate (madge + tsc) runs once Phase 12 route-handler migration lands.
 
 ### T-075: Migrate Route Handlers (`proxy/routes/*`)
 - **Description**: One file per route family. Each handler is a class implementing `RouteHandler` per AC-42.4. Each uses `serveCached` (from T-062) for cached routes. Each migrates in its own commit with its tests moved in the same commit.
@@ -668,7 +668,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.4, AC-42.6, AC-42.7.
 - **Test Requirements**: Port + split existing `worker.test.ts` (1678 lines) into per-route test files, each ≤300 lines.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — Route-handler extraction is the hot path of Phase 12. Requires concurrent migration of proxy/lib.ts handlers + the 1678-line worker.test.ts split into per-route files + wiring serveCached into live routes. Biggest single change in the project; deserves its own PR with dedicated review.
 
 ### T-076: `router.ts` + `worker.ts` Final Wiring
 - **Description**: Implement `proxy/router.ts` — a small class that holds a registry of `RouteHandler`s and dispatches via `pattern` + `methods`. `proxy/worker.ts` shrinks to ≤100 lines: instantiate tier clients, instantiate cache, instantiate fetchers, instantiate handlers, instantiate router, export the `fetch` callback that delegates to router.
@@ -677,7 +677,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.1 (worker ≤100 lines), AC-42.4 (handlers via router), AC-42.6 (no behavior change).
 - **Test Requirements**: End-to-end smoke — full existing test suite runs against the new entry point and is green.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — Depends on T-075.
 
 ### T-077: Delete `proxy/lib.ts` + Enforce File-Size Cap
 - **Description**: Final cutover. Verify nothing imports from `proxy/lib.ts`; delete the file. Add a lint rule or pre-commit check enforcing the 300-line cap per AC-42.2 so this never recurs.
@@ -686,7 +686,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-42.1, AC-42.2 (forward-enforced).
 - **Test Requirements**: Full suite green. `grep -r "from .*proxy/lib" proxy/ tests/ src/` returns no matches.
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — Deferred — Final cutover. Depends on T-075 + T-076.
 
 ---
 
