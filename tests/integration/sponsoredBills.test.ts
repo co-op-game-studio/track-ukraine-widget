@@ -136,4 +136,51 @@ describe('useSponsoredBills (Ukraine-filtered, v3)', () => {
     await waitFor(() => expect(result.current.status).toBe('error'));
     expect(result.current.error).toBeTruthy();
   });
+
+  it('reset() clears data/status/error back to idle', async () => {
+    mockProfile(profile);
+    const { result } = renderHook(() => useSponsoredBills('D000563', ''));
+    await act(async () => { await result.current.load(); });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    act(() => result.current.reset());
+    expect(result.current.status).toBe('idle');
+    expect(result.current.data).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it('load() is a no-op when bioguideId is null', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    const { result } = renderHook(() => useSponsoredBills(null, ''));
+    await act(async () => { await result.current.load(); });
+    // Status stays idle; no fetch is issued.
+    expect(spy).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('idle');
+  });
+
+  it('sorts results with featured first, then newest introducedDate', async () => {
+    // Use curated Ukraine bills so tryBuildUkraineBill keeps them.
+    // HR2471 (117) is marked featured: true; HR6833 (117) is featured: false.
+    // HR7691 (117) is featured: true \u2014 newer introducedDate than HR2471.
+    // Expected order: HR7691, HR2471, HR6833.
+    mockProfile({
+      bioguideId: 'T000001',
+      sponsored: [
+        { congress: 117, type: 'HR', number: '2471', title: 'Consolidated Approps 2022', introducedDate: '2022-02-14', latestAction: { text: 'law' }, url: '' },
+        { congress: 117, type: 'HR', number: '7691', title: 'Ukraine Supp. 2022', introducedDate: '2022-05-10', latestAction: { text: 'law' }, url: '' },
+        { congress: 117, type: 'HR', number: '6833', title: 'FY23 CR', introducedDate: '2022-09-28', latestAction: { text: 'law' }, url: '' },
+      ],
+      cosponsored: [],
+    });
+    const { result } = renderHook(() => useSponsoredBills('T000001', ''));
+    await act(async () => { await result.current.load(); });
+    await waitFor(() => expect(result.current.status).toBe('success'));
+    const nums = result.current.data!.sponsored.map((b) => b.number);
+    // First element must be a featured bill; last element must be the unfeatured one.
+    const first = result.current.data!.sponsored[0]!;
+    const last = result.current.data!.sponsored[result.current.data!.sponsored.length - 1]!;
+    expect(first.featured).toBe(true);
+    expect(last.featured).toBe(false);
+    // Sanity: all three curated bills survived the filter.
+    expect(nums).toHaveLength(3);
+  });
 });

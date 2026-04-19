@@ -310,7 +310,176 @@ The proxy MUST:
 
 ---
 
-## 5. Spec Refresh Workflow
+## 5. KV-Backed Internal Routes (v2.5.x)
+
+Routes under this section are served directly from the Worker's `KV_VOTER_INFO` namespace — no upstream call on a cache hit. Cache-Control values here are the Worker-emitted values that govern CDN/browser caching of these routes; they differ from the upstream pass-through routes in §4 because the KV routes are authoritative (their freshness is driven by curator runs, not upstream staleness).
+
+### 5.1 `GET /api/members/{bioguideId}`
+
+**Spec anchor:** FR-32 AC-32.1, AC-32.14, AC-32.18, AC-32.19.
+
+**Backing key:** `member:v1:{bioguideId}`.
+
+**Response (200):**
+
+```json
+{
+  "bioguideId": "D000563",
+  "first": "Richard",
+  "last": "Durbin",
+  "officialName": "Richard J. Durbin",
+  "state": "IL",
+  "district": null,
+  "chamber": "Senate",
+  "party": "D",
+  "photoUrl": "https://www.congress.gov/img/member/d000563_200.jpg",
+  "website": "https://www.durbin.senate.gov",
+  "searchKey": "richard durbin",
+  "sponsored":   [ /* CongressLegislationRawEntry[], up to 250 */ ],
+  "cosponsored": [ /* CongressLegislationRawEntry[], up to 250 */ ],
+  "generatedAt": "2026-04-18T18:01:40.123Z",
+  "schemaVersion": 1
+}
+```
+
+`sponsored[]` / `cosponsored[]` carry the raw Congress.gov entry shape (§2.2 table of sponsored-legislation endpoints). Consumers filter these to the curated Ukraine set and compute per-bill valence at render time; the Worker does not pre-filter.
+
+**Response (404):** `{"error":"member_not_found","bioguideId":"<id>"}` when no `member:v1:<id>` key exists and the Worker's read-through returned a 404 from `/v3/member/{id}`.
+
+**Response (502):** `{"error":"upstream_error","detail":"upstream_body_invalid"}` when the required `/v3/member/{id}` upstream returned a malformed JSON body during the read-through write. Optional legs (sponsored, cosponsored) degrade to `[]` on parse failure per AC-32.19.
+
+**Response (504):** `{"error":"upstream_timeout","upstream":"member detail"}` on AC-27.18 15-second timeout of the required detail leg.
+
+**Cache-Control:** `public, max-age=60, s-maxage=300` (AC-32.14). The Worker also writes the resulting record back to KV with a 30-day `expirationTtl` (AC-32.18).
+
+### 5.2 `GET /api/name-search?q={query}`
+
+**Spec anchor:** FR-31, AC-32.4, AC-32.14.
+
+**Backing keys:** `name-index:v1:meta`, `name-index:v1:{letter}`.
+
+**Response (200):**
+
+```json
+{
+  "results": [
+    {
+      "bioguideId": "J000289",
+      "displayName": "Jim Jordan",
+      "first": "Jim",
+      "last": "Jordan",
+      "state": "OH",
+      "chamber": "House",
+      "district": 4,
+      "party": "R",
+      "photoUrl": "https://www.congress.gov/img/member/j000289_200.jpg",
+      "searchKeys": ["jim", "jordan"]
+    }
+  ],
+  "truncated": false
+}
+```
+
+`district` is `number | null` — House members emit the district number; senators and non-voting delegates emit `null` (AC-32.4 v2.5.2).
+
+**Response (400):** `{"error":"query_too_short"}` when the normalized query is fewer than 2 characters.
+
+**Response (503):** `{"error":"index_not_ready"}` when `name-index:v1:meta` is absent (curator has not yet populated the namespace). Widget behavior: disable input and show hint per AC-31.9.
+
+**Cache-Control:** `public, max-age=60, s-maxage=300` (AC-32.14).
+
+### 5.3 `GET /api/bills/{billId}`
+
+**Spec anchor:** FR-32 AC-32.2.
+
+**Backing key:** `bill:v1:{billId}` — canonical curated-bill metadata. `billId` is the concatenated uppercase type + number, e.g., `HR815`, `HR7691`, `SRES412`.
+
+**Response (200):** the verbatim KV record (see AC-32.2 shape).
+
+**Response (400):** `{"error":"invalid_bill_id"}` for malformed IDs (fails the `/^[A-Z]+\d+$/i` shape check).
+
+**Response (404):** `{"error":"bill_not_found","billId":"<id>"}` when no record exists (uncurated bill).
+
+**Cache-Control:** `public, max-age=60, s-maxage=300`.
+
+### 5.4 `GET /api/roll-calls/{chamber}/{congress}/{session}/{rollCall}`
+
+**Spec anchor:** FR-32 AC-32.3.
+
+**Backing key:** `roll-call:v1:{chamber}:{congress}:{session}:{rollCall}` — curated roll-call metadata (question, result, totals, linked billId). `chamber` is `house` or `senate` (lowercase); all four path segments are required.
+
+**Response (200):** the verbatim KV record (AC-32.3 shape).
+
+**Response (400):** `{"error":"invalid_roll_call_key"}` when any path segment fails shape validation.
+
+**Response (404):** `{"error":"roll_call_not_found"}` when the record does not exist.
+
+**Cache-Control:** `public, max-age=60, s-maxage=300`.
+
+### 5.5 `GET /api/roll-call-rosters/{chamber}/{congress}/{session}/{rollCall}` (NEW v2.5.2)
+
+**Spec anchor:** FR-32 AC-32.15.
+
+**Backing key:** `roll-call-roster:v1:{chamber}:{congress}:{session}:{rollCall}`.
+
+**Response (200) — House:**
+
+```json
+{
+  "rollCallId": "house:118:2:151",
+  "chamber": "house",
+  "congress": 118,
+  "session": 2,
+  "rollCall": 151,
+  "casts": { "J000289": "Nay", "D000096": "Yea", /* ...all House members... */ },
+  "generatedAt": "2026-04-19T02:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+**Response (200) — Senate:** same envelope with `"chamber":"senate"` and `casts` as an array of `{ lastName, state, cast, firstName?, party? }` entries (Senate XML carries no bioguide — see design.md §4.3 for lastName+state matching).
+
+**Response (400):** `{"error":"invalid_roll_call_key"}` on malformed path.
+
+**Response (404):** `{"error":"roll_call_roster_not_found"}` — means the curator has not yet written a roster for this roll-call. Client behavior: treat as "Did Not Vote" for any member, surface a non-blocking warning to observability.
+
+**Cache-Control:** `public, max-age=86400, s-maxage=31536000, immutable` — roll-call rosters are historical and never change.
+
+### 5.6 `GET /api/state-members/{stateCode}` (NEW v2.5.2)
+
+**Spec anchor:** FR-32 AC-32.16.
+
+**Backing key:** `state-members:v1:{stateCode}`.
+
+**Response (200):**
+
+```json
+{
+  "stateCode": "IL",
+  "senators": [
+    { "bioguideId": "D000563", "first": "Richard", "last": "Durbin", /* ... */ },
+    { "bioguideId": "D000622", "first": "Tammy",   "last": "Duckworth", /* ... */ }
+  ],
+  "house": [
+    { "bioguideId": "J000309", "district": 1, /* ... */ },
+    /* ...sorted by district asc... */
+  ],
+  "generatedAt": "2026-04-19T02:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+`MemberSummary` shape: `{ bioguideId, first, last, officialName, state, district: number | null, chamber, party, photoUrl, website }`. `house[]` is sorted by district ascending. `senators[]` is sorted by last name ascending (Congress.gov does not expose seniority class on the member-list endpoint; if seniority sort is required, the widget can sort client-side after cross-referencing the individual member records).
+
+**Response (400):** `{"error":"invalid_state_code"}` when `stateCode` fails the `/^[A-Z]{2}$/` check (case-insensitive accepted, normalized on read).
+
+**Response (404):** `{"error":"state_members_not_found"}` when no record exists (curator has not written yet, or stateCode is valid syntax but not a U.S. state/territory).
+
+**Cache-Control:** `public, max-age=86400, s-maxage=86400, stale-while-revalidate=3600`.
+
+---
+
+## 6. Spec Refresh Workflow
 
 When we suspect the external OpenAPI spec has changed:
 

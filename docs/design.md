@@ -181,21 +181,48 @@ Triggered lazily when user selects the "Votes" tab on a RepCard.
 4. Return: VoteRecord[] + feed data to partyAlignment calculator
 ```
 
-#### 3.2.3 Legislation Pipeline
+#### 3.2.3 Legislation Pipeline (REVISED v2.5.2)
 
-Triggered lazily when user selects the "Legislation" tab.
+Triggered eagerly when `RepDetail` mounts (alongside the voting-record pipeline) and stored in the hook's state for both the score-bar and the "Legislation" tab.
 
 ```
-1. Parallel:
-   ├── congressApi.fetchSponsoredLegislation(bioguideId, offset=0)
-   │   GET /api/congress/v3/member/{bioguideId}/sponsored-legislation?limit=20&format=json
-   │
-   └── congressApi.fetchCosponsoredLegislation(bioguideId, offset=0)
-       GET /api/congress/v3/member/{bioguideId}/cosponsored-legislation?limit=20&format=json
-         │
-2. Map responses to Bill[] domain objects
-3. Return: { sponsored: Bill[], cosponsored: Bill[] }
+1. useSponsoredBills.load(bioguideId):
+   GET /api/members/{bioguideId}
+     → KV read (member:v1:{bioguideId}); Worker read-through from Congress.gov on cache miss.
+     → Response carries up to 250 sponsored + 250 cosponsored raw CongressLegislationRawEntry items.
+2. tryBuildUkraineBill(entry, relationship) for each raw entry:
+   - Filter out amendments (type === null) per AC-4.1 and the "D-6" regression.
+   - Filter against curated Ukraine bill set (isCuratedBill) — drop non-matches silently.
+   - Lookup curated metadata (direction, featured flag, CRS summary) via lookupCuratedBill.
+   - Compute valence via computeValence(direction, relationship).
+3. Sort: featured first, then newest introducedDate.
+4. Return: { sponsored: UkraineBill[], cosponsored: UkraineBill[] }
 ```
+
+**Retired (v2.5.1):** the prior pipeline paginated sponsored/cosponsored live via five 100-entry pages against Congress.gov (10 round-trips per rep click). That path is removed; the legacy cache contract on `/api/congress/v3/member/*/sponsored-legislation` and `/cosponsored-legislation` remains in force for admin/debugging per AC-25.3 but is not called by the widget. See spec.md FR-7 v2.5.2 for the source-of-truth clause.
+
+#### 3.2.4 Roll-Call Roster Pipeline (NEW v2.5.2)
+
+Triggered eagerly when `RepDetail` mounts; populates the Ukraine-votes tab and feeds the score computation.
+
+```
+1. useVotingRecord.load(member):
+   For each curated vote V in getCuratedVotesForChamber(member.chamber):
+     GET /api/roll-call-rosters/{chamber}/{V.congress}/{V.session}/{V.rollCall}
+       → KV read (roll-call-roster:v1:{chamber}:{c}:{s}:{rc}); no upstream fetch on cache miss — the curator populates.
+     Extract the member's cast:
+       - House: rosterData.casts[member.bioguideId]
+       - Senate: rosterData.casts.find(r => r.lastName === lastNameOf(member.name) && r.state === member.state)
+     If member not found in roster:
+       - Cross-check state-members:v1:{member.state} to distinguish Did Not Vote (in roster, no ballot) from Did Not Serve (not in that Congress).
+2. voteClustering.clusterMemberVotes(rows):
+   - Group by billId; primary = highest-weight row, procedurals = the rest.
+3. valence.computeValence(direction, action, directionMultiplier) per row.
+4. obstruction.isObstructionVote per row.
+5. Return: { clusters, flat, voteScore, obstructionCount, primaryAbstentionCount }.
+```
+
+**Retired (v2.5.1):** the prior pipeline fetched each roll-call's full roster live via `/api/congress/v3/house-vote/{c}/{s}/{rc}/members` (House) or `/api/senate/legislative/LIS/.../xml` (Senate), producing 18-27 upstream round-trips per cold rep click. See spec.md FR-12 v2.5.2 for the source-of-truth clause.
 
 ### 3.3 Data View — Domain Types
 
@@ -643,6 +670,51 @@ build: {
   cssCodeSplit: false, // inline CSS into JS
 }
 ```
+
+### 4.14 KV Data Architecture (v2.5.2) — App-Data vs. Edge-Cache Boundary
+
+**Principle.** Every datum the widget needs to render SHALL live in `KV_VOTER_INFO` under one of the curator-managed prefixes (or — for now — the Worker's read-through-written `member:v1:` prefix). Edge caching (Cloudflare's `caches.default` and CDN-layer caching via `Cache-Control`) SHALL be treated as a **performance optimization only** — a layer that makes warm reads fast but whose absence never causes a widget render to fail or to fall back to a live upstream API call in the hot path.
+
+This is the formalization of ADR-011's "KV as sole first-class datastore" decision. The v2.5.1 implementation partially met this bar: `bill:v1:`, `roll-call:v1:`, `name-index:v1:`, and `member:v1:` records were in KV, but the widget still reached upstream via the Worker proxy for roll-call rosters (House `members`, Senate XML) and for the per-state member directory. v2.5.2 closes those gaps with the `roll-call-roster:v1:` and `state-members:v1:` families below.
+
+**Key families and writers:**
+
+| Prefix | Writer | Purpose | TTL / refresh cadence |
+|---|---|---|---|
+| `cache:v1:` | Worker (ADR-009 response cache) | Incidental upstream-response cache for non-authoritative routes | 30d `expirationTtl`, write-on-read-miss |
+| `member:v1:{bioguideId}` | Worker read-through (interim, AC-32.18) → Curator (AC-32.17, deferred) | Per-member profile, raw sponsored/cosponsored arrays | 30d `expirationTtl` (Worker); weekly refresh by curator (future) |
+| `bill:v1:{billId}` | Curator | Curated Ukraine-bill metadata + CRS summary + linked roll calls | Rewritten each curator run (~weekly) |
+| `roll-call:v1:{chamber}:{c}:{s}:{rc}` | Curator | Curated Ukraine-vote metadata (question, result, totals, billId) | Rewritten each curator run; historical roll-calls are stable |
+| `roll-call-roster:v1:{chamber}:{c}:{s}:{rc}` | Curator (NEW v2.5.2) | Full per-roll-call cast map, House keyed by bioguide, Senate keyed by lastName+state | Rewritten each curator run; historical roll-calls are stable |
+| `name-index:v1:{letter}` + `:meta` | Curator | First- and last-letter-keyed shards of the current-Congress directory | Rewritten each curator run |
+| `state-members:v1:{stateCode}` | Curator (NEW v2.5.2) | Pre-computed per-state Senate/House roster | Rewritten each curator run |
+
+**Widget → KV route map (v2.5.2 target state):**
+
+| Widget call | KV route | Backing key(s) |
+|---|---|---|
+| Address → list state's senators + district rep | `GET /api/state-members/{state}` | `state-members:v1:{state}` |
+| Open rep card | `GET /api/members/{bioguideId}` | `member:v1:{bioguideId}` |
+| Populate voting record (per curated vote) | `GET /api/roll-call-rosters/{chamber}/{c}/{s}/{rc}` | `roll-call-roster:v1:{chamber}:{c}:{s}:{rc}` |
+| Populate sponsored/cosponsored bills | (read from member profile, no extra fetch) | `member:v1:{bioguideId}` |
+| Name search | `GET /api/name-search?q=` | `name-index:v1:meta`, `name-index:v1:{letter}` |
+| Bill detail (rare, admin/debug) | `GET /api/bills/{billId}` | `bill:v1:{billId}` |
+| Roll-call metadata (rare, admin/debug) | `GET /api/roll-calls/{chamber}/{c}/{s}/{rc}` | `roll-call:v1:{chamber}:{c}:{s}:{rc}` |
+
+**Upstream pass-through routes (`/api/census/*`, `/api/congress/*`, `/api/senate/*`) remain available** for:
+- The address geocode (`/api/census/...`) — address space is unbounded, pre-populating KV is not viable.
+- The Worker's own read-through into `member:v1:` (until AC-32.17 lands, the Worker still hits Congress.gov when an uncached member is requested).
+- The curator itself — `scripts/publish-to-kv.ts` runs outside the Worker and calls Congress.gov directly with its own API key.
+- Debugging / admin tools that want the raw upstream shape.
+
+The widget SHALL NOT call the upstream pass-through routes. Tests SHALL enforce this (see tasks.md T-050 in Phase 8).
+
+**Per-visit fan-out contract (v2.5.2 target):**
+- Address flow resolving 3 reps: 1 census + 1 `/api/state-members/{state}` + 3 `/api/members/{bioguideId}` = **5 requests**.
+- Exploring one rep with N curated Ukraine votes: 1 `/api/members/{bioguideId}` (if not already fetched by the chip list, which pre-fetches for enrichment) + N `/api/roll-call-rosters/...` = **up to N+1 requests**.
+- Exploring all 3 reps from an address lookup, where the Senate has M curated votes and the House has H curated votes, worst-case cold KV cache: `5 + (M+H)*avg_reps_per_chamber` ≈ 5 + 26 + 18 = **~49 requests**.
+
+This is a **35%** reduction from the v2.5.1 worst case (~70+ per fully cold visit). The absolute number is still large-ish, but every one of those requests is a single KV read (~10 ms edge-local) rather than a multi-hundred-ms cross-origin Congress.gov round-trip. The rate-limit budget (AC-27.21) is set to comfortably exceed this worst case. Post-AC-32.17 (curator-baked member profiles with pre-joined votes), the per-visit count drops further to ~5 requests regardless of curated-vote count.
 
 ---
 

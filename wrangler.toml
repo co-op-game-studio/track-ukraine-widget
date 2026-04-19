@@ -42,16 +42,17 @@ ENV_NAME = "prod"
 binding = "KV_VOTER_INFO"
 id = "72d3dbce1a1d4ea4aec74b305d7995e6"
 
-# AC-27.21 — in-Worker per-IP rate limit. Opening a rep's detail fans out
-# to ~30 upstream cache-fill requests (house-vote member rolls + senate
-# XML per curated vote + member profile reads). 300/60s lets a single
-# visitor open multiple reps without 429 while still gating abuse.
-# Zone-level rule in AC-28.3 provides defense-in-depth. See ADR-010.
+# AC-27.21 (RE-TIGHTENED v2.5.3) — in-Worker per-IP rate limit. After
+# ADR-012 moved roll-call rosters and state-members into KV, per-visit
+# fan-out dropped from ~70 req (v2.5.2 interim) to ~49 req worst case
+# (all KV reads). 60/60s covers one visitor opening all three reps with
+# headroom for re-navigation; anything above is hostile or a stuck
+# client. Zone rule in AC-28.3 is the 2x outer gate.
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 300, period = 60 }
+simple = { limit = 60, period = 60 }
 
 [observability]
 enabled = true
@@ -107,12 +108,13 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "3756142363984d218d5f489151716b30"
 
-# UAT: 60 req / 60 s / IP — reviewers need a looser budget than prod.
+# UAT: 120 req / 60 s / IP — reviewers iterate faster than prod.
+# RE-TIGHTENED v2.5.3 alongside prod/stg.
 [[env.uat.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1003"
-simple = { limit = 60, period = 60 }
+simple = { limit = 120, period = 60 }
 
 [env.uat.observability]
 enabled = true
@@ -136,16 +138,13 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "4ff9a8e54b82489fb9a300466bd68686"
 
-# Stg: 300 req / 60 s / IP. A single RepDetail opens ~30 upstream
-# cache-fill requests (house-vote member rolls + senate XML per curated
-# vote + member profile reads). 300/60s lets a single visitor open
-# several reps in succession without 429, while still gating abuse.
-# Mirrors the intended prod posture (FR-30 AC-30.1).
+# Stg: 60 req / 60 s / IP — mirrors prod per FR-30 AC-30.1.
+# RE-TIGHTENED v2.5.3 alongside prod.
 [[env.stg.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1004"
-simple = { limit = 300, period = 60 }
+simple = { limit = 60, period = 60 }
 
 [env.stg.observability]
 enabled = true
