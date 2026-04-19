@@ -1160,6 +1160,32 @@
   position: relative;
   align-items: stretch;
 }
+
+/* Suppress the browser-native search-cancel ("×") button on type="search"
+ * inputs. The status glyph (.viw-search-status) sits in the same trailing
+ * slot and was overlapping the native button on Chrome + Safari. We don't
+ * expose an explicit clear affordance today — users can select-all +
+ * delete. If we want one, render it in the React component so we own its
+ * positioning deterministically. */
+.viw-name-search-row input[type='search']::-webkit-search-cancel-button,
+.viw-name-search-row input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+.viw-name-search-row input[type='search']::-ms-clear,
+.viw-name-search-row input[type='search']::-ms-reveal {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Reserve horizontal space on the right so text never runs beneath the
+ * status glyph, even on long names like "Hoeven" or a typed state list. */
+.viw-name-search-row input[type='search'] {
+  padding-right: 40px;
+}
+
 .viw-search-status {
   position: absolute;
   right: 10px;
