@@ -1,25 +1,23 @@
 /**
  * useAddressLookup — orchestrates the address-to-representatives pipeline.
  *
- * Pipeline (see design.md §3.2.1):
+ * Pipeline (v2.5.2, see design.md §3.2.1 and §4.14):
  *   1. Census geocoder → { state, district }
- *   2. Parallel Congress.gov calls: house rep for (state, district), all members for state
- *   3. Filter state response to senators, return combined Representative[]
+ *   2. ONE KV-backed call: `/api/state-members/{state}` returns the
+ *      full senator + house roster for the state in one record (ADR-012).
+ *   3. Filter house[] to the resolved district; combine with senators[] to
+ *      produce the `Representative[]` result.
  *
- * Traces to: FR-1, FR-2, FR-3, FR-4, US-1 (AC-1.1 through AC-1.5)
+ * Traces to: FR-1, FR-2, FR-3, FR-4 (REVISED v2.5.2), US-1 (AC-1.1\u20131.5),
+ * FR-32 AC-32.16, ADR-012.
+ *
+ * The v2.5.1 implementation did two Congress.gov list calls plus a
+ * per-rep member-detail enrichment loop (5\u20136 upstream round-trips total).
+ * The v2.5.2 path is a single KV read after the geocode.
  */
 import { useCallback, useRef, useState } from 'react';
 import { geocodeAddress } from '../services/censusApi';
-import {
-  fetchMembersByState,
-  fetchMembersByStateDistrict,
-  fetchMemberDetail,
-} from '../services/congressApi';
-import {
-  mapSummaryToRepresentative,
-  enrichWithMemberDetail,
-} from '../services/mapMember';
-import { mapWithConcurrency } from '../utils/limitConcurrency';
+import { fetchStateMembers, type StateMemberSummary } from '../services/stateMembers';
 import type { LookupResult, Representative } from '../types/domain';
 
 export type LookupStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -34,10 +32,29 @@ export interface UseAddressLookupResult {
 
 /**
  * Convert a Census at-large/territory district number (e.g., DC = 98) to
- * the value Congress.gov expects (0).
+ * the value used in the state-members record (0 for non-voting
+ * at-large delegates). Preserves the domain's existing convention.
  */
 function normalizeDistrictForCongress(district: number): number {
   return district >= 90 ? 0 : district;
+}
+
+function toRepresentative(summary: StateMemberSummary): Representative {
+  return {
+    bioguideId: summary.bioguideId,
+    name: `${summary.last}, ${summary.first}`,
+    party:
+      summary.party === 'D' ? 'Democratic' :
+      summary.party === 'R' ? 'Republican' :
+      summary.party === 'I' ? 'Independent' : summary.party,
+    partyAbbreviation: summary.party as Representative['partyAbbreviation'],
+    state: summary.state,
+    district: summary.district,
+    chamber: summary.chamber === 'Senate' ? 'senate' : 'house',
+    photoUrl: summary.photoUrl,
+    isNonVoting: summary.isNonVoting ?? false,
+    officialWebsiteUrl: summary.website,
+  };
 }
 
 export function useAddressLookup(apiBase: string): UseAddressLookupResult {
@@ -66,34 +83,20 @@ export function useAddressLookup(apiBase: string): UseAddressLookupResult {
 
         const congressDistrict = normalizeDistrictForCongress(geo.district);
 
-        const [houseList, stateList] = await Promise.all([
-          fetchMembersByStateDistrict(geo.state, congressDistrict, apiBase),
-          fetchMembersByState(geo.state, apiBase),
-        ]);
+        const stateRecord = await fetchStateMembers(geo.state, apiBase);
         if (thisLookup !== lookupIdRef.current) return;
 
-        const houseReps: Representative[] = houseList.map(mapSummaryToRepresentative);
-        const senators: Representative[] = stateList
-          .filter((m) => m.district === null)
-          .map(mapSummaryToRepresentative);
+        if (!stateRecord) {
+          throw new Error('Member roster for your state is temporarily unavailable.');
+        }
 
-        const summaryReps = [...senators, ...houseReps];
+        const senators: Representative[] = stateRecord.senators.map(toRepresentative);
+        const houseForDistrict: Representative[] = stateRecord.house
+          .filter((m) => m.district === congressDistrict)
+          .map(toRepresentative);
 
-        // Enrich each with the detail endpoint (for officialWebsiteUrl + authoritative partyAbbreviation).
-        // This is ~3 extra API calls. We swallow individual failures so the UI still renders.
-        const representatives = await mapWithConcurrency(
-          summaryReps,
-          3,
-          async (rep) => {
-            try {
-              const detail = await fetchMemberDetail(rep.bioguideId, apiBase);
-              return enrichWithMemberDetail(rep, detail);
-            } catch {
-              return rep; // detail call failed — fall back to list-endpoint data
-            }
-          },
-        );
-        if (thisLookup !== lookupIdRef.current) return;
+        // Prefer the house rep to fall last (matches v2.5.1 chip-grid layout).
+        const representatives: Representative[] = [...senators, ...houseForDistrict];
 
         setData({
           state: geo.state,

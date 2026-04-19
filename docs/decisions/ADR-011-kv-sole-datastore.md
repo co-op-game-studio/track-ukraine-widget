@@ -1,10 +1,11 @@
 # ADR-011: KV as Sole First-Class Datastore
 
-**Status**: Accepted
+**Status**: Accepted (2026-04-17) — Partially Implemented (v2.5.1 / v2.5.2). See addendum.
 **Date**: 2026-04-17
 **Deciders**: Kody
 **Supersedes**: ADR-005 §R2 (R2 bucket for bundled rosters), ADR-010 (name-index as separate pipeline)
 **Amends**: ADR-009 (KV response cache — now shares namespace with first-class records)
+**Amended by**: ADR-012 (roll-call rosters + state-members — closes the remaining upstream-fan-out gap)
 
 ---
 
@@ -296,3 +297,24 @@ Rollback path: revert the PR, redeploy. R2 buckets remain for 48h post-merge as 
 2. **Compression at rest?** KV doesn't do it natively. Our records are ~50KB uncompressed; not worth pre-gzipping.
 3. **Historical-member lookup (former reps)?** Out of scope for v1. Would be a `former-member:v1:{bioguide}` prefix if we add it.
 4. **Per-embedder quota / rate limiting on `/api/name-search`?** Zone-level rate limit from ADR-007 covers it. If search becomes hot, revisit.
+
+---
+
+## Addendum — Implementation status (v2.5.1 / v2.5.2, 2026-04-18)
+
+**Landed (v2.5.1):**
+- Single `KV_VOTER_INFO` namespace. R2 bindings removed from `wrangler.toml`. Widget bundle served via Worker Sites (`[assets] binding = "ASSETS"`).
+- `bill:v1:`, `roll-call:v1:`, `name-index:v1:` prefixes populated by `scripts/publish-to-kv.ts`.
+- `/api/bills/{id}`, `/api/roll-calls/{chamber}/{c}/{s}/{rc}`, `/api/name-search?q=` routes serving directly from KV.
+
+**Deviation from original design (v2.5.1 / v2.5.2):** `member:v1:` was originally specified as **curator-written, pre-joined** (embedding `ukraineVotes[]` and `ukraineScore` — see the atomic-unit example at the top of this ADR). As implemented, the Worker populates `member:v1:` via a **read-through write** on first request for a given member, pulling identity + raw sponsored/cosponsored arrays from Congress.gov. Ukraine votes and score are computed **client-side** by the widget. This is captured in spec.md AC-32.1 (REVISED v2.5.2), AC-32.17 (DEFERRED), AC-32.18 (Worker write exemption), and AC-32.19 (parse resilience). The curator-baked variant is deferred pending curator-pipeline work; it does not block the v2.5.2 goal of eliminating per-visitor Congress.gov fan-out.
+
+**Landed (v2.5.2):**
+- `name-index:v1:` shards carry the `district` field (AC-32.4 REVISED) and `photoUrl`.
+- Widget `NameSearchResultsPanel` reads `district` through into the constructed `Representative`.
+- Null-district rendering fallback in `MemberChip.subtitle` and `RepDetail.chamberLabel` (AC-31.4 REVISED).
+- Parse-resilient Worker read-through on `/api/members/{id}` (AC-32.19).
+
+**Remaining gap closed by ADR-012:** The widget's voting-record pipeline (`useVotingRecord`) still hits the upstream pass-through routes `/api/congress/v3/house-vote/.../members` and `/api/senate/legislative/LIS/.../xml` — one per curated vote per rep click, producing the 2026-04-18 rate-limit crunch. ADR-012 adds `roll-call-roster:v1:` and `state-members:v1:` KV families and their corresponding Worker routes, completing the "all app data lives in KV" picture.
+
+**Note on the original atomic-unit goal:** the v2.5.1/v2.5.2 implementation *does* maintain per-member atomicity in the sense that one `/api/members/{id}` call returns everything the widget needs to render the *identity* portion of a rep card. What it does not yet maintain is the per-member pre-join of vote casts — that's now covered by a per-roll-call roster lookup (ADR-012) rather than embedded in the member profile. The multi-read shape is a small regression from the ADR-011 ideal but keeps the curator pipeline simple. AC-32.17 remains the path back to the original atomic ideal if/when curator complexity becomes worthwhile.

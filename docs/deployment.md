@@ -226,6 +226,77 @@ git add src/data/ && git commit -m "chore: refresh curated data"
 git push
 ```
 
+### v2.5.2 rollout — KV roll-call rosters + state-members (ADR-012)
+
+Adding or re-enabling the KV roll-call-roster + state-members path requires
+a specific commit-order because the widget reads from KV records that the
+curator writes. Shipping widget code before populating KV = 404s on every
+roster / state-members fetch; shipping curator + Worker before widget = no
+effect (nothing calls the new records yet).
+
+**Correct order (per ADR-012 + tasks.md T-036..T-045):**
+
+1. **Merge the feature branch into `main`** (Phase 1-3 all land together —
+   spec, tests, Worker routes, curator phases, widget cutover).
+2. **Deploy to `develop` → `dev.vote.cogs.it.com`** via the normal `main →
+   develop` ladder rotation. At this point the new Worker routes exist but
+   KV has no `roll-call-roster:v1:*` or `state-members:v1:*` records yet.
+3. **Populate KV in dev** — one curator run per env, smallest blast radius
+   first:
+   ```bash
+   cd voter-info-widget
+   # Dev namespace uses a dev-scoped Congress.gov key.
+   CONGRESS_API_KEY=$DEV_CONGRESS_KEY \
+     npx tsx scripts/publish-to-kv.ts --env dev
+   ```
+   The curator writes the full set — `bill:v1:*`, `roll-call:v1:*`,
+   `roll-call-roster:v1:*` (NEW), `state-members:v1:*` (NEW), `name-index:v1:*`
+   shards + meta. ~2-3 minutes at default concurrency.
+4. **Smoke-test the new routes against dev** via the Access service-token
+   credentials:
+   ```bash
+   curl -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+        -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+        "https://dev.vote.cogs.it.com/api/state-members/IL" | jq '.senators | length'
+   # Expect: 2
+   curl -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
+        -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
+        "https://dev.vote.cogs.it.com/api/roll-call-rosters/house/118/2/151" | jq '.casts | length'
+   # Expect: > 400 (full House roster)
+   ```
+5. **Optional: warm dev edge cache** (not required for correctness, but
+   removes cold-start latency for any manual testing):
+   ```bash
+   node scripts/warm-member-cache.mjs --host https://dev.vote.cogs.it.com \
+     --concurrency 4 --delay-ms 250
+   ```
+6. **Promote `develop → uat`** via the ladder. Re-run the curator for uat,
+   re-smoke, re-warm as above:
+   ```bash
+   CONGRESS_API_KEY=$DEV_CONGRESS_KEY \
+     npx tsx scripts/publish-to-kv.ts --env uat
+   node scripts/warm-member-cache.mjs --host https://uat.vote.cogs.it.com \
+     --concurrency 4 --delay-ms 250
+   ```
+7. **STOP at uat until explicitly approved to proceed.** Phase 9 ships
+   to stg and prod as a separate, deliberate decision; the in-flight commits
+   up to T-042 are safe to run in dev/uat in parallel with the v2.5.1
+   implementation still live on stg/prod.
+8. **Later — promote to stg, then prod.** For each: ladder PR, reviewer
+   approval, curator run, smoke-test, optional warm. The widget-invariant
+   test (T-042) and the AC-32.15/16 route tests should already be green at
+   this point; CI flags regressions before the PR merges.
+
+**If the curator fetch fails mid-run** (e.g., Congress.gov 429, transient
+network error), the curator aborts the whole run and writes nothing — per
+ADR-012. Re-run when the upstream recovers; no partial-write cleanup
+needed.
+
+**Adding a new curated vote during this phase** — if a new vote is added
+to `src/data/ukraineBills.json` between curator runs, the widget will 404
+on the roster fetch and treat the cast as "Did Not Vote." Re-run the
+curator for each env to populate the new roster.
+
 ### Rotate the Congress.gov API key
 
 See FR-31 AC-31.3. The key-holder is the only person who can regenerate
