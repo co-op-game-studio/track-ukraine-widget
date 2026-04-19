@@ -687,3 +687,106 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Test Requirements**: Full suite green. `grep -r "from .*proxy/lib" proxy/ tests/ src/` returns no matches.
 - **Traces to**: FR-42
 - **Status**: [ ] Pending
+
+---
+
+## Phase 13: Test Ladder + CI Gating + Stress Testing (v2.6.0 — FR-44 / ADR-016)
+
+### T-080: `serveCached` Integration Test (tier 2)
+- **Description**: New `tests/integration/serveCached.test.ts` composing a real `TieredCache<string>` + real `EdgeTier` + real `KvTier` + real `R2Tier` + real `createUpstreamRegistry`, with only bindings faked (fake KV, fake R2, fake `caches.default`, stubbed `fetch`). Covers: cold-all-tiers → upstream → writes all eligible; edge hit; KV hit + promote to edge; R2 hit + promote to KV + edge; R2-ineligible route (member-detail) never writes to R2; upstream 429 → FR-37 envelope; upstream 5xx → retryable envelope; contentType roundtrip through tiers.
+- **Dependencies**: All Phase 11 tasks (T-055..T-062) — already landed.
+- **Files**: `tests/integration/serveCached.test.ts` (new).
+- **Acceptance Criteria**: AC-44.1. ~12 tests.
+- **Test Requirements**: Itself — this IS the integration test.
+- **Traces to**: FR-44, FR-40, ADR-014, ADR-016
+- **Status**: [ ] Pending
+
+### T-081: `matchRoute` × `serveCached` Integration Test (tier 2)
+- **Description**: New `tests/integration/matchRoute.test.ts` driving 20+ sample `/api/*` paths through `matchRoute` → `serveCached` → fake tiers + stubbed fetch. Asserts header shape (`X-Cache`, `X-Cache-Tier`, `X-Trace-Id`) and FR-37 envelope on error for every CacheKind.
+- **Dependencies**: T-080 (shares fixture pattern).
+- **Files**: `tests/integration/matchRoute.test.ts` (new).
+- **Acceptance Criteria**: AC-44.2.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44
+- **Status**: [ ] Pending
+
+### T-082: Local E2E Worker Harness (tier 3)
+- **Description**: Boot `wrangler dev --env preview` on a random free port. Stand up a Node fixture HTTP server on a second port returning canned Congress/Senate/Census responses. Point the Worker's upstream URLs at the fixture server via an `UPSTREAM_OVERRIDE_*` env var set. Expose helpers (`startWorker`, `startFixtureServer`, `teardown`) for e2e tests to consume.
+- **Dependencies**: Phase 11 wiring of `serveCached` into live routes (pending, queued for Phase 12 atomic rewrite).
+- **Files**: `tests/e2e/harness.ts` (new — shared by local + remote), `tests/e2e/worker-local.test.ts` (new), `scripts/start-fixture-server.ts` (new), `package.json` script entry `test:e2e:local`.
+- **Acceptance Criteria**: AC-44.3, AC-44.4, AC-44.14. At least one assertion SHALL verify cache-tier serves on a second request (`X-Cache-Tier: edge` or `kv`). Duration ≤90 s.
+- **Test Requirements**: Itself. Gated as a required CI job on `pr.yml`.
+- **Traces to**: FR-44, ADR-016
+- **Status**: [ ] Pending
+
+### T-083: Remote E2E Harness + Golden-Flow Twin (tier 4)
+- **Description**: Parallel `tests/e2e/remote.test.ts` using the shared `harness.ts` helpers but configured via `E2E_TARGET=https://...` + `CF_ACCESS_CLIENT_ID`/`CF_ACCESS_CLIENT_SECRET`. Remote-mode tests SHALL consult `E2E_TARGET` at module top and skip with a console note when unset (AC-44.13), so `npm test` locally keeps passing. At least the golden-flow from T-082 SHALL have a remote-mode twin here. Resolves the long-aspirational AC-30.5.
+- **Dependencies**: T-082 (shared harness).
+- **Files**: `tests/e2e/remote.test.ts` (new), `package.json` `test:e2e:remote` entry.
+- **Acceptance Criteria**: AC-44.5, AC-44.13, AC-44.14, AC-30.5 (closed).
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44, FR-30, ADR-016
+- **Status**: [ ] Pending
+
+### T-084: Stg KV Mirror — Full Prod-Prefix Sync
+- **Description**: Extend `scripts/sync-stg-data.ts` to copy ALL six curator-owned prefixes verbatim from prod → stg (`member:v1:*`, `bill:v1:*`, `roll-call:v1:*`, `name-index:v1:*`, `roll-call-roster:v1:*`, `state-members:v1:*`). SHALL NOT copy `cache:v1:*` or R2 archive (stg must exercise cold-cache). Fail-loud on any write error. Supports `--dry-run` that prints the key counts per prefix.
+- **Dependencies**: T-026 (KV namespaces exist).
+- **Files**: `scripts/sync-stg-data.ts` (extend), `tests/unit/syncStgData.test.ts` (new — unit-test the copy loop against fake KVs).
+- **Acceptance Criteria**: AC-44.6. Supersedes FR-30 AC-30.3.
+- **Test Requirements**: Unit test covers: all 6 prefixes enumerated; cache prefix never in the copy set; error on write fails the run; dry-run prints counts, writes nothing.
+- **Traces to**: FR-44, FR-30 (AC-30.3 superseded)
+- **Status**: [ ] Pending
+
+### T-085: Stg Rehearsal Workflow — Wire Sync + E2E + Stress
+- **Description**: Create/extend `.github/workflows/stg-rehearsal.yml` to run in order: (1) `npm run stg:sync-data` (AC-44.6), (2) `wrangler deploy --env stg`, (3) `npm run test:e2e:local` smoke, (4) `E2E_TARGET=https://stg.vote.cogs.it.com npm run test:e2e:remote` (AC-44.5), (5) `npm run test:stress` against stg (AC-44.8). Any failure aborts; run summary SHALL emit stress budget numbers (AC-44.12).
+- **Dependencies**: T-083, T-084, T-086.
+- **Files**: `.github/workflows/stg-rehearsal.yml` (new).
+- **Acceptance Criteria**: AC-44.7, AC-44.9, AC-44.10, AC-44.12.
+- **Test Requirements**: Manual trigger + inspect run summary contains stress numbers.
+- **Traces to**: FR-44, FR-30, ADR-016
+- **Status**: [ ] Pending
+
+### T-086: Stress Scenarios — Visitor-Flow Workload
+- **Description**: `tests/stress/visitor-flow.stress.ts` exercising parametrized concurrent-visitor workload. Two scenarios: cold (fresh R2 + KV, 50 concurrent for 60s) and warm (same load after cold, caches warm). Assertions: p95 ≤ 5s, 0 Worker 5xx, upstream 429 ≤ 0 warm / ≤ 5 cold. Service token bypasses per-IP limit so stress can exceed 60/60s. Captures req/sec, p95, error rate, cache-hit ratio per tier — emitted to stdout for the workflow summary (AC-44.12).
+- **Dependencies**: T-083 (same harness patterns for auth).
+- **Files**: `tests/stress/visitor-flow.stress.ts` (new), `tests/stress/harness.ts` (new — concurrency + metrics helpers), `package.json` `test:stress` script.
+- **Acceptance Criteria**: AC-44.8, AC-44.12. Duration ≤4 min.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44, ADR-016
+- **Status**: [ ] Pending
+
+### T-087: CI Gating — `pr.yml` Runs Tiers 1 + 2, Enforces 80% Branch Coverage on Changed Paths
+- **Description**: Extend `.github/workflows/pr.yml` so the required `lint-typecheck-test` job runs both unit and integration tests (merge-blocking on failure). Add a separate `coverage-guard` job that runs `vitest --coverage --coverage.thresholds.branches=80` scoped to files changed in the PR under `proxy/**`, `src/services/**`, or curator scripts. Marks the PR failing if coverage drops below 80% on any touched module.
+- **Dependencies**: T-080, T-081 (integration tests must exist first).
+- **Files**: `.github/workflows/pr.yml` (extend).
+- **Acceptance Criteria**: AC-44.10, AC-44.11.
+- **Test Requirements**: Manual verification — open a PR that removes test coverage, confirm CI fails.
+- **Traces to**: FR-44, ADR-016
+- **Status**: [ ] Pending
+
+### T-088: `deploy.yml` — Tier 3 Gate on Non-Prod Deploys
+- **Description**: Extend `.github/workflows/deploy.yml` so pushes to `develop`, `uat`, `stg` run `test:e2e:local` BEFORE `wrangler deploy`. Failure blocks the deploy for that env. Prod continues to require the SHA-match-to-stg-rehearsal check per AC-30.6.
+- **Dependencies**: T-082.
+- **Files**: `.github/workflows/deploy.yml` (extend).
+- **Acceptance Criteria**: AC-44.10.
+- **Test Requirements**: Intentional failing e2e run verifies deploy is blocked.
+- **Traces to**: FR-44, ADR-016
+- **Status**: [ ] Pending
+
+### T-089: Reconcile FR-30 AC-30.3 with FR-44 AC-44.6
+- **Description**: In `docs/spec.md`, append "SUPERSEDED by FR-44 AC-44.6 (2026-04-19)" note to AC-30.3, AC-30.5. Preserve existing text as a historical marker — do NOT delete. Update `docs/deployment.md` stg-rehearsal section to reference FR-44 mechanics.
+- **Dependencies**: FR-44 spec landed (this PR).
+- **Files**: `docs/spec.md` (note additions), `docs/deployment.md` (section rewrite).
+- **Acceptance Criteria**: Spec is internally consistent; no reader of FR-30 is misdirected to an obsolete sync procedure.
+- **Test Requirements**: None (docs-only).
+- **Traces to**: FR-44, FR-30
+- **Status**: [ ] Pending
+
+### T-090: Automate Prod-Promotion SHA-Match Check (AC-30.6 carry-forward)
+- **Description**: Small GitHub Actions script invoked on push to `prod` that uses the GH API to locate the latest green `stg-rehearsal.yml` run at the same SHA. Fails the prod-deploy workflow if none found. Removes the honor-system element of AC-30.6.
+- **Dependencies**: T-085 (stg rehearsal workflow exists).
+- **Files**: `.github/workflows/deploy.yml` (new job `verify-stg-rehearsal`), small JS/TS checker script.
+- **Acceptance Criteria**: AC-30.6 tightened from honor-system to mechanical.
+- **Test Requirements**: Manual verification — attempt a prod push without a matching stg run; workflow blocks.
+- **Traces to**: FR-44, FR-30 AC-30.6, ADR-016
+- **Status**: [ ] Pending (lowest-priority of Phase 13)
