@@ -74,6 +74,20 @@ export interface ProxyEnv {
    * AC-28.3 still applies in prod regardless). See ADR-010.
    */
   RATE_LIMITER?: RateLimiterLike;
+  /**
+   * R2 static archive bucket (FR-41). Tier-2 durable storage for byte-
+   * level-static upstream responses (closed-session Senate XML + House
+   * rosters + aged bill-actions/summaries). Absent in tests and in envs
+   * that haven't provisioned the bucket yet; the R2Tier's own binding
+   * guard makes get() return null and put() no-op when this is undefined.
+   */
+  R2_STATIC?: import('./cache/r2-tier').R2BucketLike;
+  /**
+   * Workers Analytics Engine dataset binding (FR-38). Absent in tests
+   * and in envs where the binding hasn't been added to wrangler.toml;
+   * writeAnalyticsPoint no-ops when this is undefined.
+   */
+  ANALYTICS?: import('./observability/analytics').AnalyticsDatasetLike;
 }
 
 export interface ApiRouteRule {

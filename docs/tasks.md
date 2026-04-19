@@ -617,13 +617,13 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 ## Phase 12: Proxy Module Decomposition (v2.6.0 — ADR-015)
 
 ### T-070: Scaffold New Module Tree Under `proxy/`
-- **Description**: Create the empty directory skeleton per FR-42: `proxy/routes/`, `proxy/cache/`, `proxy/upstreams/`, `proxy/security/`, `proxy/observability/`, `proxy/kv/`. Each dir gets an `index.ts` stub that re-exports from `proxy/lib.ts` for the one-shot migration period. This is a pure housekeeping move so subsequent file moves land at stable import paths.
+- **Description**: Create the empty directory skeleton per FR-42: `proxy/routes/`, `proxy/cache/`, `proxy/upstreams/`, `proxy/security/`, `proxy/observability/`, `proxy/kv/`. Each dir gets re-export shims from `proxy/lib.ts` for the one-shot migration period. This is a pure housekeeping move so subsequent file moves land at stable import paths.
 - **Dependencies**: none
-- **Files**: the new directory tree + stub index files.
+- **Files**: the new directory tree + re-export shim files.
 - **Acceptance Criteria**: Every existing test passes against the stub-re-export layout.
 - **Test Requirements**: None beyond existing suite (green baseline).
 - **Traces to**: FR-42
-- **Status**: [ ] Pending
+- **Status**: [x] Partial (v2.6.0 scaffold). Complete: `proxy/cache/*` (owned implementations — T-055..T-059/T-062), `proxy/upstreams/*` (owned implementations — T-060/T-061/registry), `proxy/observability/*` (owned implementations — Phase 10 T-046..T-049), `proxy/routes/cache-config.ts` (owned — T-062), `proxy/security/{origin-allowlist,url-validator,headers}.ts` (re-export shims from lib.ts), `proxy/kv/{name-index,member-profile}.ts` (re-export shims from lib.ts). Remaining: `proxy/security/{cors,rate-limit,query-filter}.ts`, `proxy/kv/prefixes.ts`, and the route-family split under `proxy/routes/*` — these land atomically with T-075 because they're not pure helpers (they need to move together with their callers).
 
 ### T-071: Migrate `proxy/security/*` Modules
 - **Description**: Move origin allowlist, CORS, security headers, rate-limit gate, URL validator, query filter out of `proxy/lib.ts` into their own files per FR-42 topology. Each file ≤300 lines. Tests split into `tests/unit/security/*.test.ts`.
