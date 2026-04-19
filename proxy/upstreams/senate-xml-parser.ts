@@ -65,6 +65,14 @@ export function parseSenateVoteXml(xml: string): SenateRoster {
   if (!xml.includes('<roll_call_vote')) {
     throw new Error('parseSenateVoteXml: <roll_call_vote> root not found');
   }
+  // AC-44.20: truncated-body guard. A body that opens <roll_call_vote> but
+  // never closes it is incomplete — likely truncated by upstream or network.
+  // Silent acceptance would hide the truncation and emit an empty-casts
+  // roster; we prefer a loud throw that the pipeline can translate to
+  // `upstream_parse_error`.
+  if (!xml.includes('</roll_call_vote>')) {
+    throw new Error('parseSenateVoteXml: </roll_call_vote> closing tag not found — body likely truncated');
+  }
 
   const congressStr = scalarTag(xml, 'congress');
   const sessionStr = scalarTag(xml, 'session');
