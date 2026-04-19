@@ -790,3 +790,57 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Test Requirements**: Manual verification — attempt a prod push without a matching stg run; workflow blocks.
 - **Traces to**: FR-44, FR-30 AC-30.6, ADR-016
 - **Status**: [ ] Pending (lowest-priority of Phase 13)
+
+### T-091: Integration — UpstreamRegistry Completeness (INT-1 / AC-44.15)
+- **Description**: Integration test verifying every `CacheKind` matchRoute emits has a registered fetcher in `createUpstreamRegistry`. Enumerates sample CacheKeys for every kind matchRoute handles + a negative case for an unhandled kind.
+- **Dependencies**: T-080, T-081 (pattern references).
+- **Files**: `tests/integration/upstreamRegistry.test.ts` (new).
+- **Acceptance Criteria**: AC-44.15. 3 tests.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44 AC-44.15
+- **Status**: [ ] Pending
+
+### T-092: Integration — Voting-Record Valence Chain (INT-2 / AC-44.16)
+- **Description**: Composes `useVotingRecord` hook with real `rollCallRosters` + real `valence` + real `ukraineScore` services against fake fetch returning realistic House + Senate roster shapes. Asserts Yea→Aye normalization, roster-shape differences (bioguide map vs. last-name array), Did-Not-Vote markers, contributing count.
+- **Dependencies**: T-080.
+- **Files**: `tests/integration/votingRecord.valence.test.ts` (new).
+- **Acceptance Criteria**: AC-44.16. 5 tests.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44 AC-44.16
+- **Status**: [ ] Pending
+
+### T-093: Integration — Hook Error → ErrorBanner Propagation (INT-3 / AC-44.17)
+- **Description**: Renders each error-emitting hook-owning component (`ResultsPanel`, `NameSearchResultsPanel`, `RepDetail`) with a fake fetch returning a realistic FR-37 envelope for 429/500/404/400. Asserts ErrorBanner renders userMessage, traceId line, "Try again" button iff retryable.
+- **Dependencies**: FR-43 ErrorBanner updates (already shipped).
+- **Files**: `tests/integration/hookErrorBanner.test.tsx` (new).
+- **Acceptance Criteria**: AC-44.17. 4 tests.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44 AC-44.17, FR-37
+- **Status**: [ ] Pending
+
+### T-094: Integration — sanitizeUrl at Render Boundary (INT-4 / AC-44.18)
+- **Description**: Renders `MemberChip`, `BillList`, `RepDetail` with malicious URL values in every href/src field. Asserts no `<a href>`/`<img src>` in rendered DOM retains dangerous schemes. One positive-case test confirms valid https:// URLs pass through unchanged.
+- **Dependencies**: none.
+- **Files**: `tests/integration/sanitizeUrlBoundary.test.tsx` (new).
+- **Acceptance Criteria**: AC-44.18. 4 tests.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44 AC-44.18
+- **Status**: [ ] Pending
+
+### T-095: Integration — Observability Thread (INT-5 / AC-44.19)
+- **Description**: Exercises a fake request flowing through `resolveTraceId` → `serveCached` → upstream-error → `asErrorResponse` → `logEvent` → `writeAnalyticsPoint`. Asserts same trace ID appears in response header, envelope, log line, analytics data point indexes[0].
+- **Dependencies**: T-080 (pattern).
+- **Files**: `tests/integration/observabilityThread.test.ts` (new).
+- **Acceptance Criteria**: AC-44.19. 3 tests.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44 AC-44.19, FR-36, FR-37, FR-38, FR-39
+- **Status**: [ ] Pending
+
+### T-096: Integration — Senate XML Parser Resilience (INT-6 / AC-44.20)
+- **Description**: Exercises `SenateXmlFetcher` against fake fetch returning valid XML, HTML error page, truncated XML, empty 200. Asserts happy-path succeeds; malformed inputs throw catchable errors (not uncaught exceptions).
+- **Dependencies**: none.
+- **Files**: `tests/integration/senateXmlFetcherResilience.test.ts` (new).
+- **Acceptance Criteria**: AC-44.20. 3 tests.
+- **Test Requirements**: Itself.
+- **Traces to**: FR-44 AC-44.20, FR-41 AC-41.7
+- **Status**: [ ] Pending
