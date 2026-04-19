@@ -480,7 +480,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-39.1 through AC-39.5.
 - **Test Requirements**: ~8 tests — serialization, redaction, circular-ref fallback, level filtering, ctx threading.
 - **Traces to**: FR-39
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase10) commit 9a50bef. proxy/observability/log.ts with 16 tests.
 
 ### T-047: Trace-ID Generation + Propagation (`proxy/observability/trace.ts`)
 - **Description**: Implement `generateOrEchoTraceId(request)` per FR-36 AC-36.1. Validate pattern `/^tr_[0-9a-f]{16}$/`. Thread trace ID through every response, every upstream fetch, every log line.
@@ -489,7 +489,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-36.1 through AC-36.4, AC-36.7.
 - **Test Requirements**: ~10 tests — pattern validation, malformed-header replacement, crypto.randomUUID path, deterministic echo.
 - **Traces to**: FR-36
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase10) commit 9a50bef. proxy/observability/trace.ts with 19 tests.
 
 ### T-048: Canonical Error Envelope (`proxy/observability/error-envelope.ts`)
 - **Description**: Implement `ErrorEnvelope` type, closed-enum error codes, `asResponse(envelope, { status, headers })` helper. Migrate every existing error emitter in the proxy to use this path in the same PR. Delete `normalizeUpstreamErrorBody` + legacy shape consumers.
@@ -498,7 +498,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-37.1 through AC-37.8.
 - **Test Requirements**: ~15 tests — one per error code value, retryable-flag matrix, widget-side parser, `Retry-After` on 429, userMessage vs message separation.
 - **Traces to**: FR-37
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase10) commit 9a50bef. proxy/observability/error-envelope.ts + src/services/errorEnvelope.ts with 35 tests. Proxy-side error-emitter migration rides Phase 12 atomic rewrite.
 
 ### T-049: Workers Analytics Engine Binding + Writer (`proxy/observability/analytics.ts`)
 - **Description**: Add `[[analytics_engine_datasets]]` binding per env in `wrangler.toml` (dataset `voter_info_widget_${ENV_NAME}`). Implement `writeAnalyticsPoint(env, ctx, payload)` helper. Wire into every `/api/*` response path via `ctx.waitUntil`. Writer SHALL NOT throw; failures fall through to `logEvent`.
@@ -507,7 +507,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-38.1 through AC-38.6.
 - **Test Requirements**: ~8 tests — field shape assertion, waitUntil wrapping, error fallback, per-env dataset naming, top-level-exception still emits.
 - **Traces to**: FR-38
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase10) commit 9a50bef. proxy/observability/analytics.ts with 15 tests. Per-env [[analytics_engine_datasets]] in wrangler.toml.
 
 ### T-050: Widget Error UI with Trace-ID Surface
 - **Description**: Update `ErrorBanner`, any error-bearing components (`ResultsPanel`, `RepDetail`, `NameSearchResultsPanel`) to render the FR-37 envelope's `userMessage` + trace ID. "Try again" button only on `retryable: true`. Trace ID styled muted + monospace + selectable.
@@ -516,7 +516,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-36.5, AC-36.6, AC-37.5, AC-37.8.
 - **Test Requirements**: ~12 tests — trace-ID rendering, retry button presence/absence, userMessage rendering, accessibility of the retry control, fallback when trace ID absent.
 - **Traces to**: FR-36, FR-37
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase10) commit 9a50bef. ErrorBanner gained traceId + onRetry props. Widget-side parseErrorEnvelope. Full un-skip of T-093 hook-wiring tests lands with T-097.
 
 ---
 
@@ -529,7 +529,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-40.1, AC-40.2, AC-40.3, AC-40.4.
 - **Test Requirements**: ~6 tests for CacheKey serialization helpers.
 - **Traces to**: FR-40
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit a3632f5. proxy/cache/{key,policy,tier}.ts with 10 tests.
 
 ### T-056: `TieredCache<V>` Composition Class (`proxy/cache/tiered-cache.ts`)
 - **Description**: Implement the composition class per AC-40.5. Reads top-down, promotes on hit via `ctx.waitUntil`, stores-all-writable on miss. Tests use three `FakeTier`s.
@@ -538,7 +538,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-40.5, AC-40.10.
 - **Test Requirements**: ~12 tests — tier-order reads, promote-on-hit, store-on-miss, policy filter, waitUntil wrapping, idempotency, miss-all null.
 - **Traces to**: FR-40
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit a3632f5. proxy/cache/tiered-cache.ts with 14 tests.
 
 ### T-057: `EdgeTier` Implementation (`proxy/cache/edge-tier.ts`)
 - **Description**: Wraps `caches.default`. Serializes CacheKey to the canonical upstream URL. Translates `WritePolicy` into `Cache-Control` headers for storage.
@@ -547,7 +547,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-40.1 (Edge implementation), AC-40.9 (header emission).
 - **Test Requirements**: ~8 tests against `FakeCache` — get/put roundtrip, TTL header translation, immutable flag.
 - **Traces to**: FR-40
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit cc71079. proxy/cache/edge-tier.ts with 9 tests.
 
 ### T-058: `KvTier` Implementation (`proxy/cache/kv-tier.ts`)
 - **Description**: Wraps `KV_VOTER_INFO`. Serializes CacheKey to `cache:v1:{kind}:{serialized-params}`. Honors `expirationTtl` from `WritePolicy.maxAge`. Handles JSON serialization of the stored `CacheEntry` envelope.
@@ -556,7 +556,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-40.1 (KV implementation).
 - **Test Requirements**: ~10 tests against `FakeKv` — get/put, TTL, prefix enforcement, envelope parse failures, null on miss.
 - **Traces to**: FR-40
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit cc71079. proxy/cache/kv-tier.ts with 10 tests.
 
 ### T-059: `R2Tier` Implementation (`proxy/cache/r2-tier.ts`)
 - **Description**: Wraps `R2_STATIC`. Serializes CacheKey per AC-41.2. Gates writes on `policy.immutable === true && entry.sessionStatus === 'frozen'`. Stores metadata per AC-41.5. Serves verbatim bytes per AC-41.6.
@@ -565,7 +565,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-41.1, AC-41.2, AC-41.3, AC-41.5, AC-41.6.
 - **Test Requirements**: ~15 tests against `FakeR2` — key serialization per kind, gate enforcement (policy.immutable false skips, sessionStatus live skips), metadata persistence, content-type roundtrip.
 - **Traces to**: FR-41
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit cc71079. proxy/cache/r2-tier.ts with 19 tests.
 
 ### T-060: Congress Calendar Helpers (`proxy/upstreams/congress-calendar.ts`)
 - **Description**: Pure functions `currentCongress(now)`, `currentSession(now)`, `isCongressFrozen(congress, session, now)`. Handle boundary dates (119th Congress: 2025-01-03 to 2027-01-03; sessions 1 odd years, 2 even years).
@@ -574,7 +574,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-41.4.
 - **Test Requirements**: ~10 tests — boundary dates, mid-year session computation, frozen/live classification.
 - **Traces to**: FR-41
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit cc71079. proxy/upstreams/congress-calendar.ts with 19 tests.
 
 ### T-061: `UpstreamFetcher<V>` Interface + Per-Upstream Implementations
 - **Description**: One fetcher per upstream: `SenateXmlFetcher`, `HouseRosterFetcher`, `HouseVoteDetailFetcher`, `BillActionsFetcher`, `BillSummariesFetcher`, `MemberDetailFetcher`, `CensusGeocoderFetcher`. Each `≤80 lines`. Each knows its upstream URL, parse, and `sessionStatus` classification.
@@ -583,7 +583,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-40.7, AC-41.4, AC-41.7 (Senate XML parse + defer-save to KV).
 - **Test Requirements**: ~6–10 tests per fetcher against a mock `fetch`. Parser module gets its own coverage (XML shape, malformed-input resilience).
 - **Traces to**: FR-40, FR-41
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11+12-prep) commit 814c75e. All 7 fetchers + registry + Senate XML parser with 73 fetcher tests. Parser tightened post-audit in commit 431de03 (T-096 finding).
 
 ### T-062: `serveCached` Pipeline (`proxy/cache/pipeline.ts`)
 - **Description**: The single request-dispatch function for every cacheable route per AC-40.6. Emits `X-Cache` + `X-Cache-Tier` headers. On upstream error emits FR-37 envelope + FR-39 log + FR-38 data point.
@@ -592,7 +592,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-40.6, AC-40.8, AC-40.9, AC-41.9.
 - **Test Requirements**: ~15 tests — hit path per tier (3 tests), miss-all path, upstream 429 (FR-37 rate_limited envelope), upstream 5xx, upstream timeout, config-driven policy enforcement, header emission.
 - **Traces to**: FR-40
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11) commit cc71079. proxy/cache/pipeline.ts + proxy/routes/cache-config.ts with 23 tests.
 
 ### T-063: Unified Prewarmer (`scripts/warm.ts`)
 - **Description**: Replace `scripts/publish-to-kv.ts` + `scripts/warm-member-cache.mjs` with a single `scripts/warm.ts` that issues HTTP GETs to the target Worker for every prewarmable key. Walks current-Congress member directory + curated roll-calls, issues bounded-concurrency GETs, reports success/failure counts. Supports CF Access service-token headers.
@@ -601,7 +601,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-35.1 through AC-35.6 (revised v2.6.0), AC-42.8, AC-41.8.
 - **Test Requirements**: `tests/unit/warm.test.ts` — flag parsing, concurrency semantics, Access header threading, exit-code on failures. No network in unit tests.
 - **Traces to**: FR-35 (revised), FR-41, FR-42
-- **Status**: [ ] Pending
+- **Status**: [ ] Deferred (2026-04-19) — DEFERRED — Replaces publish-to-kv.ts + warm-member-cache.mjs with scripts/warm.ts HTTP client. Coupled to live-wiring of serveCached in Phase 12.
 
 ### T-064: Per-Env R2 Bucket Provisioning
 - **Description**: Create `voter-info-widget-archive-${env}` R2 buckets per env. Add `[[r2_buckets]]` bindings to `wrangler.toml` for each env as `R2_STATIC`. Document the provisioning step in `docs/deployment.md §R2 static archive tier`. Deploy workflow fails fast if binding is configured but bucket is absent (AC-41.11).
@@ -610,7 +610,7 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Acceptance Criteria**: AC-41.1, AC-41.11.
 - **Test Requirements**: None (infrastructure).
 - **Traces to**: FR-41
-- **Status**: [ ] Pending
+- **Status**: [x] Done (2026-04-19) — Shipped in feat(phase11+12-prep) commit 814c75e. Per-env [[r2_buckets]] R2_STATIC bindings in wrangler.toml. Operator SHALL run wrangler r2 bucket create before first deploy.
 
 ---
 
