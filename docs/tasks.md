@@ -859,6 +859,6 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Dependencies**: T-046, T-047, T-048, T-049 (all observability helpers shipped).
 - **Files**: `proxy/cache/pipeline.ts` (extend ServeCachedInput, add calls), `tests/integration/observabilityThread.test.ts` (tighten assertions to verify pipeline-invoked calls, not manual ones).
 - **Acceptance Criteria**: AC-38.2, AC-38.6, AC-39.2 become verifiable end-to-end.
-- **Test Requirements**: Re-run T-095 integration test with tightened assertions — `logEvent` was called with `event === 'upstream_error'` + `level === 'error'` + matching traceId; `writeDataPoint` was called with `errorCode !== 'ok'` + `indexes[0] === traceId`.
+- **Test Requirements**: 5 tests in `observabilityThread.test.ts` (up from 3) covering pipeline-invoked log+analytics on error, analytics-only on success, cache-hit analytics with cacheTier reflecting serving tier, no-observability back-compat, resolveTraceId round-trip.
 - **Traces to**: FR-38 AC-38.2, FR-38 AC-38.6, FR-39 AC-39.2, FR-44 AC-44.19
-- **Status**: [ ] Pending (discovered 2026-04-19 via T-095 audit)
+- **Status**: [x] Done (2026-04-19) — `serveCached` extended with optional `ServeCachedObservability` bundle (env, routeClass, upstreamName, analytics binding). Success paths silent per AC-39.3; retryable errors log at `warn`, non-retryable at `error`. Back-compat preserved when field absent. Route handlers wire observability in Phase 12 T-075.

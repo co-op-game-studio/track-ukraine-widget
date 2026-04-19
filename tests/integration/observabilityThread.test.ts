@@ -1,30 +1,22 @@
-/** Traces: FR-44 AC-44.19 (T-095), FR-36 AC-36.1..AC-36.4, FR-38 AC-38.2. */
-/**
- * Integration test: verify the trace ID threads cleanly through
- *   resolveTraceId -> serveCached -> asErrorResponse -> logEvent
- *                                                    -> writeAnalyticsPoint
+/** Traces: FR-44 AC-44.19 (T-095 + T-098), FR-36 AC-36.1..AC-36.4,
+ *          FR-38 AC-38.2, AC-38.6, FR-39 AC-39.2.
  *
- * Catches the bug class where the trace ID is generated correctly at the
- * edge but is lost at one of the four downstream integration points.
+ * Verifies the trace ID threads cleanly through
+ *   resolveTraceId -> serveCached (with observability) -> asErrorResponse
+ *                                                      -> logEvent
+ *                                                      -> writeAnalyticsPoint
  *
- * NOTE (gap): as of this test's authoring, proxy/cache/pipeline.ts does NOT
- * auto-invoke `logEvent` or `writeAnalyticsPoint` on the upstream-error
- * path — it only builds a FR-37 envelope via `asErrorResponse`. To still
- * exercise the full observability thread end-to-end, test (1) invokes
- * `logEvent` and `writeAnalyticsPoint` directly AFTER the serveCached call,
- * using the SAME trace ID that threaded through serveCached. This is the
- * minimum plumbing check; wiring them into pipeline.ts is a follow-up task.
+ * v2.6.0 T-098 tightened this from "verify helpers work in isolation" to
+ * "verify serveCached itself invokes them." If an `observability` field is
+ * supplied to serveCached, every request MUST emit exactly one analytics
+ * data point (success or error) and error paths MUST additionally emit
+ * one logEvent call.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { serveCached } from '../../proxy/cache/pipeline';
 import { IMMUTABLE_ARCHIVE_POLICY } from '../../proxy/cache/policy';
 import { resolveTraceId, TRACE_HEADER } from '../../proxy/observability/trace';
-import { logEvent } from '../../proxy/observability/log';
-import {
-  writeAnalyticsPoint,
-  type AnalyticsDatasetLike,
-  type AnalyticsPayload,
-} from '../../proxy/observability/analytics';
+import type { AnalyticsDatasetLike } from '../../proxy/observability/analytics';
 import type { CacheKey } from '../../proxy/cache/key';
 import type { CacheEntry } from '../../proxy/cache/tier';
 import type { UpstreamFetcher } from '../../proxy/upstreams/fetcher';
@@ -77,10 +69,13 @@ function makeAnalyticsFake(): { dataset: AnalyticsDatasetLike; calls: AnalyticsC
 }
 
 describe('observability thread — trace id through pipeline + helpers', () => {
-  const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-  afterEach(() => { consoleSpy.mockClear(); });
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+  afterEach(() => { consoleSpy.mockRestore(); });
 
-  it('upstream error — trace ID propagates to envelope + log + analytics', async () => {
+  it('upstream error — pipeline self-invokes logEvent + writeAnalyticsPoint with trace ID', async () => {
     const h = harness();
     const fetcher = throwingFetcher('upstream boom');
     const { dataset, calls: analyticsCalls } = makeAnalyticsFake();
@@ -93,7 +88,14 @@ describe('observability thread — trace id through pipeline + helpers', () => {
       ctx: h.ctx,
       traceId: TRACE_BAD,
       upstreamAttribution: 'senate',
+      observability: {
+        analytics: dataset,
+        env: 'test',
+        routeClass: 'senate-xml',
+        upstreamName: 'senate',
+      },
     });
+    await Promise.all(h.ctx.awaited);
 
     // Envelope + X-Trace-Id echoed.
     expect(resp.headers.get('X-Trace-Id')).toBe(TRACE_BAD);
@@ -101,45 +103,37 @@ describe('observability thread — trace id through pipeline + helpers', () => {
     expect(body.error.traceId).toBe(TRACE_BAD);
     expect(body.error.code).toBe('upstream_5xx');
 
-    // Pipeline does NOT currently invoke logEvent/writeAnalyticsPoint itself
-    // (see header comment). Invoke them directly with the same traceId to
-    // verify the helper trace-ID plumbing still works end-to-end.
-    logEvent(
-      { env: 'test', traceId: TRACE_BAD },
-      { event: 'upstream_error', level: 'error', upstream: 'senate' },
-    );
-    const payload: AnalyticsPayload = {
-      routeClass: 'senate-xml',
-      upstreamName: 'senate',
-      errorCode: 'upstream_5xx',
-      env: 'test',
-      cacheTier: 'n/a',
-      totalLatencyMs: 12,
-      upstreamLatencyMs: 0,
-      statusCode: 502,
-      rateLimitRemaining: -1,
-      traceId: TRACE_BAD,
-    };
-    writeAnalyticsPoint(dataset, h.ctx, payload);
-    await Promise.all(h.ctx.awaited);
-
-    // logEvent wrote exactly one JSON line carrying the trace ID.
+    // Pipeline auto-invoked logEvent with the trace ID + FR-37 code.
     expect(consoleSpy).toHaveBeenCalledTimes(1);
     const firstArg = consoleSpy.mock.calls[0]?.[0];
     expect(typeof firstArg).toBe('string');
-    const parsed = JSON.parse(firstArg as string) as { traceId: string; event: string; level: string };
+    const parsed = JSON.parse(firstArg as string) as {
+      traceId: string; event: string; level: string; upstream: string | null; status: number;
+    };
     expect(parsed.traceId).toBe(TRACE_BAD);
-    expect(parsed.event).toBe('upstream_error');
-    expect(parsed.level).toBe('error');
+    expect(parsed.event).toBe('upstream_5xx');
+    // upstream_5xx is retryable → level=warn (per isRetryable).
+    expect(parsed.level).toBe('warn');
+    expect(parsed.upstream).toBe('senate');
+    expect(parsed.status).toBe(502);
 
-    // Analytics writeDataPoint was called with the trace ID as indexes[0].
+    // Pipeline auto-invoked writeAnalyticsPoint with indexes[0] = traceId
+    // and errorCode in blobs[2].
     expect(analyticsCalls).toHaveLength(1);
-    expect(analyticsCalls[0]?.indexes).toEqual([TRACE_BAD]);
+    const call = analyticsCalls[0]!;
+    expect(call.indexes).toEqual([TRACE_BAD]);
+    expect(call.blobs?.[0]).toBe('senate-xml'); // routeClass
+    expect(call.blobs?.[1]).toBe('senate');     // upstreamName
+    expect(call.blobs?.[2]).toBe('upstream_5xx'); // errorCode
+    expect(call.blobs?.[3]).toBe('test');       // env
+    expect(call.blobs?.[4]).toBe('n/a');        // cacheTier for error
+    expect(call.doubles?.[2]).toBe(502);        // statusCode
   });
 
-  it('upstream success — trace ID echoed on 200 response', async () => {
+  it('upstream success — pipeline self-invokes writeAnalyticsPoint only (no log on success)', async () => {
     const h = harness();
     const fetcher = successFetcher(frozenXmlEntry());
+    const { dataset, calls: analyticsCalls } = makeAnalyticsFake();
 
     const resp = await serveCached({
       key: SENATE_KEY,
@@ -148,12 +142,84 @@ describe('observability thread — trace id through pipeline + helpers', () => {
       policy: IMMUTABLE_ARCHIVE_POLICY,
       ctx: h.ctx,
       traceId: TRACE_GOOD,
+      observability: {
+        analytics: dataset,
+        env: 'test',
+        routeClass: 'senate-xml',
+        upstreamName: 'senate',
+      },
     });
     await Promise.all(h.ctx.awaited);
 
     expect(resp.status).toBe(200);
     expect(resp.headers.get('X-Cache')).toBe('MISS');
     expect(resp.headers.get('X-Trace-Id')).toBe(TRACE_GOOD);
+
+    // AC-39.3: success paths emit NO log lines.
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    // But analytics IS emitted on success, with errorCode='ok'.
+    expect(analyticsCalls).toHaveLength(1);
+    const call = analyticsCalls[0]!;
+    expect(call.indexes).toEqual([TRACE_GOOD]);
+    expect(call.blobs?.[2]).toBe('ok');
+    expect(call.blobs?.[4]).toBe('upstream'); // cacheTier: upstream on MISS
+    expect(call.doubles?.[2]).toBe(200);
+  });
+
+  it('cache hit — pipeline emits analytics with cacheTier reflecting the serving tier', async () => {
+    const h = harness();
+    const { dataset, calls: analyticsCalls } = makeAnalyticsFake();
+    // First miss populates all tiers.
+    await serveCached({
+      key: SENATE_KEY,
+      cache: h.cache,
+      fetcher: successFetcher(frozenXmlEntry()),
+      policy: IMMUTABLE_ARCHIVE_POLICY,
+      ctx: h.ctx,
+      traceId: 'tr_first000000000',
+      observability: { analytics: dataset, env: 'test', routeClass: 'senate-xml', upstreamName: 'senate' },
+    });
+    await Promise.all(h.ctx.awaited);
+    // Second request hits edge.
+    const resp = await serveCached({
+      key: SENATE_KEY,
+      cache: h.cache,
+      fetcher: successFetcher(frozenXmlEntry()),
+      policy: IMMUTABLE_ARCHIVE_POLICY,
+      ctx: h.ctx,
+      traceId: TRACE_GOOD,
+      observability: { analytics: dataset, env: 'test', routeClass: 'senate-xml', upstreamName: 'senate' },
+    });
+    expect(resp.headers.get('X-Cache')).toBe('HIT');
+    expect(resp.headers.get('X-Cache-Tier')).toBe('edge');
+    // Two analytics writes so far; second one is the hit.
+    expect(analyticsCalls.length).toBeGreaterThanOrEqual(2);
+    const hitCall = analyticsCalls[analyticsCalls.length - 1]!;
+    expect(hitCall.indexes).toEqual([TRACE_GOOD]);
+    expect(hitCall.blobs?.[4]).toBe('edge');
+    expect(hitCall.doubles?.[1]).toBe(0); // upstreamLatencyMs = 0 on hit
+  });
+
+  it('no observability field — pipeline does NOT emit log or analytics (back-compat)', async () => {
+    const h = harness();
+    const fetcher = throwingFetcher('still boom');
+    const resp = await serveCached({
+      key: SENATE_KEY,
+      cache: h.cache,
+      fetcher,
+      policy: IMMUTABLE_ARCHIVE_POLICY,
+      ctx: h.ctx,
+      traceId: TRACE_BAD,
+      upstreamAttribution: 'senate',
+    });
+    await Promise.all(h.ctx.awaited);
+    expect(resp.status).toBe(502);
+    // Envelope still emitted.
+    const body = (await resp.json()) as { error: { traceId: string } };
+    expect(body.error.traceId).toBe(TRACE_BAD);
+    // But no log, no analytics.
+    expect(consoleSpy).not.toHaveBeenCalled();
   });
 
   it('resolveTraceId + end-to-end — client-supplied trace echoed unchanged', async () => {
