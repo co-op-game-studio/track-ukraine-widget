@@ -3,16 +3,21 @@
  * Prewarm the Worker KV + edge cache for every current-Congress member
  * AND for every curated Ukraine-vote roll-call roster. This is what the
  * widget fetches per visitor; paying the cost once across all visitors
- * avoids the per-visitor 429 storm observed on cold opens.
+ * moves cold-start latency off the visitor path.
  *
  * Three warming phases (each paced to respect the per-IP rate limit):
  *   1. /api/members/{bioguideId} — Worker read-through fills KV
  *      member:v1:{id} (30-day TTL) and edge-caches the response.
- *   2. /api/congress/v3/house-vote/{c}/{s}/{rc}/members?limit=500
- *      — one per House roll-call in ukraineBills.json. Edge-cached
- *      immutable for 1 year.
- *   3. /api/senate/legislative/LIS/roll_call_votes/voteCS/vote_C_S_NNN.xml
- *      — one per Senate roll-call. Edge-cached immutable for 1 year.
+ *   2. /api/roll-call-rosters/house/{c}/{s}/{rc}
+ *      — one per House curated roll-call. KV-backed via
+ *      roll-call-roster:v1:* (AC-32.15). Immutable 1y cache.
+ *   3. /api/roll-call-rosters/senate/{c}/{s}/{rc}
+ *      — one per Senate curated roll-call. KV-backed via
+ *      roll-call-roster:v1:* (AC-32.15). Immutable 1y cache.
+ *
+ * v2.5.2: the prior legacy routes (/api/congress/v3/house-vote/...,
+ * /api/senate/legislative/LIS/...) are no longer called by the widget,
+ * so the warmer no longer targets them. See FR-35 AC-35.3 and ADR-012.
  *
  * Usage:
  *   node scripts/warm-member-cache.mjs --host <https://env.vote.cogs.it.com> \
@@ -138,12 +143,15 @@ function collectCuratedVotes() {
   return { house, senate };
 }
 
+// v2.5.2: roll-call roster URLs per AC-32.15 / api-contracts.md §5.5.
+// These routes are KV-backed and immutable-cached; the warmer populates
+// the edge cache so the first visitor to open a rep detail pays ~10 ms
+// per roster read instead of waiting on a KV lookup.
 function houseVoteUrl({ congress, session, rollCall }) {
-  return `${HOST}/api/congress/v3/house-vote/${congress}/${session}/${rollCall}/members?limit=500&format=json`;
+  return `${HOST}/api/roll-call-rosters/house/${congress}/${session}/${rollCall}`;
 }
 function senateVoteUrl({ congress, session, rollCall }) {
-  const rc = String(rollCall).padStart(5, '0');
-  return `${HOST}/api/senate/legislative/LIS/roll_call_votes/vote${congress}${session}/vote_${congress}_${session}_${rc}.xml`;
+  return `${HOST}/api/roll-call-rosters/senate/${congress}/${session}/${rollCall}`;
 }
 
 async function main() {

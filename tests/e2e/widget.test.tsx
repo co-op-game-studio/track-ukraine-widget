@@ -34,66 +34,58 @@ const censusChicago = {
   },
 };
 
-const houseRepIL7 = {
-  members: [
-    {
-      bioguideId: 'D000096',
-      name: 'Davis, Danny K.',
-      partyName: 'Democratic',
-      state: 'Illinois',
-      district: 7,
-      depiction: { imageUrl: '', attribution: '' },
-      terms: { item: [{ chamber: 'House of Representatives', startYear: 1997 }] },
-      updateDate: '2025-09-24',
-      url: '',
-    },
-  ],
-  pagination: { count: 1 },
-  request: {},
-};
-
+/**
+ * v2.5.2 state-members:v1:IL KV record shape — the Worker returns this
+ * verbatim from /api/state-members/IL (AC-32.16, api-contracts.md §5.6).
+ */
 const stateMembersIL = {
-  members: [
+  stateCode: 'IL',
+  senators: [
     {
-      bioguideId: 'D000563',
-      name: 'Durbin, Richard J.',
-      partyName: 'Democratic',
-      state: 'Illinois',
-      district: null,
-      terms: { item: [{ chamber: 'Senate', startYear: 1997 }] },
-      updateDate: '2026-03-08',
-      url: '',
+      bioguideId: 'D000563', first: 'Richard', last: 'Durbin',
+      officialName: 'Richard Durbin', state: 'IL', district: null,
+      chamber: 'Senate', party: 'D',
+      photoUrl: null, website: null,
     },
     {
-      bioguideId: 'D000622',
-      name: 'Duckworth, Tammy',
-      partyName: 'Democratic',
-      state: 'Illinois',
-      district: null,
-      terms: { item: [{ chamber: 'Senate', startYear: 2017 }] },
-      updateDate: '2026-03-08',
-      url: '',
-    },
-    {
-      bioguideId: 'D000096',
-      name: 'Davis, Danny K.',
-      partyName: 'Democratic',
-      state: 'Illinois',
-      district: 7,
-      terms: { item: [{ chamber: 'House of Representatives', startYear: 1997 }] },
-      updateDate: '2025-09-24',
-      url: '',
+      bioguideId: 'D000622', first: 'Tammy', last: 'Duckworth',
+      officialName: 'Tammy Duckworth', state: 'IL', district: null,
+      chamber: 'Senate', party: 'D',
+      photoUrl: null, website: null,
     },
   ],
-  pagination: { count: 19 },
-  request: {},
+  house: [
+    {
+      bioguideId: 'D000096', first: 'Danny', last: 'Davis',
+      officialName: 'Danny Davis', state: 'IL', district: 7,
+      chamber: 'House', party: 'D',
+      photoUrl: null, website: null,
+    },
+  ],
+  generatedAt: '2026-04-19T02:00:00Z',
+  schemaVersion: 1,
 };
 
-// Empty vote list + empty bills so RepCards don't explode
-const emptyVotes = { houseRollCallVotes: [], pagination: { count: 0 } };
-const emptySenateIndex = `<?xml version="1.0"?><vote_summary><congress>119</congress><session>2</session><votes></votes></vote_summary>`;
-const emptySponsored = { sponsoredLegislation: [], pagination: { count: 0 } };
-const emptyCosponsored = { cosponsoredLegislation: [], pagination: { count: 0 } };
+/** Empty member profile (the widget reads sponsored/cosponsored from here). */
+function emptyMemberProfile(bioguideId: string) {
+  return {
+    bioguideId,
+    first: '',
+    last: '',
+    officialName: '',
+    state: 'IL',
+    district: null,
+    chamber: 'House',
+    party: 'D',
+    photoUrl: null,
+    website: null,
+    searchKey: '',
+    sponsored: [],
+    cosponsored: [],
+    generatedAt: '2026-04-19T02:00:00Z',
+    schemaVersion: 1,
+  };
+}
 
 function setupFetchMocks() {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
@@ -101,26 +93,27 @@ function setupFetchMocks() {
     if (url.includes('/api/census/')) {
       return new Response(JSON.stringify(censusChicago), { status: 200 });
     }
-    if (url.includes('/v3/member/congress/119/IL/7')) {
-      return new Response(JSON.stringify(houseRepIL7), { status: 200 });
-    }
-    if (url.includes('/v3/member/congress/119/IL')) {
+    if (url.includes('/api/state-members/IL')) {
       return new Response(JSON.stringify(stateMembersIL), { status: 200 });
     }
-    if (url.includes('/house-vote/')) {
-      return new Response(JSON.stringify(emptyVotes), { status: 200 });
+    const memberMatch = url.match(/\/api\/members\/([A-Z]\d{6})/);
+    if (memberMatch) {
+      return new Response(JSON.stringify(emptyMemberProfile(memberMatch[1]!)), { status: 200 });
     }
-    if (url.includes('vote_menu_')) {
-      return new Response(emptySenateIndex, {
-        status: 200,
-        headers: { 'Content-Type': 'application/xml' },
-      });
-    }
-    if (url.includes('/sponsored-legislation')) {
-      return new Response(JSON.stringify(emptySponsored), { status: 200 });
-    }
-    if (url.includes('/cosponsored-legislation')) {
-      return new Response(JSON.stringify(emptyCosponsored), { status: 200 });
+    if (url.includes('/api/roll-call-rosters/')) {
+      // Empty roster — hook treats the member as Did Not Serve for every
+      // curated vote, so there's nothing to display under the detail.
+      return new Response(
+        JSON.stringify({
+          rollCallId: 'x',
+          chamber: url.includes('/house/') ? 'house' : 'senate',
+          congress: 0, session: 0, rollCall: 0,
+          casts: url.includes('/house/') ? {} : [],
+          generatedAt: '2026-04-19T02:00:00Z',
+          schemaVersion: 1,
+        }),
+        { status: 200 },
+      );
     }
     return new Response(`No mock for ${url}`, { status: 500 });
   });
@@ -143,9 +136,9 @@ describe('VoterInfoWidget (e2e)', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Durbin, Richard J.')).toBeInTheDocument();
+      expect(screen.getByText('Durbin, Richard')).toBeInTheDocument();
       expect(screen.getByText('Duckworth, Tammy')).toBeInTheDocument();
-      expect(screen.getByText('Davis, Danny K.')).toBeInTheDocument();
+      expect(screen.getByText('Davis, Danny')).toBeInTheDocument();
     });
 
     // And the district heading should show (rendered as two elements in v2)

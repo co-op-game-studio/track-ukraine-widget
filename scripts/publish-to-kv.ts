@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
+import { DOMParser } from 'linkedom';
 
 // ─── CLI flags ──────────────────────────────────────────────────────────────
 const argv = process.argv.slice(2);
@@ -31,6 +32,9 @@ const getArg = (flag: string): string | undefined => {
 };
 const ENV = getArg('--env');
 const DRY_RUN = argv.includes('--dry-run');
+// Phase-skip flags (useful for incremental runs / debugging).
+const SKIP_ROSTERS = argv.includes('--skip-rosters');
+const SKIP_STATE_MEMBERS = argv.includes('--skip-state-members');
 
 if (!ENV || !['dev', 'uat', 'stg', 'prod'].includes(ENV)) {
   console.error('Usage: tsx scripts/publish-to-kv.ts --env <dev|uat|stg|prod> [--dry-run]');
@@ -189,6 +193,99 @@ function splitName(full: string): { first: string; last: string } {
   return { first, last };
 }
 
+// ─── Roll-call roster fetchers (T-036 / AC-32.15) ────────────────────────────
+//
+// One pair of functions per chamber. Each returns the casts field of the
+// roll-call-roster:v1:* record — the caller wraps with the envelope
+// (rollCallId, chamber, congress, session, rollCall, generatedAt,
+// schemaVersion) before writing.
+
+interface HouseRosterCasts {
+  [bioguideId: string]: string; // "Yea" | "Nay" | "Present" | "Not Voting"
+}
+
+interface SenateRosterCast {
+  lastName: string;
+  state: string;
+  cast: string;
+  firstName?: string;
+  party?: string;
+}
+
+async function fetchHouseRosterCasts(
+  congress: number,
+  session: number,
+  rollCall: number,
+): Promise<HouseRosterCasts | null> {
+  const url = `https://api.congress.gov/v3/house-vote/${congress}/${session}/${rollCall}/members?format=json&limit=500&api_key=${CONGRESS_API_KEY}`;
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`House roster ${res.status} for ${congress}/${session}/${rollCall}`);
+  }
+  const data = (await res.json()) as {
+    houseRollCallVoteMemberVotes?: {
+      results?: Array<{ bioguideID: string; voteCast: string }>;
+    };
+  };
+  const results = data.houseRollCallVoteMemberVotes?.results ?? [];
+  const casts: HouseRosterCasts = {};
+  for (const r of results) {
+    if (!r.bioguideID) continue;
+    casts[r.bioguideID] = r.voteCast;
+  }
+  return casts;
+}
+
+async function fetchSenateRosterCasts(
+  congress: number,
+  session: number,
+  rollCall: number,
+): Promise<SenateRosterCast[] | null> {
+  const padded = String(rollCall).padStart(5, '0');
+  const url = `https://www.senate.gov/legislative/LIS/roll_call_votes/vote${congress}${session}/vote_${congress}_${session}_${padded}.xml`;
+  const res = await fetch(url);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    throw new Error(`Senate XML ${res.status} for ${congress}/${session}/${rollCall}`);
+  }
+  const text = await res.text();
+  const doc = new DOMParser().parseFromString(text, 'text/xml') as unknown as Document;
+  const members = Array.from(doc.getElementsByTagName('member'));
+  const casts: SenateRosterCast[] = [];
+  for (const m of members) {
+    const lastName = m.getElementsByTagName('last_name')[0]?.textContent?.trim() ?? '';
+    const firstName = m.getElementsByTagName('first_name')[0]?.textContent?.trim() ?? '';
+    const state = m.getElementsByTagName('state')[0]?.textContent?.trim() ?? '';
+    const party = m.getElementsByTagName('party')[0]?.textContent?.trim() ?? '';
+    const cast = m.getElementsByTagName('vote_cast')[0]?.textContent?.trim() ?? '';
+    if (!lastName || !state) continue;
+    casts.push({ lastName, state, cast, firstName, party });
+  }
+  return casts;
+}
+
+/** Bounded-concurrency map — duplicated from scripts/build-vote-rosters.ts;
+ *  kept local to avoid cross-script imports in a tsx context. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]!, i);
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 (async () => {
   console.log(`Env: ${ENV}    Namespace: ${namespaceId}`);
@@ -286,16 +383,165 @@ function splitName(full: string): { first: string; last: string } {
     }
   }
 
+  // ─── T-036 / AC-32.15: Build roll-call-roster:v1:* records ──────────────
+  //
+  // Iterate every unique curated vote and fetch its upstream roster.
+  // Skipped when --skip-rosters is passed. The curator fails the run on any
+  // fetch error — no silent partial write per ADR-012.
+
+  const rollCallRosterRecords = new Map<string, unknown>();
+  if (!SKIP_ROSTERS) {
+    const seenVotes = new Set<string>();
+    const voteQueue: Array<{
+      chamber: 'House' | 'Senate';
+      congress: number;
+      session: number;
+      rollCall: number;
+    }> = [];
+    for (const b of bills) {
+      for (const v of b.votes ?? []) {
+        const k = `${v.chamber}|${v.congress}|${v.session}|${v.rollCall}`;
+        if (seenVotes.has(k)) continue;
+        seenVotes.add(k);
+        voteQueue.push({ chamber: v.chamber, congress: v.congress, session: v.session, rollCall: v.rollCall });
+      }
+    }
+    console.log(`Fetching rosters for ${voteQueue.length} unique curated votes...`);
+    const t0 = Date.now();
+    let fetchErrors = 0;
+    const generatedAt = new Date().toISOString();
+    await mapWithConcurrency(voteQueue, 6, async (v) => {
+      const keyTail = `${v.chamber.toLowerCase()}:${v.congress}:${v.session}:${v.rollCall}`;
+      try {
+        if (v.chamber === 'House') {
+          const casts = await fetchHouseRosterCasts(v.congress, v.session, v.rollCall);
+          if (!casts) {
+            console.warn(`  404 ${keyTail} — skipping`);
+            return;
+          }
+          rollCallRosterRecords.set(keyTail, {
+            rollCallId: keyTail,
+            chamber: 'house',
+            congress: v.congress,
+            session: v.session,
+            rollCall: v.rollCall,
+            casts,
+            generatedAt,
+            schemaVersion: 1,
+          });
+        } else {
+          const casts = await fetchSenateRosterCasts(v.congress, v.session, v.rollCall);
+          if (!casts) {
+            console.warn(`  404 ${keyTail} — skipping`);
+            return;
+          }
+          rollCallRosterRecords.set(keyTail, {
+            rollCallId: keyTail,
+            chamber: 'senate',
+            congress: v.congress,
+            session: v.session,
+            rollCall: v.rollCall,
+            casts,
+            generatedAt,
+            schemaVersion: 1,
+          });
+        }
+      } catch (err) {
+        fetchErrors++;
+        console.warn(`  FAIL ${keyTail} — ${(err as Error).message}`);
+      }
+    });
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    console.log(`  ${rollCallRosterRecords.size} rosters fetched in ${secs}s (${fetchErrors} errors)`);
+    if (fetchErrors > 0) {
+      throw new Error(`roll-call-roster fetch had ${fetchErrors} errors — aborting to avoid partial KV write`);
+    }
+  }
+
+  // ─── T-038 / AC-32.16: Build state-members:v1:* records ──────────────────
+  //
+  // Pre-group the current-Congress member directory by two-letter stateCode.
+  // Uses the same `members` collection already fetched for the name-index.
+  // Senators first (district=null), House sorted by district ascending.
+
+  const stateMembersRecords = new Map<string, unknown>();
+  if (!SKIP_STATE_MEMBERS) {
+    interface MemberSummary {
+      bioguideId: string;
+      first: string;
+      last: string;
+      officialName: string;
+      state: string;
+      district: number | null;
+      chamber: 'Senate' | 'House';
+      party: string;
+      photoUrl: string | null;
+      website: string | null;
+      isNonVoting?: boolean;
+    }
+    const grouped = new Map<string, { senators: MemberSummary[]; house: MemberSummary[] }>();
+    for (const m of members) {
+      const termItems = m.terms?.item ?? [];
+      const latestTerm = termItems[termItems.length - 1];
+      if (!latestTerm) continue;
+      const chamber: 'Senate' | 'House' = latestTerm.chamber === 'Senate' ? 'Senate' : 'House';
+      const { first, last } = splitName(m.name);
+      if (!first || !last) continue;
+      const stateCode = latestTerm?.stateCode ?? STATE_NAME_TO_CODE[m.state] ?? m.state;
+      if (!/^[A-Z]{2}$/.test(stateCode)) continue; // skip junk states
+      const summary: MemberSummary = {
+        bioguideId: m.bioguideId,
+        first,
+        last,
+        officialName: `${first} ${last}`,
+        state: stateCode,
+        district: chamber === 'House' ? (m.district ?? null) : null,
+        chamber,
+        party: partyLetter(m.partyName),
+        photoUrl: m.depiction?.imageUrl ?? null,
+        website: null, // Not in the member-list response; would require per-member detail fetch.
+      };
+      // Detect non-voting delegates: territories (AS/GU/MP/PR/VI) + DC are
+      // House delegates but do not cast floor votes.
+      if (chamber === 'House' && ['AS', 'DC', 'GU', 'MP', 'PR', 'VI'].includes(stateCode)) {
+        summary.isNonVoting = true;
+      }
+      let bucket = grouped.get(stateCode);
+      if (!bucket) {
+        bucket = { senators: [], house: [] };
+        grouped.set(stateCode, bucket);
+      }
+      if (chamber === 'Senate') bucket.senators.push(summary);
+      else bucket.house.push(summary);
+    }
+    const stateGeneratedAt = new Date().toISOString();
+    for (const [stateCode, { senators, house }] of grouped) {
+      senators.sort((a, b) => a.last.localeCompare(b.last));
+      house.sort((a, b) => (a.district ?? 0) - (b.district ?? 0));
+      stateMembersRecords.set(stateCode, {
+        stateCode,
+        senators,
+        house,
+        generatedAt: stateGeneratedAt,
+        schemaVersion: 1,
+      });
+    }
+  }
+
   // ─── Summary ──────────────────────────────────────────────────────────────
   console.log(`Records to write:`);
-  console.log(`  bill:v1:*          ${billRecords.size}`);
-  console.log(`  roll-call:v1:*     ${rollCallRecords.size}`);
-  console.log(`  name-index:v1:*    ${nameIndexShards.size} shards + 1 meta`);
+  console.log(`  bill:v1:*                ${billRecords.size}`);
+  console.log(`  roll-call:v1:*           ${rollCallRecords.size}`);
+  console.log(`  roll-call-roster:v1:*    ${rollCallRosterRecords.size}${SKIP_ROSTERS ? ' (--skip-rosters)' : ''}`);
+  console.log(`  state-members:v1:*       ${stateMembersRecords.size}${SKIP_STATE_MEMBERS ? ' (--skip-state-members)' : ''}`);
+  console.log(`  name-index:v1:*          ${nameIndexShards.size} shards + 1 meta`);
 
   // ─── Assemble pairs (meta LAST per ADR-011) ──────────────────────────────
   const pairs: { key: string; value: string }[] = [];
   for (const [id, rec] of billRecords) pairs.push({ key: `bill:v1:${id}`, value: JSON.stringify(rec) });
   for (const [id, rec] of rollCallRecords) pairs.push({ key: `roll-call:v1:${id}`, value: JSON.stringify(rec) });
+  for (const [id, rec] of rollCallRosterRecords) pairs.push({ key: `roll-call-roster:v1:${id}`, value: JSON.stringify(rec) });
+  for (const [stateCode, rec] of stateMembersRecords) pairs.push({ key: `state-members:v1:${stateCode}`, value: JSON.stringify(rec) });
   for (const [letter, entries] of nameIndexShards) {
     pairs.push({
       key: `name-index:v1:${letter}`,

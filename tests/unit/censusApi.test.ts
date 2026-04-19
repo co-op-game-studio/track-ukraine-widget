@@ -122,4 +122,61 @@ describe('geocodeAddress', () => {
     expect(url).toContain('vintage=Current_Current');
     expect(url).toContain('format=json');
   });
+
+  it('throws with the response status code when the Census endpoint returns non-OK', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('oops', { status: 503 }),
+    );
+    await expect(
+      geocodeAddress('123 Main St, Springfield, IL 62701', ''),
+    ).rejects.toThrow(/503/);
+  });
+
+  it('throws when the match has no congressional-district layer', async () => {
+    const noCdLayer = {
+      result: {
+        addressMatches: [
+          {
+            matchedAddress: 'X',
+            coordinates: { x: 0, y: 0 },
+            addressComponents: { city: '', state: '', zip: '', streetName: '' },
+            geographies: {
+              States: [{ STATE: '17', NAME: 'Illinois', GEOID: '17', BASENAME: 'Illinois', FUNCSTAT: 'A' }],
+              // No 119th Congressional Districts key.
+            },
+          },
+        ],
+      },
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(noCdLayer), { status: 200 }),
+    );
+    await expect(geocodeAddress('123', '')).rejects.toThrow(
+      /Could not determine congressional district/,
+    );
+  });
+
+  it('throws with the FIPS code when the response references an unknown state', async () => {
+    const junkFips = {
+      result: {
+        addressMatches: [
+          {
+            matchedAddress: 'X',
+            coordinates: { x: 0, y: 0 },
+            addressComponents: { city: '', state: '', zip: '', streetName: '' },
+            geographies: {
+              States: [{ STATE: '99', NAME: 'Nowhere', GEOID: '99', BASENAME: 'X', FUNCSTAT: 'A' }],
+              '119th Congressional Districts': [
+                { STATE: '99', CD119: '01', CDSESSN: '119', NAME: '', GEOID: '', BASENAME: '', FUNCSTAT: 'N' },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify(junkFips), { status: 200 }),
+    );
+    await expect(geocodeAddress('123', '')).rejects.toThrow(/99/);
+  });
 });

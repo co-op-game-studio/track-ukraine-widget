@@ -76,7 +76,7 @@ export interface ProxyEnv {
   RATE_LIMITER?: RateLimiterLike;
 }
 
-interface ApiRouteRule {
+export interface ApiRouteRule {
   prefix: string;
   /** Short name used in normalized error envelopes (AC-27.5). */
   upstreamName: 'census' | 'senate' | 'congress';
@@ -93,7 +93,7 @@ interface ApiRouteRule {
   allowedQueryParams: readonly string[];
 }
 
-const API_ROUTES: ApiRouteRule[] = [
+export const API_ROUTES: ApiRouteRule[] = [
   {
     prefix: '/api/census/',
     upstreamName: 'census',
@@ -508,7 +508,11 @@ async function applyRateLimit(
   };
 }
 
-function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
+/**
+ * Per-route Cache-Control picker. Exported for AC-25.2/25.3/25.4 tests.
+ * See spec.md for the exact contract each return value satisfies.
+ */
+export function pickApiCacheControl(route: ApiRouteRule, upstreamPath: string): string {
   if (route.upstreamName !== 'congress') return route.cacheControl;
   if (/^v3\/house-vote\//.test(upstreamPath)) {
     return 'public, s-maxage=31536000, max-age=31536000, immutable';
@@ -546,6 +550,8 @@ const KV_PREFIXES = {
   member: 'member:v1:',
   bill: 'bill:v1:',
   rollCall: 'roll-call:v1:',
+  rollCallRoster: 'roll-call-roster:v1:',
+  stateMembers: 'state-members:v1:',
   nameIndex: 'name-index:v1:',
   cache: 'cache:v1:',
 } as const;
@@ -569,6 +575,10 @@ export interface NameIndexEntry {
   last: string;
   state: string;
   chamber: 'Senate' | 'House';
+  /** House district number; null for Senators and non-voting delegates
+   *  (AC-32.4 REVISED v2.5.2). Optional for backward compat with pre-v2.5.2
+   *  shards; the curator SHALL write it on all post-v2.5.2 records. */
+  district?: number | null;
   party: string;
   photoUrl?: string | null;
   searchKeys: string[];
@@ -985,6 +995,105 @@ async function handleRollCall(
   };
 }
 
+/**
+ * AC-32.15 — /api/roll-call-rosters/{chamber}/{congress}/{session}/{rollCall}
+ *
+ * Serves curator-written `roll-call-roster:v1:{chamber}:{c}:{s}:{rc}` records
+ * verbatim from KV. Rolls are historical and immutable; Cache-Control is
+ * configured accordingly.
+ */
+async function handleRollCallRoster(
+  key: string,
+  request: Request,
+  env: ProxyEnv,
+  origin: string,
+): Promise<DispatchResult> {
+  // key is "chamber/congress/session/rollCall"
+  const parts = key.split('/');
+  if (parts.length !== 4) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_roll_call_key' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const [chamber, congress, session, rollCall] = parts as [string, string, string, string];
+  if (
+    !/^(house|senate)$/i.test(chamber) ||
+    !/^\d+$/.test(congress) ||
+    !/^\d+$/.test(session) ||
+    !/^\d+$/.test(rollCall)
+  ) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_roll_call_key' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const record = await env.KV_VOTER_INFO.get(
+    `${KV_PREFIXES.rollCallRoster}${chamber.toLowerCase()}:${congress}:${session}:${rollCall}`,
+    'text',
+  );
+  if (!record) {
+    return {
+      response: jsonResponse(404, { error: 'roll_call_roster_not_found' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const headers = new Headers(corsHeaders(origin));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  // AC-32.15: historical roll-call rosters never change; mark immutable.
+  headers.set('Cache-Control', 'public, max-age=86400, s-maxage=31536000, immutable');
+  return {
+    response: new Response(request.method === 'HEAD' ? null : (record as string), {
+      status: 200,
+      headers,
+    }),
+    shape: 'api-proxied',
+  };
+}
+
+/**
+ * AC-32.16 — /api/state-members/{stateCode}
+ *
+ * Serves curator-written `state-members:v1:{stateCode}` records verbatim
+ * from KV. `stateCode` is case-insensitive and normalized to uppercase
+ * before lookup.
+ */
+async function handleStateMembers(
+  rawCode: string,
+  request: Request,
+  env: ProxyEnv,
+  origin: string,
+): Promise<DispatchResult> {
+  if (!/^[A-Za-z]{2}$/.test(rawCode)) {
+    return {
+      response: jsonResponse(400, { error: 'invalid_state_code' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const stateCode = rawCode.toUpperCase();
+  const record = await env.KV_VOTER_INFO.get(
+    `${KV_PREFIXES.stateMembers}${stateCode}`,
+    'text',
+  );
+  if (!record) {
+    return {
+      response: jsonResponse(404, { error: 'state_members_not_found' }, corsHeaders(origin)),
+      shape: 'worker-emitted',
+    };
+  }
+  const headers = new Headers(corsHeaders(origin));
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  // AC-32.16: matches the weekly curator cadence with SWR=1h.
+  headers.set('Cache-Control', 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=3600');
+  return {
+    response: new Response(request.method === 'HEAD' ? null : (record as string), {
+      status: 200,
+      headers,
+    }),
+    shape: 'api-proxied',
+  };
+}
+
 async function handleApi(
   request: Request,
   url: URL,
@@ -1215,7 +1324,7 @@ async function dispatch(
 
   // 1. KV-backed curator read routes (ADR-011, FR-32) — all go through origin check.
   const kvRouteMatch = url.pathname.match(
-    /^\/api\/(members|bills|roll-calls|name-search)(?:\/(.+))?$/,
+    /^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search)(?:\/(.+))?$/,
   );
   if (kvRouteMatch) {
     // OPTIONS preflight for these routes
@@ -1275,6 +1384,14 @@ async function dispatch(
     if (kind === 'roll-calls') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_roll_call_key' }, corsHeaders(origin)), shape: 'worker-emitted' };
       return handleRollCall(rest, request, env, origin!);
+    }
+    if (kind === 'roll-call-rosters') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_roll_call_key' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleRollCallRoster(rest, request, env, origin!);
+    }
+    if (kind === 'state-members') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_state_code' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleStateMembers(rest, request, env, origin!);
     }
     if (kind === 'name-search') {
       return handleNameSearch(request, url, env, origin!);
