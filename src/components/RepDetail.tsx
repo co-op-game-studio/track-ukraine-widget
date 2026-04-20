@@ -232,7 +232,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
           bills={bills.data}
           obstructionCount={obstructionCount}
           primaryAbstentionCount={votingRecord.data?.primaryAbstentionCount ?? 0}
-          loading={votingRecord.status === 'loading' || bills.status === 'loading'}
+          loading={votingRecord.status === 'loading'}
         />
       )}
 
