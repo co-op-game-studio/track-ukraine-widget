@@ -23,6 +23,9 @@ export interface MemberProfile {
   searchKey: string;
   sponsored: unknown[];
   cosponsored: unknown[];
+  /** Year the member first entered Congress (earliest term.startYear).
+   *  Optional — older KV records predate this field. */
+  yearEntered?: number;
   generatedAt: string;
   schemaVersion: number;
 }

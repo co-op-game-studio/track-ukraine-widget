@@ -1,58 +1,87 @@
 name: Stg Rehearsal (T-025e / FR-30)
 
-# Rehearses a prod-style release against stg:
-#   1. Sync prod KV → stg KV
-#   2. Deploy stg Worker (same code as any deploy)
+# Rehearses a prod-style release against a target env:
+#   1. Sync prod KV → target KV
+#   2. Deploy target Worker (same code as any deploy)
 #   3. Run unit tests (local mode)
-#   4. Run smoke tests against the stg edge (remote mode)
+#   4. Run smoke tests against the target edge (remote mode)
+#
+# The target env is parameterizable so the pipeline ITSELF can be
+# test-driven against UAT before we trust it against stg (meta-test of
+# the rehearsal pipeline per user directive 2026-04-19).
+#
+# Defaults to `stg` to preserve the original semantics; workflow_dispatch
+# with `target_env=uat` does a dry run against UAT.
 #
 # AC-30.5 warning emitted until a real remote-mode test suite lands.
 
 on:
   workflow_dispatch:
+    inputs:
+      target_env:
+        description: "Which env to rehearse against"
+        required: true
+        type: choice
+        default: stg
+        options: [stg, uat]
 
 concurrency:
-  group: stg-rehearsal
+  group: stg-rehearsal-${{ inputs.target_env || 'stg' }}
   cancel-in-progress: false
 
 jobs:
   rehearse:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: stg
+    environment: ${{ inputs.target_env || 'stg' }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET: ${{ inputs.target_env || 'stg' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
 
-      - name: Sync prod KV → stg KV
+      - name: Resolve target hostname + wrangler env
+        id: target
+        shell: bash
+        run: |
+          case "$TARGET" in
+            stg) HOST=https://stg.vote.cogs.it.com; WRANGLER_ENV=stg ;;
+            uat) HOST=https://uat.vote.cogs.it.com; WRANGLER_ENV=uat ;;
+            *) echo "::error::Unknown target_env=$TARGET"; exit 1 ;;
+          esac
+          echo "host=$HOST"                 >> "$GITHUB_OUTPUT"
+          echo "wrangler_env=$WRANGLER_ENV" >> "$GITHUB_OUTPUT"
+
+      - name: Sync prod KV → ${{ env.TARGET }} KV
+        env:
+          SYNC_TARGET_ENV: ${{ env.TARGET }}
         run: npx tsx scripts/sync-stg-data.ts
 
-      - name: Deploy stg Worker
+      - name: Deploy ${{ env.TARGET }} Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: deploy --env stg
+          command: deploy --env ${{ steps.target.outputs.wrangler_env }}
 
       - name: Local-mode tests
         run: npm test
 
-      - name: Remote smoke against stg edge
+      - name: Remote smoke against ${{ env.TARGET }} edge
         env:
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          HOST: ${{ steps.target.outputs.host }}
         run: |
-          H=https://stg.vote.cogs.it.com
           AH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
 
           for CHECK in \
-            "$H/api/name-search?q=durb|200" \
-            "$H/api/members/D000563|200" \
+            "$HOST/api/name-search?q=durb|200" \
+            "$HOST/api/members/D000563|200" \
           ; do
             URL="${CHECK%|*}"
             EXPECT="${CHECK##*|}"
@@ -64,6 +93,13 @@ jobs:
             echo "✓ $URL → $STATUS"
           done
 
+          # T-103 compliance: every response carries X-Trace-Id.
+          TRACE=$(curl -sS -o /dev/null -D - "${AH[@]}" -H "Origin: https://trackukraine.com" "$HOST/api/name-search?q=durb" | grep -i '^x-trace-id:' | awk '{print $2}' | tr -d '\r')
+          if [[ ! "$TRACE" =~ ^tr_[0-9a-f]{16}$ ]]; then
+            echo "::error::Missing or malformed X-Trace-Id on ${TARGET}: got '$TRACE'"; exit 1
+          fi
+          echo "✓ X-Trace-Id canonical: $TRACE"
+
       - name: AC-30.5 coverage warning
         run: |
-          echo "::warning::stg rehearsal ran unit tests only; no remote-mode test coverage yet."
+          echo "::warning::${TARGET} rehearsal ran unit tests only; no remote-mode test coverage yet."

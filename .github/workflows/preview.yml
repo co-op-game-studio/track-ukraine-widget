@@ -1,0 +1,314 @@
+name: Preview Deploy (isolated per-branch)
+
+# Branch-based Cloudflare Worker previews, FR-47.
+#
+# Push to `preview/<slug>`: CI creates an isolated KV namespace, R2 bucket,
+# and Worker named after the slug, deploys the Worker with those resources
+# bound, seeds the KV from the dev namespace, and comments the preview URL
+# on the matching PR.
+#
+# Delete `preview/<slug>` branch: CI deletes the Worker, KV namespace, and
+# R2 bucket for that slug (analytics datasets are left in place — CF expires
+# their data automatically).
+#
+# Slug rules enforced by `scripts/preview-slug.mjs` — see FR-47 AC-47.5.
+#
+# Traces: FR-47 AC-47.1 through AC-47.12.
+
+on:
+  push:
+    branches:
+      - 'preview/**'
+  delete:
+  workflow_dispatch:
+    inputs:
+      slug:
+        description: 'Slug (alphanumeric, dashes). Worker: voter-info-widget-proxy-preview-<slug>'
+        required: true
+        type: string
+      action:
+        description: 'deploy or teardown'
+        required: true
+        type: choice
+        options: [deploy, teardown]
+        default: deploy
+
+concurrency:
+  group: preview-${{ github.ref_name || inputs.slug }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    # Skip the delete event unless it was a branch (not tag) matching preview/
+    if: github.event_name != 'delete' || (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'preview/'))
+    runs-on: ubuntu-latest
+    outputs:
+      slug: ${{ steps.pick.outputs.slug }}
+      worker_name: ${{ steps.pick.outputs.worker_name }}
+      kv_name: ${{ steps.pick.outputs.kv_name }}
+      r2_bucket: ${{ steps.pick.outputs.r2_bucket }}
+      analytics_dataset: ${{ steps.pick.outputs.analytics_dataset }}
+      env_label: ${{ steps.pick.outputs.env_label }}
+      action: ${{ steps.pick.outputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - id: pick
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            RAW="${{ inputs.slug }}"
+            ACTION="${{ inputs.action }}"
+          elif [[ "${{ github.event_name }}" == "delete" ]]; then
+            RAW="${{ github.event.ref }}"
+            ACTION=teardown
+          else
+            RAW="${{ github.ref_name }}"
+            ACTION=deploy
+          fi
+
+          # Derive slug via the shared pure function — FR-47 AC-47.5.
+          SLUG=$(node scripts/preview-slug.mjs "$RAW") || {
+            echo "::error::scripts/preview-slug.mjs rejected '$RAW' — see AC-47.5"
+            exit 1
+          }
+
+          WORKER="voter-info-widget-proxy-preview-$SLUG"
+          KV="voter-info-widget-preview-$SLUG"
+          R2="voter-info-widget-archive-preview-$SLUG"
+          # R2 bucket names allow 63 chars; the 34-char prefix leaves room
+          # for a 29-char slug. If the slug exceeds that, hash-suffix it
+          # (our MAX_LEN is 31, so the window is 30–31 chars).
+          if [[ ${#R2} -gt 63 ]]; then
+            HASH=$(echo -n "$SLUG" | shasum -a 1 | head -c 8)
+            R2="voter-info-widget-archive-preview-${SLUG:0:20}-$HASH"
+            echo "::notice::R2 bucket name exceeded 63 chars; using hashed form: $R2"
+          fi
+          ANALYTICS="voter_info_widget_preview_${SLUG//-/_}"
+          ENV_LABEL="preview-$SLUG"
+
+          {
+            echo "slug=$SLUG"
+            echo "worker_name=$WORKER"
+            echo "kv_name=$KV"
+            echo "r2_bucket=$R2"
+            echo "analytics_dataset=$ANALYTICS"
+            echo "env_label=$ENV_LABEL"
+            echo "action=$ACTION"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved — slug=$SLUG action=$ACTION"
+          echo "  worker:    $WORKER"
+          echo "  kv:        $KV"
+          echo "  r2 bucket: $R2"
+          echo "  analytics: $ANALYTICS"
+
+  deploy:
+    if: needs.resolve.outputs.action == 'deploy'
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+      SLUG: ${{ needs.resolve.outputs.slug }}
+      WORKER_NAME: ${{ needs.resolve.outputs.worker_name }}
+      KV_NAME: ${{ needs.resolve.outputs.kv_name }}
+      R2_BUCKET: ${{ needs.resolve.outputs.r2_bucket }}
+      ENV_LABEL: ${{ needs.resolve.outputs.env_label }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build widget bundle
+        run: npm run build:lib
+
+      - name: Compute SRI hash
+        run: npm run build:sri
+
+      - name: Check build outputs
+        run: |
+          test -f dist/voter-info-widget.iife.js     || (echo "bundle missing"; exit 1)
+          test -f dist/voter-info-widget.iife.js.sri || (echo "SRI sidecar missing"; exit 1)
+
+      # ── AC-47.2/AC-47.3 — resource lifecycle ──
+      - name: Create or reuse KV namespace
+        id: kv
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Check if the namespace already exists (reuse — AC-47.3).
+          EXISTING=$(npx wrangler kv namespace list 2>/dev/null \
+            | jq -r --arg n "$KV_NAME" '.[] | select(.title == $n) | .id' || true)
+          if [[ -n "$EXISTING" ]]; then
+            echo "Reusing KV namespace $KV_NAME ($EXISTING)"
+            echo "id=$EXISTING" >> "$GITHUB_OUTPUT"
+          else
+            echo "Creating KV namespace $KV_NAME"
+            OUT=$(npx wrangler kv namespace create "$KV_NAME" --preview false)
+            ID=$(echo "$OUT" | grep -oE '"id":\s*"[a-f0-9]{32}"' | head -1 | grep -oE '[a-f0-9]{32}')
+            if [[ -z "$ID" ]]; then
+              echo "::error::Failed to parse KV namespace id from wrangler output"
+              exit 1
+            fi
+            echo "id=$ID" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or reuse R2 bucket
+        shell: bash
+        run: |
+          set -euo pipefail
+          # `wrangler r2 bucket create` is idempotent-ish: it errors if the
+          # bucket exists. We swallow that error specifically.
+          if npx wrangler r2 bucket create "$R2_BUCKET" 2>&1 | tee /tmp/r2.out; then
+            echo "Created R2 bucket $R2_BUCKET"
+          else
+            if grep -q "already exists\|AlreadyExists\|10004" /tmp/r2.out; then
+              echo "R2 bucket $R2_BUCKET already exists — reusing"
+            else
+              cat /tmp/r2.out
+              exit 1
+            fi
+          fi
+
+      - name: Seed KV from dev namespace (read-through copy of shared curator output)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Copy the curator-authored KV prefixes from dev into the new
+          # preview KV. Omitted prefixes (member:v1:*) fill on-demand via
+          # Worker read-through at runtime.
+          DEV_NAMESPACE_ID="743b2feda53648cd8242d3b89538bfac"
+          PREVIEW_NAMESPACE_ID="${{ steps.kv.outputs.id }}"
+          for PREFIX in 'bill:v1:' 'roll-call:v1:' 'roll-call-roster:v1:' 'name-index:v1:' 'state-members:v1:'; do
+            echo "Copying keys with prefix $PREFIX..."
+            npx wrangler kv key list --namespace-id="$DEV_NAMESPACE_ID" --prefix="$PREFIX" \
+              | jq -r '.[] | .name' \
+              | while read -r KEY; do
+                  [[ -z "$KEY" ]] && continue
+                  VAL=$(npx wrangler kv key get --namespace-id="$DEV_NAMESPACE_ID" "$KEY" 2>/dev/null || true)
+                  if [[ -n "$VAL" ]]; then
+                    echo "$VAL" | npx wrangler kv key put --namespace-id="$PREVIEW_NAMESPACE_ID" "$KEY" --path=/dev/stdin
+                  fi
+                done
+          done
+
+      - name: Deploy preview Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            deploy
+            --env preview-template
+            --name ${{ env.WORKER_NAME }}
+            --kv-namespace KV_VOTER_INFO=${{ steps.kv.outputs.id }}
+            --r2-bucket R2_STATIC=${{ env.R2_BUCKET }}
+            --var ENV_NAME:${{ env.ENV_LABEL }}
+
+      - name: Post sticky preview URL comment on PR
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Raw workers.dev URL (AC-47.2 — custom-domain DNS is a separate
+          # one-time task).
+          URL="https://${WORKER_NAME}.workers.dev"
+          DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          PR=$(gh pr list --head "$REF" --json number --jq '.[0].number' 2>/dev/null || true)
+          [[ -z "$PR" ]] && { echo "No PR for branch $REF; skipping comment"; exit 0; }
+
+          STICKY_MARKER="<!-- preview-deploy-sticky -->"
+          BODY=$(printf '%s\n🔎 **Preview**: %s · branch: `%s` · worker: `%s` · deployed: %s' \
+            "$STICKY_MARKER" "$URL" "$REF" "$WORKER_NAME" "$DEPLOYED_AT")
+
+          # Find existing sticky.
+          EXISTING=$(gh api "repos/${{ github.repository }}/issues/$PR/comments" \
+            --jq ".[] | select(.body | contains(\"$STICKY_MARKER\")) | .id" | head -1 || true)
+          if [[ -n "$EXISTING" ]]; then
+            gh api "repos/${{ github.repository }}/issues/comments/$EXISTING" \
+              -X PATCH -f body="$BODY" >/dev/null
+            echo "Updated sticky comment $EXISTING on PR #$PR"
+          else
+            gh pr comment "$PR" --body "$BODY"
+            echo "Posted sticky comment on PR #$PR"
+          fi
+
+  teardown:
+    if: needs.resolve.outputs.action == 'teardown'
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: ${{ needs.resolve.outputs.worker_name }}
+      KV_NAME: ${{ needs.resolve.outputs.kv_name }}
+      R2_BUCKET: ${{ needs.resolve.outputs.r2_bucket }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # AC-47.10 — teardown failures do not fail the workflow.
+      - name: Delete preview Worker
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          npx wrangler delete --name "$WORKER_NAME" || echo "::warning::Worker delete failed or already gone"
+
+      - name: Delete preview KV namespace
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          ID=$(npx wrangler kv namespace list 2>/dev/null \
+            | jq -r --arg n "$KV_NAME" '.[] | select(.title == $n) | .id' || true)
+          if [[ -n "$ID" ]]; then
+            npx wrangler kv namespace delete --namespace-id="$ID" || \
+              echo "::warning::KV delete failed for $KV_NAME ($ID)"
+          else
+            echo "::warning::KV namespace $KV_NAME not found — already deleted?"
+          fi
+
+      - name: Delete preview R2 bucket
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -u
+          # R2 buckets must be empty before delete. First purge.
+          npx wrangler r2 bucket list 2>/dev/null | jq -r '.[] | .name' | grep -qx "$R2_BUCKET" || {
+            echo "::warning::R2 bucket $R2_BUCKET not found — already deleted?"
+            exit 0
+          }
+          npx wrangler r2 bucket delete "$R2_BUCKET" || \
+            echo "::warning::R2 bucket delete failed for $R2_BUCKET"
+
+      - name: Teardown summary
+        shell: bash
+        run: |
+          echo "Teardown finished for preview slug ${{ needs.resolve.outputs.slug }}"
+          echo "Analytics dataset ${{ needs.resolve.outputs.analytics_dataset }} left in place per AC-47.4."

@@ -31,6 +31,7 @@ import { R2Tier } from '../cache/r2-tier';
 import { serveCached } from '../cache/pipeline';
 import { createUpstreamRegistry } from '../upstreams/registry';
 import type { CacheKey } from '../cache/key';
+import { resolveTraceId } from '../observability/trace';
 
 export async function handleApi(
   request: Request,
@@ -169,7 +170,11 @@ export async function handleApi(
           fetcher,
           policy: match.policy,
           ctx,
-          traceId: request.headers.get('X-Trace-Id') ?? 'tr_' + Math.random().toString(16).slice(2, 18).padEnd(16, '0'),
+          // FR-36 AC-36.1: canonical `tr_<16hex>` via resolveTraceId — echoes
+          // the client-supplied ID when it matches the pattern, else generates
+          // fresh. Replaces the old Math.random() fallback that could produce
+          // fewer than 16 hex chars.
+          traceId: resolveTraceId(request),
           extraHeaders: corsHeaders(origin),
           upstreamAttribution: route.upstreamName === 'senate' ? 'senate' : route.upstreamName === 'census' ? 'census' : 'congress',
           observability: {
