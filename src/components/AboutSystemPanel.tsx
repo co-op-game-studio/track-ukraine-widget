@@ -28,6 +28,7 @@ import {
 import ukraineBills from '../data/ukraineBills.json';
 import type { CuratedBill, CuratedBillVote } from '../services/ukraineFilter';
 import { computeValence, type MemberAction } from '../services/valence';
+import { sanitizeUrl } from '../utils/sanitizeUrl';
 
 const ALL_BILLS: CuratedBill[] = ukraineBills as CuratedBill[];
 
@@ -104,6 +105,13 @@ const DIRECTION_LABEL: Record<Direction, string> = {
   neutral: 'Neutral',
 };
 
+/** Shorter tab label used on narrow viewports so all tabs fit on one row. */
+const DIRECTION_LABEL_SHORT: Record<Direction, string> = {
+  'pro-ukraine': 'Pro',
+  'anti-ukraine': 'Anti',
+  neutral: 'Neutral',
+};
+
 /** Valence a `sponsored` action would carry if this were a member — purely
  *  for visual tinting of the bill row. Members don't factor in here. */
 function billRowValence(direction: Direction): Valence {
@@ -126,16 +134,21 @@ function BillsBrowser() {
         {availableTabs.map((d) => {
           const count = grouped[d].length;
           const isActive = activeTab === d;
+          // Tint each tab with the valence a bill of that direction would
+          // carry — pro tabs show green, anti tabs red, neutral stays neutral.
+          const tabValenceClass = `viw-about-tab-dir-${d}`;
           return (
             <button
               key={d}
               type="button"
               role="tab"
               aria-selected={isActive}
-              className={`viw-about-tab ${isActive ? 'viw-about-tab-active' : ''}`}
+              className={`viw-about-tab ${tabValenceClass} ${isActive ? 'viw-about-tab-active' : ''}`}
               onClick={() => { setActiveTab(d); setOpenBill(null); }}
             >
-              {DIRECTION_LABEL[d]} <span className="viw-about-tab-count">({count})</span>
+              <span className="viw-about-tab-label-full">{DIRECTION_LABEL[d]}</span>
+              <span className="viw-about-tab-label-short" aria-hidden="true">{DIRECTION_LABEL_SHORT[d]}</span>
+              {' '}<span className="viw-about-tab-count">({count})</span>
             </button>
           );
         })}
@@ -178,9 +191,20 @@ function BillsBrowser() {
                           {isOpen ? '▾' : '▸'}
                         </span>
                       </button>
+                      {sanitizeUrl(b.congressGovUrl) && (
+                        <a
+                          href={sanitizeUrl(b.congressGovUrl)!}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="viw-about-bill-link"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          Read on congress.gov ↗
+                        </a>
+                      )}
                     </th>
-                    <td className="viw-num">{b.votes.length}</td>
-                    <td className="viw-num">{b.becameLaw ? 'Yes' : '—'}</td>
+                    <td className="viw-num" data-col="Votes tracked">{b.votes.length}</td>
+                    <td className="viw-num" data-col="Became law?">{b.becameLaw ? 'Yes' : '—'}</td>
                   </tr>
                   {isOpen && (
                     <tr>
@@ -204,13 +228,28 @@ function BillsBrowser() {
                                   key={`${v.chamber}-${v.rollCall}-${idx}`}
                                   className={v.weight === 0 ? 'viw-about-weight-excluded' : ''}
                                 >
-                                  <td>{v.chamber}</td>
-                                  <td className="viw-num">{v.rollCall}</td>
-                                  <td>{labelForVoteKind(v.kind)}</td>
-                                  <td className="viw-num">
+                                  <td data-col="Chamber">{v.chamber}</td>
+                                  <td className="viw-num" data-col="Roll call">{v.rollCall}</td>
+                                  <td data-col="Kind">{labelForVoteKind(v.kind)}</td>
+                                  <td className="viw-num" data-col="Weight">
                                     {v.weight === 0 ? 'excluded' : v.weight.toFixed(2)}
                                   </td>
-                                  <td className="viw-about-vote-action">{v.action}</td>
+                                  <td className="viw-about-vote-action" data-col="Action">
+                                    {v.action}
+                                    {sanitizeUrl(v.url) && (
+                                      <>
+                                        {' '}
+                                        <a
+                                          href={sanitizeUrl(v.url)!}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="viw-about-vote-link"
+                                        >
+                                          View vote ↗
+                                        </a>
+                                      </>
+                                    )}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -294,9 +333,9 @@ export function AboutSystemPanel() {
               {VALENCE_ORDER.map((v) => (
                 <tr key={v} className={`viw-valence-${v}`}>
                   <th scope="row">{VALENCE_LABEL[v]}</th>
-                  <td className="viw-num">{VALENCE_SIGN[v] > 0 ? '+1' : VALENCE_SIGN[v] < 0 ? '−1' : '0'}</td>
-                  <td className="viw-num">{VALENCE_AMPLIFIER[v].toFixed(1)}×</td>
-                  <td>{VALENCE_DESCRIPTIONS[v]}</td>
+                  <td className="viw-num" data-col="Sign">{VALENCE_SIGN[v] > 0 ? '+1' : VALENCE_SIGN[v] < 0 ? '−1' : '0'}</td>
+                  <td className="viw-num" data-col="Amp">{VALENCE_AMPLIFIER[v].toFixed(1)}×</td>
+                  <td data-col="Meaning">{VALENCE_DESCRIPTIONS[v]}</td>
                 </tr>
               ))}
             </tbody>
@@ -315,8 +354,8 @@ export function AboutSystemPanel() {
               {WEIGHT_ROWS.map((w) => (
                 <tr key={w.kind} className={w.weight === '0.00' ? 'viw-about-weight-excluded' : ''}>
                   <th scope="row">{w.kind}</th>
-                  <td className="viw-num">{w.weight}</td>
-                  <td>{w.note}</td>
+                  <td className="viw-num" data-col="Weight">{w.weight}</td>
+                  <td data-col="Why">{w.note}</td>
                 </tr>
               ))}
             </tbody>

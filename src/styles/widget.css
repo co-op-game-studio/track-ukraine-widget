@@ -178,17 +178,26 @@
   font-size: 0.78rem;
 }
 .viw-about-table {
+  /* Every About-panel table gets the same treatment: bordered card with
+     header row that carries borders on every side (including left/right
+     on the header row's cells), cells top-aligned so wrapping text
+     doesn't stretch a row vertically, horizontal scroll on narrow widths
+     to prevent column clipping. */
   width: 100%;
   border-collapse: collapse;
+  border: 1px solid var(--viw-black);
   font-size: 0.78rem;
   margin: 0.25rem 0 0.5rem;
+  table-layout: auto;
 }
 .viw-about-table th,
 .viw-about-table td {
   padding: 0.35rem 0.5rem;
-  border-bottom: 1px solid var(--viw-off);
+  border: 1px solid var(--viw-off);
   text-align: left;
   vertical-align: top;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 .viw-about-table thead th {
   background: var(--viw-off);
@@ -197,7 +206,8 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-size: 0.72rem;
-  border-bottom: 2px solid var(--viw-black);
+  border: 1px solid var(--viw-black);
+  border-bottom-width: 2px;
 }
 .viw-about-table .viw-num {
   text-align: right;
@@ -258,11 +268,38 @@
   background: var(--viw-yellow);
   color: var(--viw-black);
 }
+/* Direction-colored idle tints (override white background; active state
+   still takes yellow to preserve "this is the open tab" signal). */
+.viw-about-tab-dir-pro-ukraine:not(.viw-about-tab-active) {
+  background: var(--viw-valence-voted-pro-bg);
+}
+.viw-about-tab-dir-anti-ukraine:not(.viw-about-tab-active) {
+  background: var(--viw-valence-voted-anti-bg);
+}
+.viw-about-tab-dir-neutral:not(.viw-about-tab-active) {
+  background: var(--viw-off);
+}
+/* Active tab shows a direction-colored left border accent so voters can
+   still tell which direction they've selected at a glance. */
+.viw-about-tab-dir-pro-ukraine.viw-about-tab-active {
+  box-shadow: inset 0 -3px 0 var(--viw-valence-voted-pro);
+}
+.viw-about-tab-dir-anti-ukraine.viw-about-tab-active {
+  box-shadow: inset 0 -3px 0 var(--viw-valence-voted-anti);
+}
 .viw-about-tab-count {
   font-weight: 400;
   font-style: normal;
   color: var(--viw-muted);
   margin-left: 0.2rem;
+}
+/* Full / short tab labels swap at the mobile breakpoint so all tabs fit
+   without wrapping. Tablet+ shows "Pro-Ukraine"; mobile shows "Pro". */
+.viw-about-tab-label-short { display: none; }
+.viw-about-tab-label-full  { display: inline; }
+@media (max-width: 639px) {
+  .viw-about-tab-label-short { display: inline; }
+  .viw-about-tab-label-full  { display: none; }
 }
 .viw-about-tab-active .viw-about-tab-count {
   color: var(--viw-black);
@@ -277,7 +314,9 @@
 .viw-about-bills-table {
   width: 100%;
   border-collapse: collapse;
+  border: 1px solid var(--viw-black);
   font-size: 0.78rem;
+  table-layout: auto;
 }
 .viw-about-bills-table thead th {
   background: var(--viw-off);
@@ -286,16 +325,22 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-size: 0.7rem;
-  border-bottom: 2px solid var(--viw-black);
+  /* Side borders on the header-row cells so the label row reads as
+     framed, not as a floating strip above the rows. */
+  border: 1px solid var(--viw-black);
+  border-bottom-width: 2px;
   padding: 0.35rem 0.5rem;
   text-align: left;
+  white-space: nowrap;
 }
 .viw-about-bills-table tbody > tr > th,
 .viw-about-bills-table tbody > tr > td {
   padding: 0.4rem 0.5rem;
-  border-bottom: 1px solid var(--viw-off);
+  border: 1px solid var(--viw-off);
   vertical-align: top;
   text-align: left;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 .viw-about-bills-table .viw-num {
   text-align: right;
@@ -384,6 +429,43 @@
   line-height: 1;
 }
 
+/* Congress.gov external-text link. Small, inline, understated — it's
+   for voters who want to double-check the source; not the primary
+   affordance on the row. */
+.viw-about-bill-link {
+  display: inline-block;
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--viw-black);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.viw-about-bill-link:hover {
+  background: var(--viw-yellow);
+}
+.viw-about-vote-link {
+  display: inline-block;
+  margin-left: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--viw-black);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.viw-about-vote-link:hover {
+  background: var(--viw-yellow);
+}
+
 /* Nested votes table, revealed below a bill row. */
 .viw-about-votes-cell {
   background: var(--viw-white) !important;
@@ -393,7 +475,9 @@
 .viw-about-votes-table {
   width: 100%;
   border-collapse: collapse;
+  border: 1px solid var(--viw-black);
   font-size: 0.72rem;
+  table-layout: auto;
 }
 .viw-about-votes-table thead th {
   background: var(--viw-off);
@@ -402,16 +486,21 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-size: 0.66rem;
-  border-bottom: 2px solid var(--viw-black);
+  /* Same side-bordered header treatment as the bills table. */
+  border: 1px solid var(--viw-black);
+  border-bottom-width: 2px;
   padding: 0.3rem 0.45rem;
   text-align: left;
+  white-space: nowrap;
 }
 .viw-about-votes-table tbody th,
 .viw-about-votes-table tbody td {
   padding: 0.3rem 0.45rem;
-  border-bottom: 1px solid var(--viw-off);
+  border: 1px solid var(--viw-off);
   vertical-align: top;
   text-align: left;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 .viw-about-votes-table .viw-num {
   text-align: right;
@@ -428,6 +517,81 @@
   color: var(--viw-black);
   line-height: 1.3;
 }
+/* Mobile: collapse each table row to a stacked card. Header row is
+   hidden; each numeric cell carries its own inline label via data-col.
+   The label + value sit on ONE line per cell, not stacked. */
+@media (max-width: 639px) {
+  /* Tighten the outer panel + browser padding so we don't stack
+     margins-on-margins. About panel itself keeps a modest inset; the
+     nested tables don't add more. */
+  .viw-about-panel {
+    padding: 0.65rem 0.75rem 0.85rem;
+  }
+  .viw-about-browser {
+    margin-top: 0.35rem;
+  }
+  .viw-about-tabpanel {
+    padding: 0;
+  }
+  .viw-about-votes-cell {
+    padding: 0.4rem 0 !important;
+  }
+  .viw-about-table,
+  .viw-about-bills-table,
+  .viw-about-votes-table {
+    display: block;
+    border: 1px solid var(--viw-black);
+  }
+  .viw-about-table thead,
+  .viw-about-bills-table thead,
+  .viw-about-votes-table thead { display: none; }
+  .viw-about-table tbody,
+  .viw-about-bills-table tbody,
+  .viw-about-votes-table tbody { display: block; }
+  .viw-about-table tbody tr,
+  .viw-about-bills-table tbody tr,
+  .viw-about-votes-table tbody tr {
+    display: block;
+    padding: 0.4rem 0.5rem;
+    border: 0;
+    border-bottom: 1px solid var(--viw-off);
+  }
+  .viw-about-table tbody tr > *,
+  .viw-about-bills-table tbody tr > *,
+  .viw-about-votes-table tbody tr > * {
+    display: block;
+    border: 0;
+    padding: 0.08rem 0;
+  }
+  .viw-about-table tbody tr > th:first-child,
+  .viw-about-bills-table tbody tr > th:first-child,
+  .viw-about-votes-table tbody tr > th:first-child {
+    font-weight: 700;
+    padding-bottom: 0.2rem;
+  }
+  /* Inline label: "LABEL: value" on a single line. Using inline element
+     via ::before keeps label and value on the same baseline. */
+  .viw-about-table tbody tr td[data-col],
+  .viw-about-bills-table tbody tr td[data-col],
+  .viw-about-votes-table tbody tr td[data-col] {
+    text-align: left !important;
+    white-space: normal;
+  }
+  .viw-about-table tbody tr td[data-col]::before,
+  .viw-about-bills-table tbody tr td[data-col]::before,
+  .viw-about-votes-table tbody tr td[data-col]::before {
+    content: attr(data-col) ": ";
+    display: inline;
+    color: var(--viw-muted);
+    font-weight: 700;
+    font-style: italic;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.65rem;
+    margin-right: 0.25rem;
+  }
+}
+
 .viw-about-no-votes {
   margin: 0;
   font-style: italic;
