@@ -40,8 +40,46 @@ interface CuratedSeed {
   label: string;
 }
 
+/**
+ * Curated Ukraine bill seed.
+ *
+ * Classification policy:
+ *   - `direction: pro-ukraine` — bill's purpose is to aid Ukraine, sanction
+ *     Russia, or codify support. Member votes in favor count positively.
+ *   - `direction: anti-ukraine` — bill's purpose is to block, restrict, or
+ *     reduce Ukraine aid, ease sanctions on Russia, or disapprove actions
+ *     supporting Ukraine. Member votes in favor count negatively.
+ *   - `direction: neutral` — a host vehicle (NDAAs, large CRs) that carried
+ *     Ukraine-relevant amendments but whose parent bill isn't itself about
+ *     Ukraine. Scored via per-vote `directionMultiplier` (see valence.ts).
+ *
+ * Bad bill numbers are safe: enrichBill() returns an entry with votes:[]
+ * when Congress.gov 404s. No need to prune pre-flight.
+ *
+ * Pre-curation pass 2026-04-19 — see spec FR-46 KEEP-IN-SYNC rule.
+ */
+/**
+ * Curated Ukraine bill seed — v0.1.0 review-ledger-applied (2026-04-19).
+ *
+ * Source of truth: `docs/curated-bills-v0.1.0.md`.
+ *
+ * Applied changes:
+ *   - 18 wrong-number entries REMOVED (were resolving to unrelated Congress.gov
+ *     titles: Taiwan Non-Discrimination, Safe Medications for Moms, Physical
+ *     Therapy, DC Council disapproval, etc.).
+ *   - 2 RENAMES:
+ *       · HR 6891 (117): label → actual Congress.gov title
+ *         "Isolate Russian Government Officials Act of 2022" (still pro-Ukraine).
+ *       · HR 855 (118): direction `neutral` → `pro-ukraine` (oversight bill, not
+ *         an obstruction).
+ *   - 27 NEW candidates ADDED across 117/118/119 via web-search verification.
+ *
+ * After curator re-run any seed whose Congress.gov title contains no
+ * Ukraine/Russia reference SHALL be caught at review before writing to
+ * `src/data/ukraineBills.json`.
+ */
 const CURATED: CuratedSeed[] = [
-  // ─── FEATURED ───
+  // ─── FEATURED — the five bills most voters recognize ───
   { congress: 117, type: 'hr', number: 2471, featured: true, direction: 'pro-ukraine',
     label: 'FY22 Consolidated Appropriations — first $13.6B Ukraine emergency (Mar 2022)' },
   { congress: 117, type: 'hr', number: 7691, featured: true, direction: 'pro-ukraine',
@@ -53,11 +91,13 @@ const CURATED: CuratedSeed[] = [
   { congress: 118, type: 'hr', number: 815,  featured: true, direction: 'pro-ukraine',
     label: '$95B National Security Supplemental (Apr 2024, incl. $61B Ukraine + REPO Act)' },
 
-  // ─── Additional ───
-  { congress: 118, type: 'hr', number: 4175, direction: 'pro-ukraine',
-    label: 'REPO for Ukrainians Act (Russian asset seizure, folded into HR 815)' },
+  // ─── 117th Congress — supplementals, sanctions, Russia-response laws ───
   { congress: 117, type: 'hr', number: 6833, direction: 'pro-ukraine',
     label: 'FY23 CR with Ukraine Supplemental ($12.35B)' },
+  { congress: 117, type: 'hr', number: 6968, direction: 'pro-ukraine',
+    label: 'Ending Importation of Russian Oil Act (became PL 117-109)' },
+  { congress: 117, type: 'hr', number: 7108, direction: 'pro-ukraine',
+    label: 'Suspending Normal Trade Relations with Russia and Belarus Act (became PL 117-110)' },
   { congress: 117, type: 'hr', number: 6753, direction: 'pro-ukraine',
     label: 'Ukraine Democracy Defense Lend-Lease Act (House version)' },
   { congress: 117, type: 's',  number: 3488, direction: 'pro-ukraine',
@@ -72,24 +112,68 @@ const CURATED: CuratedSeed[] = [
     label: 'Special Russian Sanctions Authority Act' },
   { congress: 117, type: 'hres', number: 956, direction: 'pro-ukraine',
     label: 'Supporting the people of Ukraine (resolution)' },
+  { congress: 117, type: 'hr', number: 7900, direction: 'neutral',
+    label: 'FY23 NDAA (Ukraine-related amendments voted on House floor)' },
+  { congress: 117, type: 'hr', number: 4350, direction: 'neutral',
+    label: 'FY22 NDAA (Ukraine-related amendments)' },
+  { congress: 117, type: 'hr', number: 6891, direction: 'pro-ukraine',
+    label: 'Isolate Russian Government Officials Act of 2022' },
+  // ─── 117th — v0.1.0 new candidates (web-verified) ───
+  { congress: 117, type: 'hr', number: 6842, direction: 'pro-ukraine',
+    label: "Sanctioning Russian MPs who recognized Donetsk/Luhansk as independent" },
+  { congress: 117, type: 'hr', number: 6853, direction: 'pro-ukraine',
+    label: 'Russian Travel Sanctions for a Democratic Ukraine Act' },
+  { congress: 117, type: 'hr', number: 6846, direction: 'pro-ukraine',
+    label: "Putin's Trifecta Act (review of sanctions on Russian kleptocrats)" },
+  { congress: 117, type: 'hr', number: 496,  direction: 'pro-ukraine',
+    label: 'Religious freedom violations in Russia-occupied Ukraine' },
+  { congress: 117, type: 's',  number: 3652, direction: 'pro-ukraine',
+    label: 'Counter Russian aggression / security assistance to Ukraine (Menendez pre-war)' },
+
+  // ─── 118th Congress — April 2024 supplemental + companions ───
+  { congress: 118, type: 'hr', number: 4175, direction: 'pro-ukraine',
+    label: 'REPO for Ukrainians Act (Russian asset seizure, folded into HR 815)' },
   { congress: 118, type: 'hr', number: 5692, direction: 'pro-ukraine',
     label: 'Ukraine Security Assistance & Oversight Supplemental 2024' },
   { congress: 118, type: 's',  number: 2003, direction: 'pro-ukraine',
     label: 'REPO for Ukrainians Act (Senate companion)' },
   { congress: 118, type: 's',  number: 536,  direction: 'pro-ukraine',
     label: 'Russian Asset Confiscation / Ukraine Recovery (early)' },
-  { congress: 118, type: 'hr', number: 2670, direction: 'neutral',
-    label: 'FY24 NDAA (Ukraine amendments voted on floor — mix of pro and anti)' },
-  { congress: 118, type: 'hr', number: 855,  direction: 'neutral',
-    label: 'Independent Oversight of Ukrainian Assistance Act' },
   { congress: 118, type: 's',  number: 4992, direction: 'pro-ukraine',
     label: 'Stand with Ukraine Act of 2024' },
+  { congress: 118, type: 'hr', number: 855,  direction: 'pro-ukraine',
+    label: 'Independent and Objective Oversight of Ukrainian Assistance Act' },
+  { congress: 118, type: 'hr', number: 2670, direction: 'neutral',
+    label: 'FY24 NDAA (Ukraine amendments on floor — mix of pro/anti per-vote)' },
+  { congress: 118, type: 'hr', number: 8070, direction: 'neutral',
+    label: 'FY25 NDAA (Ukraine-related floor amendments)' },
+  { congress: 118, type: 's',  number: 4638, direction: 'neutral',
+    label: 'FY25 NDAA (Senate version)' },
+  { congress: 118, type: 'hres', number: 149, direction: 'pro-ukraine',
+    label: "Denouncing Russia's war of aggression against Ukraine (anniversary resolution)" },
+  // ─── 118th — v0.1.0 new candidates (web-verified) ───
+  { congress: 118, type: 'hr', number: 2445, direction: 'pro-ukraine',
+    label: 'Special Inspector General for Ukraine Assistance Act' },
+  { congress: 118, type: 'hr', number: 2885, direction: 'pro-ukraine',
+    label: 'Ukraine Human Rights Policy Act of 2023' },
+  { congress: 118, type: 'hr', number: 9501, direction: 'pro-ukraine',
+    label: 'Stand with Ukraine Act of 2024 (House companion of S 4992)' },
+  { congress: 118, type: 'hr', number: 294,  direction: 'pro-ukraine',
+    label: 'Non-Recognition of Russian Annexation of Ukrainian Territory Act' },
+  { congress: 118, type: 'hr', number: 3911, direction: 'pro-ukraine',
+    label: 'Ukrainian Adjustment Act of 2023' },
+  { congress: 118, type: 's',  number: 2552, direction: 'pro-ukraine',
+    label: 'Ukraine Aid Oversight Act' },
+
+  // ─── 118th Congress — skeptic / anti-aid track ───
   { congress: 118, type: 'sjres', number: 117, direction: 'anti-ukraine',
     label: 'Disapproval of Presidential report on Ukrainian debt (would block debt relief)' },
-  { congress: 118, type: 'hres', number: 561, direction: 'neutral',
-    label: 'Ukraine-related resolution (118th)' },
+  { congress: 118, type: 'hres', number: 113, direction: 'anti-ukraine',
+    label: 'Ukraine Fatigue Resolution (calls for halting aid)' },
+
+  // ─── 119th Congress (2025-) — Trump-era Ukraine legislation ───
   { congress: 119, type: 's',  number: 1241, direction: 'pro-ukraine',
-    label: 'Sanctioning Russia Act of 2025' },
+    label: 'Sanctioning Russia Act of 2025 (Graham-Blumenthal)' },
   { congress: 119, type: 's',  number: 2592, direction: 'pro-ukraine',
     label: 'Supporting Ukraine Act of 2025' },
   { congress: 119, type: 'hr', number: 2913, direction: 'pro-ukraine',
@@ -98,6 +182,39 @@ const CURATED: CuratedSeed[] = [
     label: 'Recognizing three years of Ukraine defense' },
   { congress: 119, type: 'hres', number: 155, direction: 'pro-ukraine',
     label: "Reaffirming support for Ukraine's sovereignty" },
+  // ─── 119th — v0.1.0 new candidates (web-verified) ───
+  { congress: 119, type: 'hres', number: 16,  direction: 'pro-ukraine',
+    label: 'Recognizing Russian actions in Ukraine as a genocide' },
+  { congress: 119, type: 'hjres', number: 77, direction: 'pro-ukraine',
+    label: "US policy: recognize Ukraine sovereignty within 1991 borders" },
+  { congress: 119, type: 'hr', number: 2548, direction: 'pro-ukraine',
+    label: 'Sanctioning Russia Act of 2025 (House companion to S 1241)' },
+  { congress: 119, type: 'hr', number: 1601, direction: 'pro-ukraine',
+    label: "Defending Ukraine's Territorial Integrity Act" },
+  { congress: 119, type: 'hr', number: 2118, direction: 'pro-ukraine',
+    label: 'Protecting our Guests During Hostilities in Ukraine Act' },
+  { congress: 119, type: 'hr', number: 947,  direction: 'pro-ukraine',
+    label: 'Non-Recognition of Russian Annexation of Ukrainian Territory Act (119th)' },
+  { congress: 119, type: 'hr', number: 4346, direction: 'pro-ukraine',
+    label: 'Peaceful resolution to Russia-Ukraine conflict / financial institution prohibitions' },
+  { congress: 119, type: 'hr', number: 3104, direction: 'pro-ukraine',
+    label: 'Ukrainian Adjustment Act of 2025' },
+  { congress: 119, type: 's',  number: 682,  direction: 'pro-ukraine',
+    label: 'Independent and Objective Oversight of Ukrainian Assistance Act (119th)' },
+  { congress: 119, type: 'sres', number: 91,  direction: 'pro-ukraine',
+    label: "Third anniversary of Russia's further invasion of Ukraine" },
+  { congress: 119, type: 'sres', number: 100, direction: 'pro-ukraine',
+    label: 'Dissenting from UNGA vote on Russia/Ukraine' },
+  { congress: 119, type: 'sres', number: 103, direction: 'pro-ukraine',
+    label: 'Condemning US rejection of UN resolution condemning Russian invasion' },
+  { congress: 119, type: 'sres', number: 110, direction: 'pro-ukraine',
+    label: "Condemning Russia's illegal abduction of Ukrainian children" },
+  { congress: 119, type: 'sres', number: 111, direction: 'pro-ukraine',
+    label: 'Condemning Armed Forces of RF for crimes against humanity in Ukraine' },
+  { congress: 119, type: 'sres', number: 236, direction: 'pro-ukraine',
+    label: 'Calling for return of abducted Ukrainian children before peace agreement' },
+  { congress: 119, type: 'sres', number: 612, direction: 'pro-ukraine',
+    label: "Fourth anniversary of Russia's invasion of Ukraine (reaffirming support)" },
 ];
 
 // ─── Congress.gov API response shapes (minimal) ─────────────────────────────
