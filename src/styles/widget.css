@@ -986,6 +986,28 @@
   margin-top: 0.1rem;
 }
 
+/* Year-entered-office row. Own line below state, above the party pill. */
+.viw-chip-since {
+  font-size: 0.68rem;
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  font-style: italic;
+  margin-top: 0.1rem;
+}
+/* Inline sibling to .viw-detail-state / .viw-detail-chamber. Match
+   font size + letter-spacing so the baseline lines up cleanly and the
+   flex-gap provides the separator (no leading bullet). */
+.viw-detail-since {
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.06em;
+}
+
 .viw-chip-party {
   font-size: 0.62rem;
   font-weight: 900;
@@ -1035,6 +1057,7 @@
   gap: 1rem;
   padding: 1rem 1.25rem;
   border-bottom: 2px solid var(--viw-black);
+  position: relative;
 }
 
 .viw-detail-identity {
@@ -1052,6 +1075,32 @@
   border: 2px solid var(--viw-black);
   background: var(--viw-off);
   border-radius: 0; /* AC-9.2 flat */
+}
+
+/* Mobile-only: stack photo above text, make everything full-width.
+   Keeps the close button as a floating corner overlay. */
+@media (max-width: 639px) {
+  .viw-detail-identity {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+    width: 100%;
+  }
+  .viw-detail-photo {
+    width: 100%;
+    height: 260px;
+    object-position: center 20%;
+  }
+  .viw-detail-ident-text { width: 100%; }
+  .viw-detail-ident-text .viw-detail-links-row {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .viw-detail-links-row .viw-detail-link {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+  .viw-detail-links-row .viw-detail-socials { flex: 0 0 auto; }
 }
 
 .viw-detail-photo-placeholder {
@@ -1101,6 +1150,45 @@
   letter-spacing: 0.06em;
 }
 
+/* Social-media icon-links row (FR-48). Sits below the Official Website
+   button; renders only when the member has handles. Each glyph is a
+   single char pulled from the platform's recognizable logo-adjacent
+   character so we don't drag in an icon-font or SVG sprite. */
+.viw-detail-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.viw-detail-socials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.viw-detail-social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--viw-black);
+  background: var(--viw-white);
+  color: var(--viw-black);
+  text-decoration: none;
+  font-weight: 900;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: background 0.1s ease;
+}
+.viw-detail-social:hover {
+  background: var(--viw-yellow);
+}
+.viw-detail-social:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+
 .viw-detail-link {
   color: var(--viw-black);
   background: var(--viw-yellow);
@@ -1128,6 +1216,15 @@
   font-family: inherit;
   flex-shrink: 0;
   transition: background-color 0.1s linear;
+}
+@media (max-width: 639px) {
+  .viw-detail-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 2;
+    background: var(--viw-white);
+  }
 }
 .viw-detail-close:hover { background: var(--viw-black); color: var(--viw-yellow); }
 

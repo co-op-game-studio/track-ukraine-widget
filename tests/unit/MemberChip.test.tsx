@@ -112,26 +112,31 @@ describe('MemberChip', () => {
     expect(container.querySelector('.viw-chip-state')?.textContent).toBe('ZZ');
   });
 
-  // Year-entered office — senator subtitle should append " · since 2011".
-  it('UAT — senator chip subtitle includes "since YYYY" when yearEntered is set', () => {
+  // Year-entered office — shown on its own row (.viw-chip-since), not
+  // appended to the subtitle. Cleaner layout when the chip is narrow.
+  it('UAT — chip renders "Since YYYY" on its own row when yearEntered is set', () => {
     const withYear: Representative = { ...senator, yearEntered: 2011 };
-    render(<MemberChip representative={withYear} selected={false} onClick={() => {}} />);
-    expect(screen.getByText(/U\.S\. Senator · since 2011/i)).toBeInTheDocument();
+    const { container } = render(
+      <MemberChip representative={withYear} selected={false} onClick={() => {}} />,
+    );
+    // Subtitle stays bare — no inline "since" suffix.
+    expect(container.querySelector('.viw-chip-subtitle')?.textContent).toBe('U.S. Senator');
+    // Dedicated "since YYYY" row.
+    expect(container.querySelector('.viw-chip-since')?.textContent).toMatch(/Since 2011/);
   });
 
-  it('UAT — house rep chip subtitle includes district AND since-year', () => {
+  it('UAT — house rep chip shows district in subtitle and since-year in its own row', () => {
     const rep: Representative = { ...senator, chamber: 'house', district: 3, yearEntered: 2023 };
-    render(<MemberChip representative={rep} selected={false} onClick={() => {}} />);
-    expect(screen.getByText(/District 3 · since 2023/i)).toBeInTheDocument();
+    const { container } = render(<MemberChip representative={rep} selected={false} onClick={() => {}} />);
+    expect(container.querySelector('.viw-chip-subtitle')?.textContent).toBe('District 3');
+    expect(container.querySelector('.viw-chip-since')?.textContent).toMatch(/Since 2023/);
   });
 
-  it('UAT — omits "since YYYY" when yearEntered is undefined (older KV records)', () => {
-    // Senator without yearEntered — the subtitle stays as the bare chamber name.
+  it('UAT — omits the since-row entirely when yearEntered is undefined (older KV records)', () => {
     const { container } = render(
       <MemberChip representative={senator} selected={false} onClick={() => {}} />,
     );
-    const subtitle = container.querySelector('.viw-chip-subtitle')?.textContent ?? '';
-    expect(subtitle).toBe('U.S. Senator');
-    expect(subtitle).not.toMatch(/since/i);
+    expect(container.querySelector('.viw-chip-subtitle')?.textContent).toBe('U.S. Senator');
+    expect(container.querySelector('.viw-chip-since')).toBeNull();
   });
 });

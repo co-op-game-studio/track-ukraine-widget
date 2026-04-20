@@ -39,10 +39,19 @@ export function computeValence(
 ): Valence {
   if (directionMultiplier === 0) return 'unstated';
   if (action === 'not-voted' || action === 'voted-present') return 'unstated';
-  if (direction === 'neutral') return 'unstated';
+  // Neutral host bills: only score the specific votes the curator annotated
+  // with an explicit directionMultiplier (-1 flips to anti, +1 would stay
+  // pro but on a neutral bill that's meaningless). We only accept -1 here
+  // because +1 on a neutral bill has no reference direction to follow.
+  if (direction === 'neutral') {
+    if (directionMultiplier !== -1) return 'unstated';
+    // Treat as though this vote is against a pro-UA reference.
+  }
 
   const sponsored = action === 'sponsored' || action === 'cosponsored';
-  const isPro = direction === 'pro-ukraine';
+  // For neutral bills with directionMultiplier=-1, treat reference as pro-UA
+  // so the flip yields anti-UA for an Aye vote.
+  const isPro = direction === 'neutral' ? true : direction === 'pro-ukraine';
 
   // Effective vote direction after the multiplier.
   // directionMultiplier === -1 flips: an Aye on a motion-to-recommit for a

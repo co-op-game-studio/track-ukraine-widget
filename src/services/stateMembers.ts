@@ -23,6 +23,13 @@ export interface StateMemberSummary {
   /** Year member first entered office. Optional — older KV records
    *  predate this field. */
   yearEntered?: number;
+  /** Social-media handles (FR-48). Optional — older KV records predate. */
+  socials?: {
+    twitter?: string;
+    facebook?: string;
+    youtube?: string;
+    instagram?: string;
+  };
 }
 
 export interface StateMembersRecord {
