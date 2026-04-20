@@ -961,3 +961,10 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
   3. (Optional) Cloudflare Access application covering the wildcard hostname, matching the dev/uat Access policy.
 - **Traces to**: FR-47, FR-26, FR-44.
 - **Status**: [x] Done (2026-04-19). Spec FR-47 + pure slug module + workflow + tests all landed. 935 tests passing, typecheck clean, coverage 96.19/88.8/93.25/96.19. First-push validation deferred until the human pushes a `preview/*` branch (auto-mode safety: CF resource creation is a shared-system write; requires explicit user trigger via a real push or workflow_dispatch).
+
+### T-106: Documentation secret-leakage audit (NFR-7)
+- **Description**: On 2026-04-19, a grep-based audit ran over `docs/`, `.github/`, tracked workflows, and root `package.json` / `wrangler.toml` to verify zero actual secrets. Findings categorized into (a) NON-SECRET routing identifiers (KV namespace IDs, R2 bucket names — safe to commit), (b) git-public metadata (owner email, already in commit history), (c) gitignored files (`.env`, scratch JSON), (d) secret-handling prose that discusses flow without leaking values.
+- **Findings**: 0 actual leaks. Full table documented in NFR-7.2–7.5 + the commit summary for this task.
+- **Follow-up**: NFR-7.4 specifies a CI grep gate (`scripts/secret-scan.mjs`) that rejects commits introducing literal secret patterns into tracked files. Deferred from this task — tracked as T-107 to bundle with the stress-test / remote-mode work.
+- **Traces to**: NFR-7.1–7.5.
+- **Status**: [x] Audit complete 2026-04-19. CI grep gate deferred to T-107.

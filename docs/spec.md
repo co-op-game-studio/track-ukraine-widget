@@ -1198,6 +1198,18 @@ See `docs/deployment.md` for the concrete setup playbook.
 
 **Out of scope:** per-branch DNS automation (`*.preview.vote.cogs.it.com`), Access policy automation (human task), cross-branch data sharing (each preview is a cold start), custom domain per preview.
 
+### NFR-7: Documentation Secret-Leakage (NEW 2026-04-19 UAT)
+
+- NFR-7.1: `docs/**`, `.github/**`, and any tracked workflow SHALL NOT contain:
+  - API keys (Congress.gov, Cloudflare, any other)
+  - Service tokens (CF Access client ID or secret)
+  - Private encryption / signing keys
+  - GitHub personal access tokens
+- NFR-7.2: Cloudflare resource identifiers that are **not secrets** (KV namespace IDs, R2 bucket names, account ID, zone ID) MAY appear in tracked config. They are routing identifiers authenticated via the API token; per CF's own guidance they are safe to commit. The canonical copy lives in `wrangler.toml`; duplicates in `scripts/*.ts` exist for runtime use and SHALL reference the same values.
+- NFR-7.3: Personal identifiers (emails) that appear in `docs/deployment.md` or `docs/spec.md` for the purpose of documenting an Access allowlist SHALL be treated as git-author metadata — they are already public via git commit history and scrubbing them from docs would be cosmetic, not security-effective.
+- NFR-7.4: A pre-push or CI grep SHALL reject any commit that introduces a string matching one of the patterns in NFR-7.1 into tracked files. The pattern set lives in `scripts/secret-scan.mjs` (deferred — see T-106).
+- NFR-7.5: Audit run on 2026-04-19 found **zero** actual leaks. Findings documented in T-106.
+
 ### FR-21: Obstruction Events (NEW v2.1.3)
 The system SHALL identify **obstruction events** — actions whose effect is to block, delay, or kill a pro-Ukraine bill *without* a direct Nay on passage — and surface them in the UI.
 
