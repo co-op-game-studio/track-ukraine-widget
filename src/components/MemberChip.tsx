@@ -9,7 +9,7 @@
  *
  * Traces to: US-7 AC-7.1 (revised), AC-7.8, US-8, US-9 (design system).
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Representative } from '../types/domain';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
 import { stateCodeToName } from '../utils/fipsMap';
@@ -18,6 +18,12 @@ export interface MemberChipProps {
   representative: Representative;
   selected: boolean;
   onClick: () => void;
+  /** Base URL for the Worker's /api/*. When present and the member has no
+   *  yearEntered yet, the chip lazily fetches it from /api/members/{id}
+   *  so the subtitle can render "U.S. Senator · since YYYY". Older KV
+   *  shards pre-date the field, so this fallback fills the gap without
+   *  blocking a KV republish. */
+  apiBase?: string;
 }
 
 function partyCssClass(abbr: string): string {
@@ -35,7 +41,7 @@ function subtitle(rep: Representative): string {
   return rep.yearEntered ? `${base} · since ${rep.yearEntered}` : base;
 }
 
-export function MemberChip({ representative, selected, onClick }: MemberChipProps) {
+export function MemberChip({ representative, selected, onClick, apiBase }: MemberChipProps) {
   const partyClass = partyCssClass(representative.partyAbbreviation);
   const partyUpper = representative.party.toUpperCase();
   const sanitizedUrl = sanitizeUrl(representative.photoUrl);
@@ -44,6 +50,38 @@ export function MemberChip({ representative, selected, onClick }: MemberChipProp
   // never render as the browser's default broken-image glyph.
   const [imgFailed, setImgFailed] = useState(false);
   const showImage = sanitizedUrl && !imgFailed;
+
+  // Lazy yearEntered enrichment: if the incoming Representative doesn't
+  // carry the field (older KV shard), fetch it from /api/members/{id}
+  // once and stash locally so the subtitle can render "since YYYY".
+  const [enrichedYear, setEnrichedYear] = useState<number | undefined>(
+    representative.yearEntered,
+  );
+  useEffect(() => {
+    // Reset when the representative prop changes so stale year doesn't
+    // leak across chip instances (React reuses this component across
+    // re-renders of the chip grid).
+    setEnrichedYear(representative.yearEntered);
+    if (representative.yearEntered != null) return;
+    if (apiBase == null) return;
+    if (!representative.bioguideId) return;
+    const base = apiBase.replace(/\/+$/, '');
+    let cancelled = false;
+    fetch(`${base}/api/members/${encodeURIComponent(representative.bioguideId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((p: { yearEntered?: number } | null) => {
+        if (!cancelled && p?.yearEntered) setEnrichedYear(p.yearEntered);
+      })
+      .catch(() => { /* swallow — chip still renders without it */ });
+    return () => { cancelled = true; };
+  }, [representative.bioguideId, representative.yearEntered, apiBase]);
+
+  // Subtitle prefers the enriched value (merges client + KV) so we get
+  // the fill-in without mutating the incoming prop.
+  const repForSubtitle: Representative =
+    enrichedYear !== representative.yearEntered
+      ? { ...representative, yearEntered: enrichedYear }
+      : representative;
 
   return (
     <button
@@ -80,7 +118,7 @@ export function MemberChip({ representative, selected, onClick }: MemberChipProp
           space-between` on the chip root pins this to the bottom edge so
           short-name and long-name tiles share a common baseline. */}
       <div className="viw-chip-footer">
-        <div className="viw-chip-subtitle">{subtitle(representative)}</div>
+        <div className="viw-chip-subtitle">{subtitle(repForSubtitle)}</div>
         <div className="viw-chip-state">
           {stateCodeToName(representative.state) ?? representative.state}
         </div>

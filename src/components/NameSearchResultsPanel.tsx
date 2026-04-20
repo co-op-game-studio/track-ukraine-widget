@@ -101,6 +101,7 @@ export function NameSearchResultsPanel({
                 representative={r}
                 selected={openId === r.bioguideId}
                 onClick={() => toggle(r.bioguideId)}
+                apiBase={apiBase}
               />
             ))}
           </div>
