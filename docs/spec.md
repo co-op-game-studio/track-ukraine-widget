@@ -115,6 +115,7 @@ Out of scope: state legislators, local officials, judicial appointments, executi
 - AC-7.5: On narrow viewports (< 720px), the chip grid collapses to a single column (senators first, rep below).
 - AC-7.6: Widget root max-width SHALL be ≥ 1280px on large viewports.
 - AC-7.7: Vacant senator seats render as a disabled chip with placeholder text.
+- AC-7.8 (NEW 2026-04-19 UAT): Every chip SHALL render the member's full state name on its own line (class `.viw-chip-state`) between the chamber/subtitle line and the party tag. The full-name mapping comes from `stateCodeToName()`; if the code is not mapped (unknown two-letter value), the chip SHALL render the uppercase two-letter code verbatim rather than printing "undefined" or omitting the line. Rationale: search-result chips and overview chips were state-ambiguous for senators, who otherwise showed only "U.S. SENATOR" / party.
 
 ### US-8: One Detail Panel at a Time (REVISED v2.2.0)
 **As a** voter, **I want** to click a member's chip to reveal their Ukraine record **so that** the overview stays compact until I pick someone to study.
@@ -955,11 +956,29 @@ proxy/
 - AC-43.1: `UkraineScore.confidenceTier` SHALL be `'low'` when `contributing < LOW_CONFIDENCE_THRESHOLD`, `'moderate'` when `contributing < MODERATE_CONFIDENCE_THRESHOLD`, `'full'` otherwise. `UkraineScore.confidence` (continuous) SHALL be `Math.min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD)`. `LOW_CONFIDENCE_THRESHOLD` stays at 3 (existing). `MODERATE_CONFIDENCE_THRESHOLD` = 8. When `contributing === 0` the tier is `'low'`, `confidence === 0`, and the score itself is already `null`.
 - AC-43.2: `UkraineScore.lowConfidence` SHALL remain exported as the boolean alias `(confidenceTier === 'low' && contributing > 0)` for v2.6.0 compatibility, flagged `@deprecated` in the TypeScript doc comment. The `contributing > 0` guard matches pre-v2.6.0 behavior so the empty-state UI path (N/A rendering) is unchanged. Direct consumers MAY migrate to `confidenceTier` at their pace; the alias SHALL be removed in v2.7.0.
 - AC-43.3: The score number in `UkraineScoreBadge` SHALL render with `filter: saturate(X)` where `X = 0.2 + 0.8 * score.confidence`. At `confidence = 0` → `X = 0.2`; at `confidence = 0.5` → `X = 0.6`; at `confidence = 1.0` → `X = 1.0`. The filter SHALL apply ONLY to the `.viw-score-value` element; surrounding text + the gradient bar SHALL remain at full saturation (they convey categorical information, not confidence).
-- AC-43.4: The context slug (`{label} · Based on N counted actions…`) SHALL render on the same row as the score number, positioned to the LEFT of the number. On viewports ≤ 640px where the row would wrap, the slug SHALL fall below the number but above the gradient bar (no longer at the bottom).
+- AC-43.4 (REVISED 2026-04-19 UAT): The header of `UkraineScoreBadge` SHALL render as a single CSS-Grid row at viewports ≥ 640px with four tracks in document order: `[title] [context-stack] [value] [caret]`. The context-stack is a vertical flex container holding two children — `.viw-score-label` (e.g., "Strong supporter") above `.viw-score-justification` (e.g., "Based on 16 counted actions (11 excluded: unstated, procedural, or neutral)") — right-justified against the value. The title (`.viw-score-title`), value (`.viw-score-value`), and context-stack SHALL be sized so their painted heights are visually equal (title + value line-height 1 at `~2rem` font-size; stack is two stacked lines ≈ the same height). At viewports < 640px the row collapses to a 2-row grid: row 1 `[title] [value] [caret]`, row 2 holds the context-stack with label + justification rendered INLINE on one line separated by " · " and right-justified against the value above. At the < 640px width the title text SHALL render the short form "Score"; at ≥ 640px it SHALL render the full form "Ukraine Support Score". The justification text SHALL render the full form at viewports ≥ 900px and a compact form (e.g., "16 actions (11 exc)") at viewports < 900px. Both text variants SHALL be present in the DOM (hidden by CSS media queries) so there is no render reflow on viewport change and both are available for copy/screen-reader access.
 - AC-43.5: The `Ukraine Support Score` title SHALL render at `font-size: clamp(1rem, 2.2vw, 1.4rem)`, uppercase, weight 900 italic, matching the host's heading treatment per AC-9.3. Color stays as-is (inherits `var(--viw-black)`).
 - AC-43.6: No AA contrast regression. Every tier/color combination of the score number against the card background (`var(--viw-white)` = `#ffffff`) SHALL maintain ≥4.5:1 per WCAG AA. Verification: the tested fixture set covers the three tier values × three band colors (red/yellow/green) = 9 combinations, all ≥4.5:1.
 - AC-43.7: The `lowConfidence` clamp on `scoreLabel` (FR-16) SHALL remain — at `'low'` tier the label reads "Limited record" variants as today. At `'moderate'` the label reads as the full-tier would; the moderate desaturation is the only visual signal of partial confidence. This is intentional: the binary-clamp label change was itself part of Kaziem's "degrades mid-rangers" feedback — moving the nuance from copy to color is the design intent.
 - AC-43.8: Tests in `tests/unit/UkraineScoreBadge.test.tsx` SHALL cover: tier derivation boundaries (0, 1, 2, 3, 7, 8, 9 counted actions); saturation CSS applied per tier; slug rendering position relative to the number; title size class applied; the existing abstention/obstruction note paths continue to render.
+- AC-43.9 (NEW UAT): The header row SHALL render as an HTML `<button>` (`.viw-score-header-toggle`) that toggles an expandable breakdown panel (`#viw-score-breakdown-panel`). The button SHALL set `aria-expanded` and `aria-controls` and SHALL be keyboard-activatable. The panel SHALL render ONLY when expanded (no display:none placeholder).
+- AC-43.10 (NEW UAT): When expanded, the breakdown panel SHALL render a per-member contribution table with one `<tbody>` row per curated Ukraine action for the member: sponsored bills, cosponsored bills (each with weight 1.0), and every row in `VotingRecordData.flat`. Columns: `Bill / Vote`, `Action`, `Sign`, `Amp × Weight`, `Contribution`. Rows whose contribution is zero (valence `unstated` OR weight ≤ 0 per FR-16 `PROCEDURAL_THRESHOLD`) SHALL carry class `viw-score-row-skipped` and display `skip (reason)` — where reason is one of `Unstated`, `Present`, `Abstained`, `Procedural`, or `Neutral` — in place of a numeric contribution. The table SHALL have a `<tfoot>` with two rows: "Totals" (Σ amp×weight · Σ contribution) and "Score = … ÷ …" ending with the final score value. The final score in the footer SHALL equal the badge's displayed value for every member.
+- AC-43.11 (NEW UAT): In addition to the header toggle, the score bar + obstruction-note region SHALL also act as a clickable toggle (`.viw-score-bar-toggle`) that expands/collapses the same breakdown panel, with the same `aria-expanded` / `aria-controls` wiring. The progressbar role SHALL remain on the inner `.viw-score-bar` element (not on the outer button) so screen readers still announce the score value.
+- AC-43.12 (NEW UAT, REVISED 2026-04-19): Each row in the breakdown table SHALL carry a valence CSS class `viw-valence-{sponsor-pro|voted-pro|unstated|voted-anti|sponsor-anti}` matching the action's computed valence. Styling (full-row background tint via `--viw-valence-*-bg`, contribution-cell foreground color via `--viw-valence-*`) SHALL use the existing FR-15 palette tokens so the color scheme stays consistent with the Ukraine Votes table below. Unstated/skipped rows SHALL render with a transparent background and muted italic text. No left-edge accent stripe is applied — an earlier iteration used `box-shadow: inset 3px 0 0` to paint a colored vertical bar along the bill cell, but post-UAT feedback (2026-04-19) found it read as an "extra border" between the bill cell and the numeric cells on tinted rows. Removed.
+- AC-43.13 (NEW UAT): The gradient-bar + obstruction-note region SHALL render ABOVE the breakdown panel in DOM and visual order when the panel is expanded, i.e., the expand/collapse SHALL NOT push the bar, obstruction note, or abstention note off-screen — the panel is the last child of `.viw-score`.
+- AC-43.14 (NEW UAT, post-feedback 2026-04-19): The "Bill · Action" cell in the breakdown table SHALL render the per-action record as **three stacked pieces of structured data**, not a single long string:
+  1. **Slug** (`.viw-score-row-bill-slug`): a short bill identifier. For House bills, `${TYPE} ${number}` (e.g., `HR 815`). For Senate bills, `S.`-prefixed variants (`S. 1241`, `S.JRES 117`). Bold italic uppercase, matches the host's heading treatment.
+  2. **Description** (`.viw-score-row-bill-desc`): the curator-authored one-sentence bill label, truncated to `BILL_LABEL_TRUNCATE_CHARS` (72) characters with an ellipsis when longer.
+  3. **Action caption** (`.viw-score-row-bill-action`): for vote rows, `"${VOTE_KIND_LABEL[kind]} — Voted ${memberVote}"` (e.g., `"Cloture — Voted Aye"`, `"Final passage — Voted Nay"`, `"Motion to proceed — Voted Aye"`). For sponsorship rows, simply `"Sponsored"` or `"Cosponsored"`.
+
+  Rows with a truncated description OR with additional `vote.action` clerk text SHALL render the cell as a `<button>` (`.viw-score-row-bill-toggle`) with `aria-expanded` and a caret glyph (`▸` / `▾`). Clicking the button toggles a per-row expand that reveals the full description and, for vote rows, the `actionDetail` (full clerk-action text, e.g., `"Senate agreed to the House amendment to the Senate amendment to H.R. 815 by Yea-Nay Vote. 79 - 18. Record Vote Number: 154."`) as `.viw-score-row-bill-detail`. Rows where both description and action detail are short SHALL render the structured fields directly (no button wrapper).
+
+  Row-expand state is isolated: each row's expand state is independent of other rows and of the outer panel's `aria-expanded` state.
+
+  The "Action" column that appeared in the first UAT iteration SHALL be removed; the "Voted Aye / Voted Nay / Sponsored / Cosponsored" information now lives in the action caption inside the bill cell. Header columns: `Bill · Action` | `Sign` | `Amp × Weight` | `Contribution`.
+
+  Footer `colSpan` adjusts accordingly: "Totals" row uses `colSpan={2}`, "Score = Σ ÷ Σ" row uses `colSpan={3}`.
+- AC-43.15 (NEW UAT 2026-04-19): The entire `.viw-score` band — the grey wrapper AND any whitespace inside the white `.viw-score-breakdown` panel — SHALL act as a single click target that toggles the breakdown panel's `expanded` state. All interactive descendants (header toggle, bar toggle, per-row bill-expand toggles) SHALL call `e.stopPropagation()` on their own click so the container handler does not double-fire. The rule: clicking any non-interactive whitespace toggles; clicking a dedicated button fires only that button's own semantics. The score band SHALL carry `cursor: pointer` to signal the hit area. Rationale: UAT feedback found the dedicated header/bar buttons were too-small targets on mobile; the full grey band is a much easier tap zone and matches the "card opens on tap" pattern voters already expect from the chip grid.
 
 ### FR-44: Test Ladder, CI/CD Gating, and Stress Testing (NEW v2.6.0)
 
@@ -1023,7 +1042,97 @@ proxy/
 - **FR-30 AC-30.5** explicitly defers remote-mode coverage until "the first merged remote-mode test lands." FR-44 AC-44.5 is that first merged remote-mode test. AC-30.5's warning emission requirement sunsets when AC-44.5 is implemented.
 - **FR-30 AC-30.10** ("stg holds no persistent state worth preserving") is preserved exactly — FR-44's sync is always transient.
 
-### FR-26: Cloudflare Deployment Story (NEW v2.4.0)
+### FR-45: Test Coverage Reporting & Thresholds (NEW v2.6.x UAT)
+
+**Problem.** The project has 896 passing tests across unit / integration / e2e tiers (FR-44), but there is no mechanism to:
+
+1. Measure what fraction of the library code those tests actually cover.
+2. Compare coverage between tiers, so a regression where (e.g.) a hook-level integration test is silently replaced by a purely-mocked unit test produces a visible signal.
+3. Gate merges on coverage floors, so new code can't silently ship uncovered.
+
+Before this FR the `coverage/` directory existed only because `test:coverage` had been run manually once; its scope was whatever the most recent hand-run covered and had no freshness guarantee. The release-worthiness audit (2026-04-19) flagged this explicitly: "Coverage report scope is narrow — `src/components`, `hooks`, `utils`, `proxy/security`, `proxy/router.ts`, `proxy/worker.ts` all absent. The reported 99.8% overall lines is misleading."
+
+**Solution.** Formalize coverage as a first-class part of the test ladder (FR-44). Every tier runs with its own coverage report; a combined roll-up is generated; thresholds are checked in CI.
+
+**Design:**
+
+- Coverage provider: `@vitest/coverage-v8` (already a devDependency).
+- Coverage config lives in `vitest.config.ts` under `test.coverage` so it applies to every run (including `npm test`, not just `npm run test:coverage`).
+- Scripts:
+  - `npm run test:coverage` — full suite (all tiers) → `coverage/combined/`
+  - `npm run test:coverage:unit` — unit only → `coverage/unit/`
+  - `npm run test:coverage:integration` — integration only → `coverage/integration/`
+  - `npm run test:coverage:e2e` — e2e only → `coverage/e2e/`
+- Reporters: `['text', 'json', 'json-summary', 'html', 'lcov']` per tier.
+- Roll-up script: `scripts/coverage-report.mjs` reads the four `coverage-summary.json` files and prints a unified table to stdout; exits non-zero if any tier falls below its floor. Used by CI.
+
+**Acceptance criteria:**
+
+- AC-45.1: `vitest.config.ts` SHALL declare a `test.coverage` block with provider `'v8'`, reporters including `'json-summary'` and `'html'`, and an explicit `include` list covering `src/**/*.{ts,tsx}` and `proxy/**/*.{ts,tsx}` AND an explicit `exclude` list covering the following categories of files that have no runtime semantics to cover:
+  1. **Build-tool scripts** under `scripts/**` (`build-curated-bills.ts`, `build-vote-rosters.ts`, `publish-to-kv.ts`, `build-sri.mjs`, `extract-openapi.mjs`, `score-many.mjs`, `check-hawks.mjs`, `perf-check.mjs`, `sync-stg-data.ts`, `purge-members.ts`, `warm-member-cache.mjs`, `publish-curated-bills.mjs`, `core-bottom.mjs`, `check-lankford.mjs`). These are one-shot build/ops utilities and are not under test because exercising them requires Cloudflare bindings or real network.
+  2. **Entry points** that bind only (`src/main.tsx`, `src/embed.tsx`) — they instantiate the widget into a host DOM element; the widget itself has its own tests.
+  3. **Dev-harness-only components** not shipped in the production bundle (`src/EnvPicker.tsx`).
+  4. **Type-only files** (`src/types/**`). These compile to nothing.
+  5. **Test support** (`tests/fakes/**`, `tests/setup.ts`, `tests/**/fixtures/**`, `tests/**/*.test.{ts,tsx}`).
+  6. **Generated artifacts** (`dist/**`, `node_modules/**`, `coverage/**`).
+- AC-45.2: Coverage thresholds SHALL be declared in `vitest.config.ts` under `test.coverage.thresholds` with floor values:
+  - `lines: 85`, `statements: 85`, `functions: 85`, `branches: 80`.
+  When `npm run test:coverage` is invoked and any metric drops below its floor, the process SHALL exit non-zero. Rationale: the current library-code coverage is 95–100% across `src/components`, `src/hooks`, `src/services`, `src/utils`, and most of `proxy/`. 85/80 sets a floor that catches regressions without being so tight that a single new un-tested helper blocks merges — the actual target is "whatever we have today, minus a small slack."
+- AC-45.3: Three per-tier scripts SHALL be available:
+  - `test:coverage:unit` → runs only `tests/unit/**/*.test.{ts,tsx}` with output at `coverage/unit/`.
+  - `test:coverage:integration` → runs only `tests/integration/**/*.test.{ts,tsx}` with output at `coverage/integration/`.
+  - `test:coverage:e2e` → runs only `tests/e2e/**/*.test.{ts,tsx}` with output at `coverage/e2e/`.
+  Per-tier runs SHALL use the same `include` / `exclude` lists as the full run but MAY relax thresholds — integration + e2e coverage is cumulative over unit, not a replacement, so a per-tier floor would be misleading.
+- AC-45.4: A roll-up script `scripts/coverage-report.mjs` SHALL read each tier's `coverage-summary.json` after all four runs complete and print a four-row Markdown-compatible table with columns `tier | statements | branches | functions | lines | delta vs combined`. The script SHALL exit 0 if all four summaries exist and the combined run met its thresholds, non-zero otherwise.
+- AC-45.5: A meta-test `tests/unit/coverageThresholds.test.ts` SHALL verify that `vitest.config.ts` declares `thresholds` matching AC-45.2. This is a self-documenting guardrail — if the thresholds are accidentally relaxed in config, the test fails.
+- AC-45.6: Coverage output directories (`coverage/`, including `coverage/unit`, `coverage/integration`, `coverage/e2e`, `coverage/combined`) SHALL be listed in `.gitignore`. Only the config and the roll-up script are committed.
+- AC-45.7: Documentation of the coverage surface is out of scope for this FR — the existing `docs/ci-cd.md` is the eventual home, but FR-44's CI gating is already stubbed there and that doc is itself deferred. The roll-up script's stdout is the definitive "current coverage" report.
+
+**Rationale for file-level exclusions:** including `scripts/**`, entry points, and type-only files in the denominator makes the combined number unhelpful (today it reports 68.44% when the library is actually 95%+). The exclusion list is the honest denominator — what we ship + test, not what happens to live in the repo.
+
+### FR-46: About-the-System Info Panel (NEW v2.6.x UAT, REVISED 2026-04-19)
+
+**Problem.** UAT voters get a numeric score and a per-action breakdown, but the domain reasoning — *why* is a cloture-vote weight 0.45? *Why* does a sponsorship amplify 1.5×? What bills are actually being tracked? — has no surface in the UI. The score-breakdown panel (FR-43 AC-43.10) shows *how* a specific member's score was computed; this About panel shows *why* the system computes scores the way it does, plus the full live roster of bills it tracks.
+
+**Solution.** A lightweight info panel opened from a `ⓘ About this system` button in the widget footer. Scope is **the scoring system and the tracked bill roster only** — no discussion of security, proxy routing, CORS, upstream APIs, or other technical/deployment design. Two content areas:
+
+**Part A — How scoring works (static, driven by scoring constants):**
+
+1. **Purpose** — one paragraph on what the score measures.
+2. **The formula** — `score = Σ(sign × amp × weight) ÷ Σ(amp × weight)`, with a worked example.
+3. **The valence table** — 5 rows driven from `VALENCE_SIGN` / `VALENCE_AMPLIFIER` / `VALENCE_LABEL` in `services/valence.ts`.
+4. **The weight table** — vote-kind → weight mapping (passage = 1.0, cloture = 0.45, motion-to-proceed / recommit / waive-budget = 0.30, motion-to-table / motion-to-reconsider = 0 → excluded).
+5. **Confidence tiers** — the `'low' | 'moderate' | 'full'` ladder and the saturation signal (FR-43).
+
+**Part B — Tracked bills browser (live data, tabbed):**
+
+6. **Tabbed browser** over the full contents of the bundled `src/data/ukraineBills.json`. One tab per direction category: `Pro-Ukraine`, `Anti-Ukraine`, `Neutral`. A tab is hidden when its bucket is empty. Each tab contains:
+   - A **bills table** (slug · label · featured-flag · direction-reason · latest-action) rendered with the same formatting conventions as FR-43 AC-43.14's breakdown table (slug bold uppercase, description regular, action caption uppercase-small-caps).
+   - Under each bill, a nested **votes table** (chamber · roll-call · kind · weight · action), collapsed by default with click-to-expand — same affordance as FR-43 AC-43.14's per-row expand. Kind rows whose weight is 0 SHALL render as "excluded" in muted italic (same treatment as the breakdown table's skip rows).
+7. **Closing note** — a short line that the scoring weights and bill directions are auditable in the repository's commit history and that the bill set is pre-curated and human-reviewed before each release. No other technical or security content.
+
+**Scoping rules (what this panel SHALL NOT say):**
+
+- No mention of CORS, proxies, rate limits, Cloudflare, KV, R2, tiered caching, observability, deployment environments, or any other infrastructure or security detail.
+- No mention of upstream API endpoints (Congress.gov, Senate.gov, Census) beyond "the system reads directly from public legislative data." The voter's question is "what does the score measure and which bills?" — everything else is out of scope.
+
+**Keep-in-sync rule:**
+
+- AC-46.KIS: Any change to scoring constants (`VALENCE_SIGN`, `VALENCE_AMPLIFIER`, `VALENCE_LABEL`), to the set of vote kinds + their weights, or to the curated bill set schema SHALL be accompanied by a same-PR update to the About panel's content or table structure if the change would leave the panel stale. The valence table is auto-synced via imports (AC-46.1); the weight table + copy are hand-written and MUST be kept current. Per AIDD Phase 4 ("Refactor fourth — clean up while the suite stays green"), this includes updating/adding tests. The About panel's spec residency (this FR) is the single place developers check when they touch scoring.
+
+**Acceptance criteria:**
+
+- AC-46.1: A new component `src/components/AboutSystemPanel.tsx` SHALL render Part A (formula, valence table, weight table, confidence) and Part B (tabbed bills browser) as described. The valence table SHALL be driven by the constants from `services/valence.ts` so it stays sync automatically.
+- AC-46.2: A trigger button SHALL be placed in `.viw-root-footer` with accessible name "About this system" and label glyph `ⓘ About this system`. Clicking it opens the inline panel beneath the footer (not a modal).
+- AC-46.3: The bills browser SHALL be sourced by importing `src/data/ukraineBills.json` at module-init time. No runtime network. The import presents every curated bill grouped by `direction` (`pro-ukraine` / `anti-ukraine` / `neutral`). Tab order is: Pro-Ukraine → Anti-Ukraine → Neutral. Tabs with zero bills SHALL NOT render.
+- AC-46.4: The panel SHALL close when the voter clicks the trigger button a second time OR presses `Escape` while focus is inside the panel. (Unlike FR-43 AC-43.15, the About panel does NOT close on click-whitespace — click-whitespace would collide with the bills-browser expand affordance and the tab-switching click targets.)
+- AC-46.5: The bill rows SHALL reuse the FR-43 AC-43.14 formatting: slug (`HR 815`, `S. 1241`) in bold italic uppercase, bill label as a normal-weight description, a small-caps "featured" / "became law" / direction-reason caption underneath. Each bill row SHALL carry its valence CSS class (`viw-valence-sponsor-pro` / `voted-pro` / `unstated` / `voted-anti` / `sponsor-anti`) so the color scheme matches the score-breakdown table.
+- AC-46.6: Click-to-expand on a bill row reveals a nested votes table. Table columns: `Chamber`, `Roll-call`, `Kind`, `Weight`, `Action`. Vote-kind rows where `weight === 0` SHALL render as "excluded (ambiguous procedural)" in muted italic.
+- AC-46.7: The About panel SHALL NOT mention CORS, proxies, rate limits, Cloudflare, KV, R2, caching, observability, deployment environments, or specific upstream API endpoints. A test SHALL assert the rendered panel's text content does NOT contain these terms.
+- AC-46.8: The About panel and the score-breakdown panel (FR-43) SHALL be independently operable — opening one does not close the other. Their `aria-controls` SHALL reference different ids.
+- AC-46.9: Tests SHALL cover: trigger open/close; valence table renders all 5 valences in canonical order; weight table calls out passage/cloture/0.30 rows and excluded rows; bills tab-bar renders exactly the direction tabs that have bills; clicking a tab switches the visible bill list; clicking a bill row reveals its votes table with the correct kind+weight for the first vote in the curated data; Escape closes the panel; the forbidden terms from AC-46.7 are absent from the panel's rendered text.
+
+
 
 **Problem.** The widget has no defined production deployment. Spec and code exist but "where does this actually live" is undefined. Since the widget must be embeddable on trackukraine.com (Fourthwall) and the stated goal is to host infrastructure on Cloudflare for security, the deployment architecture needs to be explicit.
 
@@ -1049,6 +1158,45 @@ See `docs/deployment.md` for the concrete setup playbook.
 - AC-26.10 (NEW v2.5.1): The integrator-facing embed snippet documented in `README.md`, `proxy/example-embed.html`, and any future integration guide SHALL use the SRI-pinned form: `<script src="https://vote.cogs.it.com/voter-info-widget.iife.js" integrity="sha384-<base64>" crossorigin="anonymous" async></script>`. The `<base64>` placeholder SHALL be replaced with the release's actual hash at embed time. If the integrator cannot pin to a specific release, the docs SHALL clearly state the tradeoff — that an unpinned embed inherits the full attack surface of the widget's deploy pipeline. For SRI to work, the bundle response SHALL carry `Access-Control-Allow-Origin: *` per AC-27.1b.
 - AC-26.11 (NEW v2.5.1, revised twice: 2026-04-18a for Worker Sites migration, 2026-04-18b for ADR-011 curated-data placement): The deployed Worker Sites static-asset surface (binding `ASSETS`, backed by `./dist`) SHALL contain, at minimum: `voter-info-widget.iife.js` and `voter-info-widget.iife.js.sri`. The deploy workflow SHALL ship both on every deploy; a post-deploy smoke test SHALL `curl` each path on the deployed hostname and assert a 200 response. Rationale: missing datasets were found in prod during the 2026-04-17 audit. Making asset presence + verification part of the deploy contract prevents silent loss of functionality. **Curated data placement after ADR-011:** `ukraineBills.json` is imported at build time into the IIFE bundle (not a separately-deployed asset — runtime reads it from the bundled constant via `src/services/ukraineFilter.ts`); `ukraineVotes.json` was removed entirely in favor of per-member data in KV (via `scripts/publish-to-kv.ts`). Neither is a separately-fetched static asset, so neither is part of this AC's smoke list. **Historical note:** the original v2.5.1 wording listed four R2 keys; both revisions above chase the code's actual state.
 - AC-26.12 (NEW v2.5.1, revised 2026-04-18): The static-asset surface SHALL be served by the Worker deployment (Worker Sites' `ASSETS` binding), NOT by a separate Pages binding, Transform Rule, or direct R2 public URL. Verification: `curl -i https://vote.cogs.it.com/voter-info-widget.iife.js` SHALL return a `Content-Type` of `application/javascript`, and the response headers SHALL pass through `applySecurityHeaders` (STS, nosniff, CORP cross-origin, etc. all present). Rationale: the 2026-04-17 audit observed prod serving the bundle with headers that did not match Worker output, indicating a separate serving path. Spec-as-Truth: the Worker's deploy is the single authority for what `/voter-info-widget.iife.js` returns. Any Cloudflare-dashboard binding that would shadow this path is a spec violation.
+
+### FR-47: Isolated Per-Branch Preview Environments (NEW v2.6.x UAT)
+
+**Problem.** Reviewers want to click a link in a PR and see that branch running live, without it affecting the shared dev/uat/stg/prod ladder. An earlier attempt (T-105 initial) proposed a shared `env.preview` wrangler block where every `preview/*` branch deployed under the same Cloudflare env and KV namespace. That approach has two failure modes:
+
+1. **KV cross-contamination.** A preview branch that mutates schema (new field, renamed shard prefix, recomputed index) overwrites the shared KV, breaking every other preview on the same namespace. The release-worthiness audit's Spec-as-Truth principle applies: previews should be isolated or they aren't previews — they're shared-mutable staging.
+2. **Secret + rate-limit co-mingling.** Shared env means shared `CONGRESS_API_KEY` secret exposure, shared rate-limit bucket (one preview hammering Congress.gov burns the whole preview env's quota), shared analytics dataset (no way to slice observability by branch).
+
+**Solution — fully-isolated per-branch preview envs.** For every branch matching `preview/{slug}`, CI generates a freshly-scoped set of Cloudflare resources, deploys a Worker that uses them, posts the URL, and tears everything down on branch delete.
+
+**Per-preview resource set (isolated):**
+
+- **Worker**: `voter-info-widget-proxy-preview-{slug}` — deployed via `wrangler deploy --env preview-template --name <name>`.
+- **KV namespace**: `voter-info-widget-preview-{slug}` — created on first deploy via `wrangler kv namespace create`, ID captured and passed to the Worker via `--kv-namespace KV_VOTER_INFO=<id>`. Deleted on teardown.
+- **R2 bucket**: `voter-info-widget-archive-preview-{slug}` — created on first deploy, deleted on teardown. Empty by default; populated on-demand by warm-on-miss.
+- **Analytics dataset**: `voter_info_widget_preview_{slug}` — namespaced analytics so a preview's Logpush + Analytics Engine data doesn't mix with others.
+- **Rate-limit namespace**: `{1005 base} + hash(slug) mod 100` — a deterministic offset so concurrent previews each get their own token bucket.
+- **Secret**: `CONGRESS_API_KEY` — copied from the `dev` env's secret at deploy time (one-time `wrangler secret put` during the CI deploy job).
+
+**Shared seed data:** every preview env starts empty. CI's deploy job runs `scripts/publish-to-kv.ts --env preview-{slug}` which copies the dev namespace's curator output (`bill:*`, `roll-call:*`, `name-index:*`, `state-members:*`) into the preview KV. Member profile records (`member:v1:*`) are populated on-demand via the Worker's read-through from Congress.gov, just like prod — so previews don't need to pre-copy them.
+
+**Slug rules:** `preview/{slug}` → slug is lowercased, non-`[a-z0-9-]` replaced with `-`, max length 40 chars (Cloudflare name limits). Slugs `dev`, `uat`, `stg`, `prod`, `preview` are reserved and SHALL be rejected.
+
+**Acceptance criteria:**
+
+- AC-47.1: Pushing to a branch matching `preview/**` SHALL trigger `.github/workflows/preview.yml` which computes a slug from the branch name via the rules above.
+- AC-47.2: On first push to a `preview/{slug}` branch: CI SHALL create a KV namespace named `voter-info-widget-preview-{slug}`, an R2 bucket named `voter-info-widget-archive-preview-{slug}`, and deploy a Worker named `voter-info-widget-proxy-preview-{slug}` with those resources bound. The Worker SHALL NOT be routed to `*.preview.vote.cogs.it.com` automatically; the CI workflow SHALL emit the raw `*.workers.dev` URL as the preview URL. (DNS wildcard provisioning is a separate one-time human step tracked in `docs/deployment.md`, not part of this FR.)
+- AC-47.3: On subsequent pushes to the same `preview/{slug}` branch: CI SHALL reuse the existing KV + R2 resources (detected via `wrangler kv namespace list`) and only re-deploy the Worker. No resource re-creation.
+- AC-47.4: On branch delete (GitHub `delete` event with `ref_type=branch` and ref matching `preview/**`), CI SHALL delete the Worker, the KV namespace, and the R2 bucket for that slug. Analytics datasets are append-only in Cloudflare's product surface and SHALL be left in place (they're cheap; CF expires their data after 90d automatically).
+- AC-47.5: Reserved slugs (`dev`, `uat`, `stg`, `prod`, `preview`, or empty) SHALL cause the deploy job to exit with a failure message identifying the conflict. Reserved prefixes (`vote-`, `trackukraine-`) SHALL also be rejected to prevent impersonation-style naming.
+- AC-47.6: A new `env.preview-template` block in `wrangler.toml` SHALL act as the template that CI's `--name`, `--kv-namespace`, `--r2-bucket`, and `--var` overrides populate per-deploy. The template SHALL NOT reference fixed KV/R2 IDs — the resource bindings are provided entirely via CLI flags. The block's only purpose is to set `vars` defaults (ENV_NAME, PREVIEW_MODE, ALLOWED_ORIGINS) and the `compatibility_date`.
+- AC-47.7: Per-preview `ENV_NAME` SHALL be `preview-{slug}` so that FR-36 trace logs + FR-38 analytics points correctly attribute every preview's traffic back to its branch.
+- AC-47.8: The preview Worker SHALL carry `PREVIEW_MODE=true` and `ALLOW_LOCALHOST=true` so origin enforcement matches dev semantics. Preview URLs SHALL be gated behind Cloudflare Access per FR-29 AC-29.2 (non-prod envs require Access). The Access policy SHALL include a wildcard-matched `*.preview.vote.cogs.it.com` application once DNS is provisioned; until then, the raw `*.workers.dev` URL inherits the account's default Access policy (which may be public — documented as a limitation).
+- AC-47.9: The workflow SHALL post a sticky PR comment with the preview URL, the slug, the Worker name, and the deployment timestamp. If a previous sticky comment exists, it is updated in place rather than appended. Comment body format: `🔎 **Preview**: <url> · branch: <ref> · worker: <name> · deployed: <iso8601>`.
+- AC-47.10: Teardown failures (resource already deleted, permission error, transient CF API 5xx) SHALL NOT fail the whole workflow run; the workflow SHALL log the failure, continue to attempt other resources, and report a summary at the end. Rationale: when multiple resources need to be cleaned up, a partial failure shouldn't leave orphaned resources that block re-creation.
+- AC-47.11: A deploy-gate check SHALL reject the deploy if `CLOUDFLARE_API_TOKEN` lacks the scope to create KV namespaces (detected by trial `wrangler kv namespace create <name> --dry-run` returning an auth error). This prevents half-deploys where the Worker lands but its backing KV doesn't exist.
+- AC-47.12: Tests SHALL cover the slug-derivation pure function in isolation (reserved slugs, punctuation normalization, length clamp, empty-input guard) plus a snapshot test for the `wrangler.toml` `env.preview-template` block shape. The actual CF resource lifecycle is NOT unit-tested (it's CI-only); it's validated manually on first use by pushing a `preview/smoke-test` branch.
+
+**Out of scope:** per-branch DNS automation (`*.preview.vote.cogs.it.com`), Access policy automation (human task), cross-branch data sharing (each preview is a cold start), custom domain per preview.
 
 ### FR-21: Obstruction Events (NEW v2.1.3)
 The system SHALL identify **obstruction events** — actions whose effect is to block, delay, or kill a pro-Ukraine bill *without* a direct Nay on passage — and surface them in the UI.
