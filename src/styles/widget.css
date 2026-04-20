@@ -1366,7 +1366,6 @@
    class just owns the weight + size bump. */
 .viw-score-justification-confidence {
   font-weight: 800;
-  font-size: 0.78rem;
   letter-spacing: 0.01em;
 }
 /* Short/full justification swap — by default show the full sentence and
@@ -1426,8 +1425,17 @@
     text-align: right;
     gap: 0.4rem;
     white-space: nowrap;
-    overflow: hidden;
     width: 100%;
+    min-width: 0;
+  }
+  .viw-score-context-stack .viw-score-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .viw-score-context-stack .viw-score-justification {
+    flex: 0 0 auto;
   }
   .viw-score-context-stack .viw-score-label::after {
     content: " ·";
