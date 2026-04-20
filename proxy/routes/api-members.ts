@@ -87,8 +87,17 @@ export async function buildProfileFromUpstream(
   const rawTerms = m.terms;
   const terms: TermEntry[] = Array.isArray(rawTerms) ? rawTerms : (rawTerms?.item ?? []);
   let currentTerm: TermEntry | undefined;
+  // Earliest start year across all terms = year member first entered office.
+  // Members who've served non-contiguous terms (rare but real) correctly
+  // surface their very-first-term year, not their current-stint-only year.
+  let yearEntered: number | undefined;
   for (const t of terms) {
     if (!currentTerm || (t.endYear ?? 0) >= (currentTerm.endYear ?? 0)) currentTerm = t;
+    if (typeof t.startYear === 'number') {
+      if (yearEntered === undefined || t.startYear < yearEntered) {
+        yearEntered = t.startYear;
+      }
+    }
   }
   const chamber: 'House' | 'Senate' =
     currentTerm?.chamber === 'Senate' ? 'Senate' : 'House';
@@ -134,6 +143,9 @@ export async function buildProfileFromUpstream(
     searchKey: normalizeSearchKey(`${first} ${last}`),
     sponsored,
     cosponsored,
+    // UAT (2026-04-19): earliest term start year — used by the widget to
+    // render "· since YYYY" in member chips and the detail header.
+    yearEntered,
     generatedAt: new Date().toISOString(),
     schemaVersion: 1,
   };

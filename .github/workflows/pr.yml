@@ -12,9 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Main PR check — runs the full FR-44 test ladder + coverage floors +
+  # bundle-size check + build. Surfaces as the GH check context
+  # `lint-typecheck-test` (same as pre-2026-04-19, so branch protection
+  # keeps working). The distinct `check-source` context is emitted by
+  # ladder-guard.yml — see ops/branch-protection memory.
   lint-typecheck-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,11 +36,37 @@ jobs:
       - name: Typecheck (widget + worker)
         run: npm run typecheck
 
-      - name: Unit + integration tests
-        run: npm test
+      # FR-44 test ladder — unit, integration, and e2e tests ALL run in CI.
+      # vitest auto-picks them up via the `include: ['tests/**/*.test.{ts,tsx}']`
+      # glob in vitest.config.ts; no test is silently skipped.
+      - name: Unit tests (FR-44 tier 1)
+        run: npx vitest run tests/unit
+
+      - name: Integration tests (FR-44 tier 2)
+        run: npx vitest run tests/integration
+
+      - name: End-to-end tests (FR-44 tier 3)
+        run: npx vitest run tests/e2e
+
+      # Coverage with the FR-45 floor enforcement. If any tier drops below
+      # the floor declared in vitest.config.ts, the job fails. Also uploads
+      # the combined report as an artifact so reviewers can see deltas.
+      - name: Coverage (combined, FR-45 thresholds enforced)
+        run: npx vitest run --coverage
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-combined
+          path: coverage/combined/
+          retention-days: 14
 
       - name: Build widget bundle
         run: npm run build:lib
+
+      - name: Compute SRI hash (AC-26.9)
+        run: npm run build:sri
 
       - name: Bundle size check (< 400 KB gzipped)
         run: |

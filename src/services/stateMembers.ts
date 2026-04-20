@@ -20,6 +20,9 @@ export interface StateMemberSummary {
   photoUrl: string | null;
   website: string | null;
   isNonVoting?: boolean;
+  /** Year member first entered office. Optional — older KV records
+   *  predate this field. */
+  yearEntered?: number;
 }
 
 export interface StateMembersRecord {

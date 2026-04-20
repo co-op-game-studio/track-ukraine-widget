@@ -32,10 +32,12 @@ function partyCssClass(abbr: string): string {
 }
 
 function chamberLabel(rep: Representative): string {
-  if (rep.chamber === 'senate') return 'U.S. Senator';
-  if (rep.isNonVoting) return 'U.S. Delegate (non-voting)';
-  if (rep.district == null) return 'U.S. Representative';
-  return `U.S. Representative · District ${rep.district}`;
+  const base =
+    rep.chamber === 'senate' ? 'U.S. Senator' :
+    rep.isNonVoting ? 'U.S. Delegate (non-voting)' :
+    rep.district == null ? 'U.S. Representative' :
+    `U.S. Representative · District ${rep.district}`;
+  return rep.yearEntered ? `${base} · since ${rep.yearEntered}` : base;
 }
 
 export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) {
@@ -45,8 +47,13 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
   // render the same rich card as the address path without the address flow
   // having to pass photoUrl through.
   const [enriched, setEnriched] = useState<Representative>(representative);
+  // Broken-image fallback — mirrors MemberChip. If Congress.gov's photo URL
+  // 404s or is blocked, fall back to the placeholder instead of the
+  // browser's default broken-image glyph.
+  const [photoFailed, setPhotoFailed] = useState(false);
   useEffect(() => {
     setEnriched(representative);
+    setPhotoFailed(false);
     const base = apiBase.replace(/\/+$/, '');
     let cancelled = false;
     fetch(`${base}/api/members/${encodeURIComponent(enriched.bioguideId)}`)
@@ -56,6 +63,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
         website?: string | null;
         district?: number | null;
         officialName?: string;
+        yearEntered?: number;
       } | null) => {
         if (!p || cancelled) return;
         // AC-31.1: every URL sourced from /api/members/{id} passes through
@@ -69,6 +77,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
           officialWebsiteUrl: curr.officialWebsiteUrl ?? safeWebsite ?? null,
           district: curr.district ?? p.district ?? null,
           name: curr.name || p.officialName || curr.name,
+          yearEntered: curr.yearEntered ?? p.yearEntered,
         }));
       })
       .catch(() => { /* keep base representative if profile lookup fails */ });
@@ -104,8 +113,14 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
     >
       <header className="viw-detail-header">
         <div className="viw-detail-identity">
-          {sanitizeUrl(enriched.photoUrl) ? (
-            <img src={sanitizeUrl(enriched.photoUrl)!} alt="" className="viw-detail-photo" loading="lazy" />
+          {sanitizeUrl(enriched.photoUrl) && !photoFailed ? (
+            <img
+              src={sanitizeUrl(enriched.photoUrl)!}
+              alt=""
+              className="viw-detail-photo"
+              loading="lazy"
+              onError={() => setPhotoFailed(true)}
+            />
           ) : (
             <div className="viw-detail-photo viw-detail-photo-placeholder" aria-hidden />
           )}
@@ -140,6 +155,8 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
       {!enriched.isNonVoting && (
         <UkraineScoreBadge
           score={score}
+          voting={votingRecord.data}
+          bills={bills.data}
           obstructionCount={obstructionCount}
           primaryAbstentionCount={votingRecord.data?.primaryAbstentionCount ?? 0}
           loading={votingRecord.status === 'loading' || bills.status === 'loading'}
