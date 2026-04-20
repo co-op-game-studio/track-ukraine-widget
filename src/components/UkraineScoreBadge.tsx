@@ -54,6 +54,26 @@ function scoreLabel(value: number, lowConfidence: boolean): string {
   return 'Strongly opposed';
 }
 
+/**
+ * FR-43 AC-43.16: continuous red→amber→green color for the
+ * "N actions (M exc)" justification line. Honestly communicates that a
+ * 3-action score is softer evidence than a 40-action score without
+ * changing the score math itself. Same [0,1] confidence signal that
+ * drives the saturation filter, remapped onto a hue gradient:
+ *   0.0 → red   (#c9302c) — almost no data
+ *   0.5 → amber (#b58900) — some data, partial confidence
+ *   1.0 → green (#1b7a3b) — full confidence tier reached
+ */
+function confidenceColorFor(confidence: number): string {
+  const c = Math.max(0, Math.min(1, confidence));
+  // Interpolate through amber midpoint so the gradient reads
+  // correctly against both light-grey (panel) and dim text backgrounds.
+  const r = c < 0.5 ? 201 - Math.round((201 - 181) * (c / 0.5)) : 181 - Math.round((181 - 27) * ((c - 0.5) / 0.5));
+  const g = c < 0.5 ? 48 + Math.round((137 - 48) * (c / 0.5)) : 137 - Math.round((137 - 122) * ((c - 0.5) / 0.5));
+  const b = c < 0.5 ? 44 + Math.round((0 - 44) * (c / 0.5)) : 0 + Math.round((59 - 0) * ((c - 0.5) / 0.5));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 function saturationFilterFor(confidence: number): string {
   const x = 0.2 + 0.8 * Math.max(0, Math.min(1, confidence));
   return `saturate(${Math.round(x * 100) / 100})`;
@@ -374,6 +394,7 @@ export function UkraineScoreBadge({
     const label = scoreLabel(score.score, score.lowConfidence);
     const signed = (score.score >= 0 ? '+' : '') + score.score.toFixed(2);
     const saturation = saturationFilterFor(score.confidence);
+    const confidenceColor = confidenceColorFor(score.confidence);
     const excluded = score.total - score.contributing;
     const justification = (
       <>
@@ -392,7 +413,13 @@ export function UkraineScoreBadge({
       <>
         <div className="viw-score-context-stack">
           <span className="viw-score-label">{label}</span>
-          <span className="viw-score-justification">{justification}</span>
+          <span
+            className="viw-score-justification viw-score-justification-confidence"
+            style={{ color: confidenceColor }}
+            title={`Confidence: ${Math.round(score.confidence * 100)}% (${score.confidenceTier})`}
+          >
+            {justification}
+          </span>
         </div>
         <span
           className="viw-score-value"
