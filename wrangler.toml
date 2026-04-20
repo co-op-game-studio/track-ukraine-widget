@@ -191,37 +191,50 @@ enabled = true
 binding = "ANALYTICS"
 dataset = "voter_info_widget_stg"
 
-# ─── Local preview (wrangler dev) ────────────────────────────────────────────
-[env.preview]
-name = "voter-info-widget-proxy-preview"
+# ─── Preview template (FR-47) — per-branch isolated deploys ────────────────
+# Branch-based preview envs are declared as overrides at `wrangler deploy`
+# time from `.github/workflows/preview.yml`. For each `preview/<slug>`
+# branch CI creates a fresh KV namespace, R2 bucket, and analytics
+# dataset, then invokes:
+#
+#   wrangler deploy \
+#     --env preview-template \
+#     --name voter-info-widget-proxy-preview-<slug> \
+#     --kv-namespace KV_VOTER_INFO=<id> \
+#     --r2-bucket R2_STATIC=<bucket> \
+#     --var ENV_NAME:preview-<slug>
+#
+# The block below only carries defaults that apply to EVERY preview —
+# vars, assets, rate limit. Bindings the CLI provides (KV, R2, analytics)
+# are omitted here on purpose; wrangler will merge the CLI values in.
+[env.preview-template]
+name = "voter-info-widget-proxy-preview-template"
 
-[env.preview.vars]
-ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173"
+[env.preview-template.vars]
+# Previews gate through Cloudflare Access like every other non-prod env
+# (FR-29). PREVIEW_MODE relaxes Origin enforcement so the browser can
+# embed from localhost or from a Fourthwall preview host.
+ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,https://trackukraine.com"
 ALLOW_LOCALHOST = "true"
 PREVIEW_MODE = "true"
-ENV_NAME = "preview"
+# ENV_NAME is overridden per-deploy via --var to "preview-<slug>" so FR-36
+# trace logs + FR-38 analytics correctly attribute traffic to the branch.
+ENV_NAME = "preview-template"
 
-[env.preview.assets]
+[env.preview-template.assets]
 directory = "./dist"
 not_found_handling = "none"
 binding = "ASSETS"
 run_worker_first = true
 
-[[env.preview.kv_namespaces]]
-binding = "KV_VOTER_INFO"
-id = "743b2feda53648cd8242d3b89538bfac"
-
-[[env.preview.r2_buckets]]
-binding = "R2_STATIC"
-bucket_name = "voter-info-widget-archive-dev"
-
-# Preview: 600 req / 60 s / IP — same posture as dev.
-[[env.preview.unsafe.bindings]]
+# Preview rate-limit namespace — each preview deploy overrides this id
+# to a slug-derived offset via --var so concurrent previews don't share a
+# token bucket.
+[[env.preview-template.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1005"
 simple = { limit = 600, period = 60 }
 
-[[env.preview.analytics_engine_datasets]]
-binding = "ANALYTICS"
-dataset = "voter_info_widget_preview"
+[env.preview-template.observability]
+enabled = true
