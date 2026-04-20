@@ -78,7 +78,7 @@ export function buildPreviewHtml(envName: string): string {
     <title>Voter Info Widget — ${envName}</title>
     <style>
       html, body { margin: 0; padding: 0; min-height: 100vh; }
-      body { background: #00b4e6; font-family: "Hanken Grotesk", system-ui, sans-serif; }
+      body { background: #ffffff; font-family: "Hanken Grotesk", system-ui, sans-serif; }
       .viw-env-label {
         position: fixed; top: 8px; right: 8px;
         background: #000; color: #ffd400; padding: 6px 10px; border-radius: 4px;
