@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from 'react';
 import {
   VALENCE_LABEL,
@@ -168,9 +169,17 @@ function BillsBrowser() {
               const key = `${b.congress}-${b.type}-${b.number}`;
               const isOpen = openBill === key;
               const valence = billRowValence(b.direction);
+              // Click anywhere on the bill card's non-interactive areas to
+              // toggle. Interactive descendants (expand button, links)
+              // stopPropagation on their own handlers.
+              const handleBillAreaClick = (e: ReactMouseEvent<HTMLElement>) => {
+                const t = e.target as HTMLElement;
+                if (t.closest('button, a, input, [role="button"]')) return;
+                setOpenBill(isOpen ? null : key);
+              };
               return (
                 <Fragment key={key}>
-                  <tr className={`viw-valence-${valence}`}>
+                  <tr className={`viw-valence-${valence}`} onClick={handleBillAreaClick}>
                     <th scope="row" className="viw-about-bill-cell">
                       <button
                         type="button"
@@ -207,7 +216,7 @@ function BillsBrowser() {
                     <td className="viw-num" data-col="Became law?">{b.becameLaw ? 'Yes' : '—'}</td>
                   </tr>
                   {isOpen && (
-                    <tr>
+                    <tr onClick={handleBillAreaClick}>
                       <td colSpan={3} id={`viw-about-votes-${key}`} className="viw-about-votes-cell">
                         {b.votes.length === 0 ? (
                           <p className="viw-about-no-votes">No roll-call votes tracked for this bill yet.</p>
@@ -379,11 +388,6 @@ export function AboutSystemPanel() {
           </p>
           <BillsBrowser />
 
-          <p className="viw-about-footer-note">
-            Every weight and direction above is auditable in the repository's
-            commit history. The bill set is pre-curated and will be
-            human-reviewed before each release.
-          </p>
         </div>
       )}
     </div>
