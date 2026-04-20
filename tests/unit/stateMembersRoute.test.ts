@@ -111,7 +111,7 @@ describe('AC-32.16 — /api/state-members/ route', () => {
     expect(body.stateCode).toBe('IL');
   });
 
-  it('AC-32.16 — Cache-Control is 24h/24h with SWR=1h', async () => {
+  it('AC-32.16 — Cache-Control is 5 min with SWR=10 min (tightened 2026-04-19 UAT)', async () => {
     const store = {
       'state-members:v1:IL': JSON.stringify(illinoisRecord),
     };
@@ -121,9 +121,12 @@ describe('AC-32.16 — /api/state-members/ route', () => {
       makeCache(),
     );
     const cc = r.headers.get('Cache-Control') ?? '';
-    expect(cc).toContain('max-age=86400');
-    expect(cc).toContain('s-maxage=86400');
-    expect(cc).toContain('stale-while-revalidate=3600');
+    // Dropped from 24h/24h/1h SWR → 5min/5min/10min SWR so curator
+    // republishes (state-members changes frequently during iteration)
+    // propagate within minutes instead of a full day.
+    expect(cc).toContain('max-age=300');
+    expect(cc).toContain('s-maxage=300');
+    expect(cc).toContain('stale-while-revalidate=600');
   });
 
   it('AC-32.16 — 404 `state_members_not_found` on missing key', async () => {

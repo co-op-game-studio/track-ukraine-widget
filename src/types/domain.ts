@@ -1,5 +1,16 @@
 /** Core domain types — see docs/spec.md §6 Data Dictionary */
 
+/** Social-media handles sourced from the unitedstates/congress-legislators
+ *  dataset (FR-48). Each field is a human-readable handle; the widget
+ *  builds the canonical URL at render time. `_id` variants from the
+ *  upstream feed are dropped — we only need handles. */
+export interface MemberSocials {
+  twitter?: string;
+  facebook?: string;
+  youtube?: string;
+  instagram?: string;
+}
+
 export interface Representative {
   bioguideId: string;
   name: string;
@@ -19,6 +30,9 @@ export interface Representative {
    *  from the Congress.gov member profile). Optional — older KV records
    *  predate this field. */
   yearEntered?: number;
+  /** Social-media handles (FR-48). Optional — older KV records predate
+   *  this field; members may also legitimately have zero social accounts. */
+  socials?: MemberSocials;
 }
 
 export type VoteCast = 'Aye' | 'Nay' | 'Present' | 'Not Voting' | 'Did Not Serve';

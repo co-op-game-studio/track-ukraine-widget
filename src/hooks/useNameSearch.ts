@@ -18,6 +18,16 @@ export interface NameSearchResult {
   party: string;
   photoUrl?: string | null;
   searchKeys: string[];
+  /** Year member first entered Congress. Absent on older shards; the
+   *  chip renders without the "Since YYYY" row when missing. */
+  yearEntered?: number;
+  /** Social-media handles (FR-48). */
+  socials?: {
+    twitter?: string;
+    facebook?: string;
+    youtube?: string;
+    instagram?: string;
+  };
 }
 
 export type NameSearchStatus = 'idle' | 'loading' | 'success' | 'error' | 'unavailable';

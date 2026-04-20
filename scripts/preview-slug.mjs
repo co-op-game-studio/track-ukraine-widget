@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * Derive a Cloudflare-safe preview slug from a branch name. Used by the
  * preview deploy workflow (FR-47 AC-47.1, AC-47.5).

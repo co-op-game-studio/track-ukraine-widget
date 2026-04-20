@@ -26,6 +26,14 @@ export interface MemberProfile {
   /** Year the member first entered Congress (earliest term.startYear).
    *  Optional — older KV records predate this field. */
   yearEntered?: number;
+  /** Social-media handles (FR-48) sourced from
+   *  unitedstates/congress-legislators. Optional. */
+  socials?: {
+    twitter?: string;
+    facebook?: string;
+    youtube?: string;
+    instagram?: string;
+  };
   generatedAt: string;
   schemaVersion: number;
 }

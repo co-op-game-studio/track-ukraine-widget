@@ -141,8 +141,10 @@ describe('VoteList \u2014 obstruction + procedural tagging', () => {
       primary: row(vote(48, 'passage', 1.0), 'Aye', 'voted-pro', false),
       procedural: [],
     };
-    render(<VoteList clusters={[cluster]} />);
-    expect(screen.getByText(/HR\./)).toBeInTheDocument();
-    expect(screen.getByText(/815/)).toBeInTheDocument();
+    const { container } = render(<VoteList clusters={[cluster]} />);
+    // Slug uses the unified formatBillSlug helper: "HR 815" (no period
+    // after House types). Matches About panel + score-breakdown panel.
+    const slug = container.querySelector('.viw-votelist-billslug')?.textContent;
+    expect(slug).toBe('HR 815');
   });
 });

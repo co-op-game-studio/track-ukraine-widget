@@ -55,6 +55,7 @@ function toRepresentative(summary: StateMemberSummary): Representative {
     isNonVoting: summary.isNonVoting ?? false,
     officialWebsiteUrl: summary.website,
     yearEntered: summary.yearEntered,
+    socials: summary.socials,
   };
 }
 
