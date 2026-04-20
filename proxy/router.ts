@@ -10,7 +10,16 @@
  * invokes `dispatch`, then applies the FR-27 security-header baseline
  * to whatever the handler returned.
  *
- * Traces: FR-42 AC-42.1, AC-42.4. FR-27 AC-27.1. FR-44.
+ * Observability (T-103, 2026-04-19): `handleFetch` runs a single trace /
+ * analytics / log middleware around `dispatch`. Every outbound response —
+ * from every code path — carries `X-Trace-Id`, emits one Analytics Engine
+ * data point, and on non-2xx emits one `logEvent`. Previously only the
+ * tiered-cache pipeline did any of this, which meant KV-backed routes,
+ * origin-denials, rate-limits, and static HTML were invisible to
+ * Cloudflare Logpush / Analytics.
+ *
+ * Traces: FR-42 AC-42.1, AC-42.4. FR-27 AC-27.1. FR-36 AC-36.2. FR-38
+ * AC-38.2. FR-39 AC-39.2. FR-44.
  */
 import type { ProxyEnv, CacheLike } from './env';
 import type { DispatchResult, WaitUntilLike } from './routes/common';
@@ -32,6 +41,46 @@ import { handleRollCallRoster } from './routes/api-roll-call-rosters';
 import { handleStateMembers } from './routes/api-state-members';
 import { handleApi } from './routes/api-upstream';
 import { buildEmbedHtml, buildPreviewHtml } from './routes/preview';
+import { resolveTraceId, TRACE_HEADER } from './observability/trace';
+import { logEvent } from './observability/log';
+import {
+  writeAnalyticsPoint,
+  type UpstreamNameLabel,
+  type CacheTierLabel,
+} from './observability/analytics';
+
+/** Classify a URL pathname into the analytics `routeClass` blob value. */
+function classifyRoute(url: URL): string {
+  const p = url.pathname;
+  const kv = p.match(/^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search)\b/);
+  if (kv) return kv[1]!;
+  if (p.startsWith('/api/census/')) return 'census';
+  if (p.startsWith('/api/congress/')) return 'congress-upstream';
+  if (p.startsWith('/api/senate/')) return 'senate-upstream';
+  if (p.startsWith('/api/')) return 'api-other';
+  if (p === '/embed' || p === '/embed/') return 'embed-html';
+  if (p === '/' || p === '') return 'root';
+  return 'asset-or-404';
+}
+
+function classifyUpstream(routeClass: string): UpstreamNameLabel {
+  if (routeClass === 'census') return 'census';
+  if (routeClass === 'congress-upstream') return 'congress';
+  if (routeClass === 'senate-upstream') return 'senate';
+  return 'none';
+}
+
+/** Map an HTTP status + path to the AC-37.2 error code vocabulary. */
+function errorCodeFor(status: number): string {
+  if (status >= 200 && status < 300) return 'ok';
+  if (status === 304) return 'ok';
+  if (status === 403) return 'origin_not_allowed';
+  if (status === 404) return 'not_found';
+  if (status === 405) return 'method_not_allowed';
+  if (status === 429) return 'rate_limited';
+  if (status >= 500) return 'upstream_error';
+  return 'invalid_request';
+}
 
 /**
  * Default fetch handler. Called per-request; stateless; pure over its
@@ -39,6 +88,11 @@ import { buildEmbedHtml, buildPreviewHtml } from './routes/preview';
  *
  * Every response is funneled through `applySecurityHeaders` with its
  * shape so the AC-27.1 baseline is guaranteed regardless of control flow.
+ *
+ * Observability middleware (T-103): resolve trace ID once, stamp on
+ * response, emit analytics + log on exit. Error paths get one log event
+ * at level=warn (4xx) or error (5xx); success paths are silent per
+ * AC-39.3.
  */
 export async function handleFetch(
   request: Request,
@@ -46,8 +100,91 @@ export async function handleFetch(
   cache: CacheLike,
   ctx: WaitUntilLike = { waitUntil: () => {} },
 ): Promise<Response> {
-  const { response, shape } = await dispatch(request, env, cache, ctx);
-  return applySecurityHeaders(response, shape);
+  const started = Date.now();
+  const url = new URL(request.url);
+  const traceId = resolveTraceId(request);
+  const envLabel = env.ENV_NAME ?? 'prod';
+  const routeClass = classifyRoute(url);
+  const upstreamName = classifyUpstream(routeClass);
+  const redactList = env.CONGRESS_API_KEY ? [env.CONGRESS_API_KEY] : undefined;
+
+  let response: Response;
+  let shape;
+  try {
+    const dispatched = await dispatch(request, env, cache, ctx);
+    response = dispatched.response;
+    shape = dispatched.shape;
+  } catch (err) {
+    // Handler threw — convert to a 500 with the trace ID so the operator
+    // can correlate. This is a belt-and-suspenders catch; individual
+    // handlers already catch their own errors.
+    logEvent(
+      { env: envLabel, traceId, redactList },
+      { event: 'router_unhandled_error', level: 'error', routeClass, message: (err as Error)?.message ?? String(err) },
+    );
+    response = new Response('Internal error', { status: 500 });
+    shape = 'worker-emitted' as const;
+  }
+
+  const withHeaders = applySecurityHeaders(response, shape);
+
+  // Stamp X-Trace-Id on every response (FR-36 AC-36.2). `applySecurityHeaders`
+  // doesn't touch X-Trace-Id, but `stripFingerprintingHeaders` (called deep
+  // in api-upstream for origin responses) does — so we set AFTER the full
+  // dispatch pipeline has returned.
+  const finalHeaders = new Headers(withHeaders.headers);
+  finalHeaders.set(TRACE_HEADER, traceId);
+  const finalResponse = new Response(withHeaders.body, {
+    status: withHeaders.status,
+    statusText: withHeaders.statusText,
+    headers: finalHeaders,
+  });
+
+  // Analytics point — one per request, whatever the status (AC-38.2).
+  const cacheTier: CacheTierLabel = classifyCacheTier(finalHeaders);
+  writeAnalyticsPoint(env.ANALYTICS, ctx, {
+    routeClass,
+    upstreamName,
+    errorCode: errorCodeFor(finalResponse.status),
+    env: envLabel,
+    cacheTier,
+    totalLatencyMs: Date.now() - started,
+    upstreamLatencyMs: 0, // populated only on cache-pipeline paths today
+    statusCode: finalResponse.status,
+    rateLimitRemaining: -1,
+    traceId,
+  });
+
+  // Log line on non-2xx — AC-39.2. Success is silent (AC-39.3).
+  if (finalResponse.status >= 400) {
+    const level = finalResponse.status >= 500 ? 'error' : 'warn';
+    logEvent(
+      { env: envLabel, traceId, redactList },
+      {
+        event: 'request_non_2xx',
+        level,
+        routeClass,
+        upstreamName,
+        status: finalResponse.status,
+        method: request.method,
+        path: url.pathname,
+      },
+    );
+  }
+
+  return finalResponse;
+}
+
+/** Inspect the outbound headers to label which cache tier served this. */
+function classifyCacheTier(headers: Headers): CacheTierLabel {
+  const cacheHeader = headers.get('X-Cache') ?? headers.get('X-Proxy-Cache') ?? '';
+  const tierHeader = headers.get('X-Cache-Tier') ?? '';
+  if (tierHeader === 'edge' || tierHeader === 'kv' || tierHeader === 'r2' || tierHeader === 'upstream') {
+    return tierHeader;
+  }
+  if (cacheHeader === 'HIT') return 'edge';
+  if (cacheHeader === 'MISS') return 'upstream';
+  return 'n/a';
 }
 
 export async function dispatch(
