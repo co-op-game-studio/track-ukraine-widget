@@ -9,7 +9,7 @@
  *
  * Traces to: US-7 AC-7.1 (revised), AC-7.8, US-8, US-9 (design system).
  */
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Representative } from '../types/domain';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
 import { stateCodeToName } from '../utils/fipsMap';
@@ -18,11 +18,11 @@ export interface MemberChipProps {
   representative: Representative;
   selected: boolean;
   onClick: () => void;
-  /** Base URL for the Worker's /api/*. When present and the member has no
-   *  yearEntered yet, the chip lazily fetches it from /api/members/{id}
-   *  so the subtitle can render "U.S. Senator · since YYYY". Older KV
-   *  shards pre-date the field, so this fallback fills the gap without
-   *  blocking a KV republish. */
+  /** Unused by the chip itself — kept in the prop shape so callers
+   *  (ResultsPanel, NameSearchResultsPanel) can pass the harness
+   *  apiBase without a type error if we later need server-side data
+   *  enrichment. All chip data is expected to come pre-filled on the
+   *  Representative prop from the parent's KV fetch. */
   apiBase?: string;
 }
 
@@ -33,15 +33,13 @@ function partyCssClass(abbr: string): string {
 }
 
 function subtitle(rep: Representative): string {
-  const base =
-    rep.chamber === 'senate' ? 'U.S. Senator' :
-    rep.isNonVoting ? 'Delegate (non-voting)' :
-    rep.district == null ? 'U.S. Representative' :
-    `District ${rep.district}`;
-  return rep.yearEntered ? `${base} · since ${rep.yearEntered}` : base;
+  if (rep.chamber === 'senate') return 'U.S. Senator';
+  if (rep.isNonVoting) return 'Delegate (non-voting)';
+  if (rep.district == null) return 'U.S. Representative';
+  return `District ${rep.district}`;
 }
 
-export function MemberChip({ representative, selected, onClick, apiBase }: MemberChipProps) {
+export function MemberChip({ representative, selected, onClick }: MemberChipProps) {
   const partyClass = partyCssClass(representative.partyAbbreviation);
   const partyUpper = representative.party.toUpperCase();
   const sanitizedUrl = sanitizeUrl(representative.photoUrl);
@@ -50,38 +48,6 @@ export function MemberChip({ representative, selected, onClick, apiBase }: Membe
   // never render as the browser's default broken-image glyph.
   const [imgFailed, setImgFailed] = useState(false);
   const showImage = sanitizedUrl && !imgFailed;
-
-  // Lazy yearEntered enrichment: if the incoming Representative doesn't
-  // carry the field (older KV shard), fetch it from /api/members/{id}
-  // once and stash locally so the subtitle can render "since YYYY".
-  const [enrichedYear, setEnrichedYear] = useState<number | undefined>(
-    representative.yearEntered,
-  );
-  useEffect(() => {
-    // Reset when the representative prop changes so stale year doesn't
-    // leak across chip instances (React reuses this component across
-    // re-renders of the chip grid).
-    setEnrichedYear(representative.yearEntered);
-    if (representative.yearEntered != null) return;
-    if (apiBase == null) return;
-    if (!representative.bioguideId) return;
-    const base = apiBase.replace(/\/+$/, '');
-    let cancelled = false;
-    fetch(`${base}/api/members/${encodeURIComponent(representative.bioguideId)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((p: { yearEntered?: number } | null) => {
-        if (!cancelled && p?.yearEntered) setEnrichedYear(p.yearEntered);
-      })
-      .catch(() => { /* swallow — chip still renders without it */ });
-    return () => { cancelled = true; };
-  }, [representative.bioguideId, representative.yearEntered, apiBase]);
-
-  // Subtitle prefers the enriched value (merges client + KV) so we get
-  // the fill-in without mutating the incoming prop.
-  const repForSubtitle: Representative =
-    enrichedYear !== representative.yearEntered
-      ? { ...representative, yearEntered: enrichedYear }
-      : representative;
 
   return (
     <button
@@ -118,10 +84,13 @@ export function MemberChip({ representative, selected, onClick, apiBase }: Membe
           space-between` on the chip root pins this to the bottom edge so
           short-name and long-name tiles share a common baseline. */}
       <div className="viw-chip-footer">
-        <div className="viw-chip-subtitle">{subtitle(repForSubtitle)}</div>
+        <div className="viw-chip-subtitle">{subtitle(representative)}</div>
         <div className="viw-chip-state">
           {stateCodeToName(representative.state) ?? representative.state}
         </div>
+        {representative.yearEntered != null && (
+          <div className="viw-chip-since">Since {representative.yearEntered}</div>
+        )}
         <div className={`viw-chip-party viw-chip-party-${partyClass}`}>{partyUpper}</div>
       </div>
     </button>

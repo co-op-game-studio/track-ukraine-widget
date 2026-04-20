@@ -36,7 +36,11 @@ export async function handleStateMembers(
   }
   const headers = new Headers(corsHeaders(origin));
   headers.set('Content-Type', 'application/json; charset=utf-8');
-  headers.set('Cache-Control', 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=3600');
+  // Shorter cache so curator republishes (state-members is frequent
+  // during iteration) propagate within minutes, not a day. KV read
+  // costs stay cheap because CF still serves from edge for 5 min +
+  // stale-while-revalidate for another 10.
+  headers.set('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=600');
   return {
     response: new Response(request.method === 'HEAD' ? null : (record as string), {
       status: 200,

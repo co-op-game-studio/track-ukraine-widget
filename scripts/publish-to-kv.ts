@@ -143,6 +143,13 @@ interface CuratedBill {
   votes?: CuratedVote[];
 }
 
+interface MemberSocials {
+  twitter?: string;
+  facebook?: string;
+  youtube?: string;
+  instagram?: string;
+}
+
 interface NameIndexEntry {
   bioguideId: string;
   displayName: string;
@@ -156,6 +163,15 @@ interface NameIndexEntry {
   party: string;
   photoUrl: string | null;
   searchKeys: string[];
+  /** Earliest term start year — populated via the per-member detail
+   *  endpoint during the curator build. Matches state-members:v1:*
+   *  so every chip (address-lookup AND name-search origin) renders
+   *  "Since YYYY" from the initial shard payload. Optional on older
+   *  shards; the widget treats missing as "don't render the row." */
+  yearEntered?: number;
+  /** Social-media handles (FR-48) — sourced from
+   *  unitedstates/congress-legislators. */
+  socials?: MemberSocials;
 }
 
 // ─── Fetch current-Congress members from Congress.gov ────────────────────────
@@ -173,6 +189,84 @@ async function fetchAllCurrentMembers(): Promise<CongressMemberListEntry[]> {
     offset += PAGE;
   }
   return out;
+}
+
+/**
+ * FR-48 — fetch social-media handles from the
+ * unitedstates/congress-legislators dataset. One HTTP request, joined by
+ * bioguide id. Transient failures are logged but do not fail the curator
+ * run (per AC-48.1).
+ */
+async function fetchSocialsMap(): Promise<Map<string, MemberSocials>> {
+  const result = new Map<string, MemberSocials>();
+  const url = 'https://unitedstates.github.io/congress-legislators/legislators-social-media.json';
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.warn(`  FR-48 socials fetch: ${res.status} — continuing with empty map`);
+      return result;
+    }
+    const body = (await res.json()) as Array<{
+      id?: { bioguide?: string };
+      social?: Record<string, unknown>;
+    }>;
+    for (const entry of body) {
+      const bid = entry.id?.bioguide;
+      if (!bid || !entry.social) continue;
+      const s: MemberSocials = {};
+      if (typeof entry.social.twitter === 'string')   s.twitter = entry.social.twitter;
+      if (typeof entry.social.facebook === 'string')  s.facebook = entry.social.facebook;
+      if (typeof entry.social.youtube === 'string')   s.youtube = entry.social.youtube;
+      if (typeof entry.social.instagram === 'string') s.instagram = entry.social.instagram;
+      if (Object.keys(s).length > 0) result.set(bid, s);
+    }
+  } catch (err) {
+    console.warn(`  FR-48 socials fetch threw: ${(err as Error).message} — continuing with empty map`);
+  }
+  return result;
+}
+
+/**
+ * Per-member detail fetch — the list endpoint's `terms.item.startYear`
+ * is only populated for the CURRENT term (confirmed empirically
+ * 2026-04-19), so to get a member's earliest term-start-year we have
+ * to hit `/v3/member/{bioguideId}` which returns the full `terms`
+ * array. Batched with bounded concurrency so we respect the 5000/hr
+ * rate limit.
+ */
+async function fetchYearEnteredMap(members: CongressMemberListEntry[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  const CONCURRENCY = 8;
+  let idx = 0;
+  async function worker(): Promise<void> {
+    while (true) {
+      const i = idx++;
+      if (i >= members.length) return;
+      const bid = members[i]!.bioguideId;
+      try {
+        const url = `https://api.congress.gov/v3/member/${bid}?format=json&api_key=${CONGRESS_API_KEY}`;
+        const res = await fetch(url);
+        if (!res.ok) continue; // skip silently — chip falls back to no "since" row
+        const body = (await res.json()) as {
+          member?: { terms?: { item?: { startYear?: number }[] } | { startYear?: number }[] };
+        };
+        const rawTerms = body.member?.terms;
+        const terms = Array.isArray(rawTerms) ? rawTerms : (rawTerms?.item ?? []);
+        let earliest: number | undefined;
+        for (const t of terms) {
+          if (typeof t.startYear === 'number') {
+            if (earliest === undefined || t.startYear < earliest) earliest = t.startYear;
+          }
+        }
+        if (earliest !== undefined) result.set(bid, earliest);
+      } catch {
+        /* skip on transient failure */
+      }
+    }
+  }
+  const workers = Array.from({ length: CONCURRENCY }, () => worker());
+  await Promise.all(workers);
+  return result;
 }
 
 function partyLetter(partyName: string): string {
@@ -301,6 +395,23 @@ async function mapWithConcurrency<T, R>(
   const members = await fetchAllCurrentMembers();
   console.log(`Fetched ${members.length} current members`);
 
+  // 2b. Fetch per-member earliest-term year. The list endpoint only
+  // returns the current term's startYear, so we need the detail endpoint
+  // to compute "serving since YYYY" for each member. Feeds BOTH the
+  // name-index and the state-members shards so every chip (address-
+  // lookup AND name-search origin) has the field. Bounded concurrency.
+  console.log('Fetching per-member term histories for yearEntered...');
+  const t0 = Date.now();
+  const yearEnteredMap = await fetchYearEnteredMap(members);
+  console.log(`  got yearEntered for ${yearEnteredMap.size}/${members.length} members in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+
+  // FR-48 — social handles from the unitedstates/congress-legislators
+  // dataset. Joined by bioguide id so we can stamp into member-profile,
+  // state-members, and name-index shards in the same trip.
+  console.log('Fetching social-media handles (unitedstates/congress-legislators)...');
+  const socialsMap = await fetchSocialsMap();
+  console.log(`  got socials for ${socialsMap.size} members`);
+
   // ─── Build record collections ─────────────────────────────────────────────
 
   const billRecords = new Map<string, unknown>();
@@ -370,6 +481,8 @@ async function mapWithConcurrency<T, R>(
       party: partyLetter(m.partyName),
       photoUrl: m.depiction?.imageUrl ?? null,
       searchKeys,
+      yearEntered: yearEnteredMap.get(m.bioguideId),
+      socials: socialsMap.get(m.bioguideId),
     };
 
     const letters = new Set<string>();
@@ -479,6 +592,7 @@ async function mapWithConcurrency<T, R>(
       website: string | null;
       isNonVoting?: boolean;
       yearEntered?: number;
+      socials?: MemberSocials;
     }
     const grouped = new Map<string, { senators: MemberSummary[]; house: MemberSummary[] }>();
     for (const m of members) {
@@ -490,12 +604,17 @@ async function mapWithConcurrency<T, R>(
       if (!first || !last) continue;
       const stateCode = latestTerm?.stateCode ?? STATE_NAME_TO_CODE[m.state] ?? m.state;
       if (!/^[A-Z]{2}$/.test(stateCode)) continue; // skip junk states
-      // Earliest term start year = year member first entered office.
-      let yearEntered: number | undefined;
-      for (const t of termItems) {
-        if (typeof t.startYear === 'number') {
-          if (yearEntered === undefined || t.startYear < yearEntered) {
-            yearEntered = t.startYear;
+      // Earliest term start year. The list-endpoint's termItems only
+      // include the CURRENT term's startYear, so prefer the per-member-
+      // detail-endpoint-computed map when available; fall back to the
+      // list-scoped local scan otherwise.
+      let yearEntered: number | undefined = yearEnteredMap.get(m.bioguideId);
+      if (yearEntered === undefined) {
+        for (const t of termItems) {
+          if (typeof t.startYear === 'number') {
+            if (yearEntered === undefined || t.startYear < yearEntered) {
+              yearEntered = t.startYear;
+            }
           }
         }
       }
@@ -511,6 +630,7 @@ async function mapWithConcurrency<T, R>(
         photoUrl: m.depiction?.imageUrl ?? null,
         website: null, // Not in the member-list response; would require per-member detail fetch.
         yearEntered,
+        socials: socialsMap.get(m.bioguideId),
       };
       // Detect non-voting delegates: territories (AS/GU/MP/PR/VI) + DC are
       // House delegates but do not cast floor votes.

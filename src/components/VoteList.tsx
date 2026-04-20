@@ -127,8 +127,7 @@ function VoteRow({
       <td className="viw-votelist-bill" data-label="Bill & Vote">
         <div className="viw-votelist-billnum">
           {row.bill.featured && <span className="viw-billlist-featured" aria-hidden>★</span>}
-          {row.bill.type === 'HRES' || row.bill.type === 'SRES' ? '' : ''}
-          {row.bill.type}. {row.bill.number}
+          <span className="viw-votelist-billslug">{formatBillSlug(row.bill.type, row.bill.number)}</span>
           <span className="viw-vote-chamber-tag">{row.vote.chamber}</span>
           {row.vote.weight > 0 && row.vote.weight < 0.5 && (
             <span className="viw-vote-weight-tag" title="Procedural — low weight">
@@ -169,7 +168,9 @@ function VoteRow({
         </span>
       </td>
       <td className="viw-vote-outcome" data-label="Outcome">
-        {row.bill.becameLaw ? 'Became law' : shortenAction(row.vote.action)}
+        {isPrimary && row.bill.becameLaw
+          ? 'Became law'
+          : shortenAction(row.vote.action)}
       </td>
     </tr>
   );
@@ -179,6 +180,18 @@ function VoteRow({
 
 function valenceCss(v: Valence): string {
   return v.replace('-', '-'); // keeps original for clarity; class is viw-valence-${v}
+}
+
+/** House bills print without a period after the type; Senate variants
+ *  get the conventional `S.` form. Matches the score-breakdown panel +
+ *  About panel formatBillSlug, so every slug rendered in the widget
+ *  reads consistently. */
+function formatBillSlug(type: string, number: string): string {
+  const t = type.toUpperCase();
+  if (t === 'S' || t === 'SRES' || t === 'SJRES' || t === 'SCONRES') {
+    return `${t.replace('S', 'S.').replace('..', '.')} ${number}`;
+  }
+  return `${t} ${number}`;
 }
 
 function displayPosition(row: MemberVoteRow): string {

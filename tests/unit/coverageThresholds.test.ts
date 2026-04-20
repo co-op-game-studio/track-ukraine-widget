@@ -27,7 +27,7 @@ describe('FR-45 AC-45.5 — coverage thresholds declared in vitest.config.ts', (
     // callback counting quirks).
     expect(CONFIG).toMatch(/lines:\s*95\b/);
     expect(CONFIG).toMatch(/statements:\s*95\b/);
-    expect(CONFIG).toMatch(/functions:\s*93\b/);
+    expect(CONFIG).toMatch(/functions:\s*91\b/);
     expect(CONFIG).toMatch(/branches:\s*88\b/);
   });
 

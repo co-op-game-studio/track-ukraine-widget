@@ -5,7 +5,7 @@
  *
  * Traces to: US-2, US-3, US-4, US-5, US-7, US-8 (v2.2.0), US-9 (design).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import type { Representative } from '../types/domain';
 import { stateCodeToName } from '../utils/fipsMap';
 import { useVotingRecord } from '../hooks/useVotingRecord';
@@ -32,12 +32,79 @@ function partyCssClass(abbr: string): string {
 }
 
 function chamberLabel(rep: Representative): string {
-  const base =
-    rep.chamber === 'senate' ? 'U.S. Senator' :
-    rep.isNonVoting ? 'U.S. Delegate (non-voting)' :
-    rep.district == null ? 'U.S. Representative' :
-    `U.S. Representative · District ${rep.district}`;
-  return rep.yearEntered ? `${base} · since ${rep.yearEntered}` : base;
+  if (rep.chamber === 'senate') return 'U.S. Senator';
+  if (rep.isNonVoting) return 'U.S. Delegate (non-voting)';
+  if (rep.district == null) return 'U.S. Representative';
+  return `U.S. Representative · District ${rep.district}`;
+}
+
+/** FR-48: render socials as a row of icon-links beneath the Official
+ *  Website button. Only present handles render; missing platforms are
+ *  skipped entirely (AC-48.4). URLs pass through sanitizeUrl at the
+ *  render boundary (AC-31.1). */
+const SOCIAL_ICONS: Record<string, ReactElement> = {
+  twitter: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor">
+      <path d="M22.46 6c-.77.35-1.6.58-2.46.69.88-.53 1.56-1.37 1.88-2.38-.83.5-1.75.86-2.72 1.05C18.37 4.5 17.26 4 16 4c-2.35 0-4.27 1.92-4.27 4.29 0 .34.04.67.11.98C8.28 9.09 5.11 7.38 3 4.79c-.37.63-.58 1.37-.58 2.15 0 1.49.75 2.81 1.91 3.56-.71 0-1.37-.2-1.95-.5v.03c0 2.08 1.48 3.82 3.44 4.21a4.22 4.22 0 0 1-1.93.07 4.28 4.28 0 0 0 4 2.98 8.52 8.52 0 0 1-5.33 1.84c-.34 0-.68-.02-1.02-.06C3.44 20.29 5.7 21 8.12 21 16 21 20.33 14.46 20.33 8.79c0-.19 0-.37-.01-.56.84-.6 1.56-1.36 2.14-2.23z" />
+    </svg>
+  ),
+  facebook: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor">
+      <path d="M13.5 21v-7.5h2.5l.4-3H13.5v-2c0-.8.3-1.4 1.4-1.4H16.5V4.3c-.3 0-1.2-.1-2.3-.1-2.3 0-3.7 1.4-3.7 3.9v2.4H8v3h2.5V21h3z" />
+    </svg>
+  ),
+  youtube: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor">
+      <path d="M23 12s0-3.7-.5-5.4a2.8 2.8 0 0 0-2-2C18.8 4 12 4 12 4s-6.8 0-8.5.6a2.8 2.8 0 0 0-2 2C1 8.3 1 12 1 12s0 3.7.5 5.4a2.8 2.8 0 0 0 2 2c1.7.6 8.5.6 8.5.6s6.8 0 8.5-.6a2.8 2.8 0 0 0 2-2c.5-1.7.5-5.4.5-5.4zM10 15.5v-7l6 3.5-6 3.5z" />
+    </svg>
+  ),
+  instagram: (
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+};
+
+function SocialsRow({ name, socials }: { name: string; socials?: Representative['socials'] }) {
+  if (!socials) return null;
+  const links: Array<{ platform: string; key: string; url: string }> = [];
+  if (socials.twitter) {
+    const url = sanitizeUrl(`https://twitter.com/${encodeURIComponent(socials.twitter)}`);
+    if (url) links.push({ platform: 'Twitter', key: 'twitter', url });
+  }
+  if (socials.facebook) {
+    const url = sanitizeUrl(`https://facebook.com/${encodeURIComponent(socials.facebook)}`);
+    if (url) links.push({ platform: 'Facebook', key: 'facebook', url });
+  }
+  if (socials.youtube) {
+    const url = sanitizeUrl(`https://youtube.com/@${encodeURIComponent(socials.youtube)}`);
+    if (url) links.push({ platform: 'YouTube', key: 'youtube', url });
+  }
+  if (socials.instagram) {
+    const url = sanitizeUrl(`https://instagram.com/${encodeURIComponent(socials.instagram)}`);
+    if (url) links.push({ platform: 'Instagram', key: 'instagram', url });
+  }
+  if (links.length === 0) return null;
+  return (
+    <div className="viw-detail-socials" role="list" aria-label={`${name}'s social media accounts`}>
+      {links.map(({ platform, key, url }) => (
+        <a
+          key={platform}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`viw-detail-social viw-detail-social-${key}`}
+          aria-label={`${name} on ${platform}`}
+          title={platform}
+          role="listitem"
+        >
+          {SOCIAL_ICONS[key]}
+        </a>
+      ))}
+    </div>
+  );
 }
 
 export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) {
@@ -134,17 +201,23 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
               </span>
               <span className="viw-detail-state">{stateName}</span>
               <span className="viw-detail-chamber">{chamberLabel(enriched)}</span>
+              {enriched.yearEntered != null && (
+                <span className="viw-detail-since">Serving since {enriched.yearEntered}</span>
+              )}
             </div>
-            {sanitizeUrl(enriched.officialWebsiteUrl) && (
-              <a
-                href={sanitizeUrl(enriched.officialWebsiteUrl)!}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="viw-detail-link"
-              >
-                Official website ↗
-              </a>
-            )}
+            <div className="viw-detail-links-row">
+              {sanitizeUrl(enriched.officialWebsiteUrl) && (
+                <a
+                  href={sanitizeUrl(enriched.officialWebsiteUrl)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="viw-detail-link"
+                >
+                  Official website ↗
+                </a>
+              )}
+              <SocialsRow name={enriched.name} socials={enriched.socials} />
+            </div>
           </div>
         </div>
         <button type="button" className="viw-detail-close" onClick={onClose} aria-label="Close detail panel">

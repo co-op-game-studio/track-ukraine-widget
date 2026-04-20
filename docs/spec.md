@@ -1203,6 +1203,47 @@ See `docs/deployment.md` for the concrete setup playbook.
 
 **Out of scope:** per-branch DNS automation (`*.preview.vote.cogs.it.com`), Access policy automation (human task), cross-branch data sharing (each preview is a cold start), custom domain per preview.
 
+### FR-48: Member Social Media Links (NEW 2026-04-19 UAT)
+
+**Problem.** The detail panel currently shows a single "Official website" link. Voters habitually check a member's social accounts (Twitter/X, YouTube, Facebook, Instagram) to get a feel for the member's public stance on Ukraine and to follow ongoing statements. Congress.gov's API does not expose social handles, so we have to source them from elsewhere.
+
+**Solution.** Pull from the community-maintained `unitedstates/congress-legislators` dataset — specifically `https://unitedstates.github.io/congress-legislators/legislators-social-media.json`. This is the de-facto source used by GovTrack, ProPublica, and most civic-tech projects. Fetch once per curator run, join against bioguide IDs, ship into the KV shards that feed the widget.
+
+**Data model:**
+
+```ts
+interface MemberSocials {
+  twitter?: string;   // screen name, no @ prefix
+  facebook?: string;  // page slug
+  youtube?: string;   // channel slug
+  instagram?: string; // handle
+}
+```
+
+`youtube_id`, `twitter_id`, `instagram_id` from the upstream feed are ignored — we only need human-readable handles to construct URLs at render time. Bluesky is not in the upstream dataset as of 2026-04; we can add it when it appears.
+
+**URL construction (render-time, in the widget):**
+
+- Twitter/X → `https://x.com/{handle}`
+- Facebook → `https://facebook.com/{slug}`
+- YouTube → `https://youtube.com/@{slug}` (legacy `/user/{slug}` redirects)
+- Instagram → `https://instagram.com/{handle}`
+
+All passed through `sanitizeUrl` (AC-31.1). All links render with `target="_blank" rel="noopener noreferrer"`.
+
+**Acceptance criteria:**
+
+- AC-48.1: `scripts/publish-to-kv.ts` SHALL fetch `https://unitedstates.github.io/congress-legislators/legislators-social-media.json` once per run, parse to a `Map<bioguideId, MemberSocials>`, and log the count. Transient failures (non-2xx, parse error, network timeout) SHALL NOT fail the curator run — log a warning and continue with an empty map.
+- AC-48.2: The `socials` field (optional) SHALL land on the `MemberProfile` KV record (`member:v1:*`), the `StateMemberSummary` (`state-members:v1:*`), and the `NameIndexEntry` (`name-index:v1:*`) shards. Same-trip fetch — no separate KV prefix, no separate route.
+- AC-48.3: `src/types/domain.ts#Representative` SHALL carry an optional `socials?: MemberSocials` field. Every transform in `useAddressLookup`, `useNameSearch`, and `RepDetail`'s enrichment path SHALL thread it through.
+- AC-48.4: `src/components/RepDetail.tsx` SHALL render a `.viw-detail-socials` row of icon-links below the Official Website button when any social handle is present. Each icon SHALL be a recognizable glyph (unicode or inline SVG — pick whichever keeps the bundle lean), with `aria-label="{Member name} on {Platform}"` for screen readers. Missing handles SHALL NOT render an empty slot; only the present platforms show.
+- AC-48.5: The social-links row SHALL NOT render on the overview MemberChip grid — it's a detail-only affordance. Chips stay visually compact.
+- AC-48.6: A cache-bust parameter SHALL NOT be added to the upstream social-media-data URL; the unitedstates.github.io source has its own CDN + git-backed versioning.
+- AC-48.7: Tests SHALL cover:
+  - `RepDetail` renders one link per present handle, zero links when `socials` is undefined or empty
+  - `RepDetail` does NOT render a broken `href` when a handle is present but malformed (sanitizeUrl returns null)
+  - The publish-to-kv integration: a fixture social-media JSON feeds into a mocked curator run and the resulting `MemberProfile.socials` shape matches AC-48.3
+
 ### NFR-7: Documentation Secret-Leakage (NEW 2026-04-19 UAT)
 
 - NFR-7.1: `docs/**`, `.github/**`, and any tracked workflow SHALL NOT contain:

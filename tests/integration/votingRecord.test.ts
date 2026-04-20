@@ -110,8 +110,16 @@ describe('useVotingRecord (v2.5.2 \u2014 KV roll-call rosters)', () => {
       expect(clusters.length).toBeGreaterThan(0);
       expect(flat.length).toBeGreaterThan(0);
       expect(clusters.length).toBeLessThanOrEqual(flat.length);
+      // Invariant: each procedural vote must have weight ≤ primary, UNLESS
+      // the primary is a `concur` (conference report) vote on a bill that
+      // became law. In that case the concur takes precedence over the
+      // initial-passage vote even though its weight (0.9) is lower than
+      // passage (1.0). See voteClustering.ts primary-selection rule.
       for (const c of clusters) {
         for (const p of c.procedural) {
+          if (c.primary.vote.kind === 'concur' && c.primary.bill.becameLaw) {
+            continue;
+          }
           expect(p.vote.weight).toBeLessThanOrEqual(c.primary.vote.weight);
         }
       }

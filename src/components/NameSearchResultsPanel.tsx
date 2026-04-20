@@ -35,6 +35,8 @@ function resultToRepresentative(r: NameSearchResult): Representative {
     photoUrl: sanitizeUrl(r.photoUrl),
     isNonVoting: false,
     officialWebsiteUrl: null,
+    yearEntered: r.yearEntered,
+    socials: r.socials,
   };
 }
 
