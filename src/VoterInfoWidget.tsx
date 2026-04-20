@@ -10,6 +10,7 @@ import { NameSearchInput } from './components/NameSearchInput';
 import { NameSearchResultsPanel } from './components/NameSearchResultsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { ResultsPanel } from './components/ResultsPanel';
+import { AboutSystemPanel } from './components/AboutSystemPanel';
 import { useAddressLookup } from './hooks/useAddressLookup';
 import { useNameSearch } from './hooks/useNameSearch';
 import { getEnvelopeFromError } from './services/errorEnvelope';
@@ -95,6 +96,7 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
           <br />
           We do not store or keep any information you enter in this form.
         </small>
+        <AboutSystemPanel />
       </footer>
     </div>
   );
