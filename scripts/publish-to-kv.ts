@@ -478,6 +478,7 @@ async function mapWithConcurrency<T, R>(
       photoUrl: string | null;
       website: string | null;
       isNonVoting?: boolean;
+      yearEntered?: number;
     }
     const grouped = new Map<string, { senators: MemberSummary[]; house: MemberSummary[] }>();
     for (const m of members) {
@@ -489,6 +490,15 @@ async function mapWithConcurrency<T, R>(
       if (!first || !last) continue;
       const stateCode = latestTerm?.stateCode ?? STATE_NAME_TO_CODE[m.state] ?? m.state;
       if (!/^[A-Z]{2}$/.test(stateCode)) continue; // skip junk states
+      // Earliest term start year = year member first entered office.
+      let yearEntered: number | undefined;
+      for (const t of termItems) {
+        if (typeof t.startYear === 'number') {
+          if (yearEntered === undefined || t.startYear < yearEntered) {
+            yearEntered = t.startYear;
+          }
+        }
+      }
       const summary: MemberSummary = {
         bioguideId: m.bioguideId,
         first,
@@ -500,6 +510,7 @@ async function mapWithConcurrency<T, R>(
         party: partyLetter(m.partyName),
         photoUrl: m.depiction?.imageUrl ?? null,
         website: null, // Not in the member-list response; would require per-member detail fetch.
+        yearEntered,
       };
       // Detect non-voting delegates: territories (AS/GU/MP/PR/VI) + DC are
       // House delegates but do not cast floor votes.

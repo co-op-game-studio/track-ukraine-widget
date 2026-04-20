@@ -345,8 +345,13 @@ describe('handleFetch — upstream Access-Control-* headers stripped (AC-27.17)'
       makeEnv(),
       makeFakeCache(),
     );
-    // Upstream's Access-Control-Expose-Headers is gone.
-    expect(r.headers.get('Access-Control-Expose-Headers')).toBeNull();
+    // Upstream's Access-Control-Expose-Headers value is gone — the Worker is
+    // now the sole authority on which headers the browser is allowed to
+    // read, and it emits its own canonical list (observability headers per
+    // T-103 audit B3 fix).
+    const expose = r.headers.get('Access-Control-Expose-Headers') ?? '';
+    expect(expose).not.toMatch(/X-Upstream-Choice/);
+    expect(expose).toMatch(/X-Trace-Id/);
     // Our Access-Control-Allow-Origin (origin reflection, not wildcard) remains.
     expect(r.headers.get('Access-Control-Allow-Origin')).toBe('https://trackukraine.com');
   });

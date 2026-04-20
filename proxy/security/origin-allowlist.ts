@@ -74,6 +74,9 @@ export function corsHeaders(allowedOrigin: string | null): Record<string, string
   const base: Record<string, string> = {
     'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
+    // AC-40.9, AC-36.2 (FR-45 audit B3 fix): expose observability headers so
+    // browser JS running on embedding hosts can read them.
+    'Access-Control-Expose-Headers': 'X-Trace-Id, X-Cache, X-Cache-Tier, X-Proxy-Cache',
     'Access-Control-Max-Age': '86400',
     Vary: 'Origin',
   };

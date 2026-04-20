@@ -1,0 +1,352 @@
+/**
+ * AboutSystemPanel — info surface explaining *why* the widget scores
+ * representatives the way it does, plus a live browser of every curated
+ * bill the system tracks.
+ *
+ * Traces to: FR-46.
+ *
+ * Content scope is strictly the scoring system and the tracked bill
+ * roster. No mentions of CORS, proxies, rate limits, caching,
+ * deployment, observability, or upstream API endpoints (AC-46.7).
+ *
+ * Valence tables are driven from `services/valence.ts` so they stay
+ * in sync with the scoring code automatically.
+ */
+import {
+  Fragment,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
+import {
+  VALENCE_LABEL,
+  VALENCE_SIGN,
+  VALENCE_AMPLIFIER,
+  type Valence,
+} from '../services/valence';
+import ukraineBills from '../data/ukraineBills.json';
+import type { CuratedBill, CuratedBillVote } from '../services/ukraineFilter';
+import { computeValence, type MemberAction } from '../services/valence';
+
+const ALL_BILLS: CuratedBill[] = ukraineBills as CuratedBill[];
+
+const VALENCE_ORDER: Valence[] = [
+  'sponsor-pro',
+  'voted-pro',
+  'unstated',
+  'voted-anti',
+  'sponsor-anti',
+];
+
+const VALENCE_DESCRIPTIONS: Record<Valence, string> = {
+  'sponsor-pro':
+    'Sponsored or cosponsored a pro-Ukraine bill. Strongest positive signal — putting their name on the legislation.',
+  'voted-pro':
+    'Voted Aye on a pro-Ukraine bill (or Nay on an anti-Ukraine amendment that would have weakened it).',
+  unstated:
+    'Present/abstained, or the vote was ambiguous (motion-to-table, motion-to-reconsider). Contributes zero.',
+  'voted-anti':
+    'Voted Nay on a pro-Ukraine bill, or Aye on an anti-Ukraine amendment or procedural maneuver.',
+  'sponsor-anti':
+    'Sponsored or cosponsored an anti-Ukraine bill. Strongest negative signal.',
+};
+
+const WEIGHT_ROWS: Array<{ kind: string; weight: string; note: string }> = [
+  { kind: 'Final passage',                  weight: '1.00', note: 'The decisive up/down vote on the bill.' },
+  { kind: 'Resolving differences / concur', weight: '0.90', note: 'Vote on the final cross-chamber compromise text.' },
+  { kind: 'Cloture',                        weight: '0.45', note: 'Vote to end debate and allow passage (Senate 60-vote threshold).' },
+  { kind: 'Motion to proceed',              weight: '0.30', note: 'Vote to start debate — directional but not dispositive.' },
+  { kind: 'Motion to recommit',             weight: '0.30', note: 'Directional procedural vote; direction may be inverted (Aye = against bill).' },
+  { kind: 'Waive budget point of order',    weight: '0.30', note: 'Directional procedural on budget rules.' },
+  { kind: 'Motion to table',                weight: '0.00', note: 'EXCLUDED — ambiguous direction (tabling can block either side).' },
+  { kind: 'Motion to reconsider',           weight: '0.00', note: 'EXCLUDED — ambiguous direction.' },
+];
+
+const VOTE_KIND_LABEL: Record<string, string> = {
+  passage: 'Final passage',
+  concur: 'Resolving differences',
+  cloture: 'Cloture',
+  'motion-to-proceed': 'Motion to proceed',
+  'motion-to-recommit': 'Motion to recommit',
+  'waive-budget': 'Waive budget',
+  'motion-to-table': 'Motion to table',
+  'motion-to-reconsider': 'Motion to reconsider',
+  'other-procedural': 'Procedural',
+};
+function labelForVoteKind(kind: string): string {
+  return VOTE_KIND_LABEL[kind] ?? kind.replace(/-/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function formatBillSlug(type: string, number: string): string {
+  const t = type.toUpperCase();
+  if (t === 'S' || t === 'SRES' || t === 'SJRES' || t === 'SCONRES') {
+    return `${t.replace('S', 'S.').replace('..', '.')} ${number}`;
+  }
+  return `${t} ${number}`;
+}
+
+type Direction = CuratedBill['direction'];
+
+function groupByDirection(bills: CuratedBill[]): Record<Direction, CuratedBill[]> {
+  const out: Record<Direction, CuratedBill[]> = {
+    'pro-ukraine': [],
+    'anti-ukraine': [],
+    neutral: [],
+  };
+  for (const b of bills) out[b.direction].push(b);
+  return out;
+}
+
+const DIRECTION_LABEL: Record<Direction, string> = {
+  'pro-ukraine': 'Pro-Ukraine',
+  'anti-ukraine': 'Anti-Ukraine',
+  neutral: 'Neutral',
+};
+
+/** Valence a `sponsored` action would carry if this were a member — purely
+ *  for visual tinting of the bill row. Members don't factor in here. */
+function billRowValence(direction: Direction): Valence {
+  return computeValence(direction, 'sponsored' as MemberAction);
+}
+
+function BillsBrowser() {
+  const grouped = useMemo(() => groupByDirection(ALL_BILLS), []);
+  const availableTabs: Direction[] = (
+    ['pro-ukraine', 'anti-ukraine', 'neutral'] as Direction[]
+  ).filter((d) => grouped[d].length > 0);
+  const [activeTab, setActiveTab] = useState<Direction>(availableTabs[0] ?? 'pro-ukraine');
+  const [openBill, setOpenBill] = useState<string | null>(null);
+
+  const visibleBills = grouped[activeTab] ?? [];
+
+  return (
+    <div className="viw-about-browser">
+      <div className="viw-about-tabs" role="tablist" aria-label="Tracked bills by direction">
+        {availableTabs.map((d) => {
+          const count = grouped[d].length;
+          const isActive = activeTab === d;
+          return (
+            <button
+              key={d}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              className={`viw-about-tab ${isActive ? 'viw-about-tab-active' : ''}`}
+              onClick={() => { setActiveTab(d); setOpenBill(null); }}
+            >
+              {DIRECTION_LABEL[d]} <span className="viw-about-tab-count">({count})</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div role="tabpanel" aria-label={`${DIRECTION_LABEL[activeTab]} bills`} className="viw-about-tabpanel">
+        <table className="viw-about-bills-table">
+          <thead>
+            <tr>
+              <th scope="col">Bill · Reason</th>
+              <th scope="col" className="viw-num">Votes tracked</th>
+              <th scope="col" className="viw-num">Became law?</th>
+            </tr>
+          </thead>
+          <tbody>
+            {visibleBills.map((b) => {
+              const key = `${b.congress}-${b.type}-${b.number}`;
+              const isOpen = openBill === key;
+              const valence = billRowValence(b.direction);
+              return (
+                <Fragment key={key}>
+                  <tr className={`viw-valence-${valence}`}>
+                    <th scope="row" className="viw-about-bill-cell">
+                      <button
+                        type="button"
+                        className="viw-about-bill-toggle"
+                        aria-expanded={isOpen}
+                        aria-controls={`viw-about-votes-${key}`}
+                        onClick={(e) => { e.stopPropagation(); setOpenBill(isOpen ? null : key); }}
+                      >
+                        <span className="viw-about-bill-slug">
+                          {formatBillSlug(b.type, b.number)}
+                          {b.featured && <span className="viw-about-featured" title="Featured">★</span>}
+                        </span>
+                        <span className="viw-about-bill-desc">{b.label}</span>
+                        <span className="viw-about-bill-caption">
+                          {b.direction.toUpperCase()} — {b.directionReason}
+                        </span>
+                        <span className="viw-about-bill-caret" aria-hidden="true">
+                          {isOpen ? '▾' : '▸'}
+                        </span>
+                      </button>
+                    </th>
+                    <td className="viw-num">{b.votes.length}</td>
+                    <td className="viw-num">{b.becameLaw ? 'Yes' : '—'}</td>
+                  </tr>
+                  {isOpen && (
+                    <tr>
+                      <td colSpan={3} id={`viw-about-votes-${key}`} className="viw-about-votes-cell">
+                        {b.votes.length === 0 ? (
+                          <p className="viw-about-no-votes">No roll-call votes tracked for this bill yet.</p>
+                        ) : (
+                          <table className="viw-about-votes-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Chamber</th>
+                                <th scope="col" className="viw-num">Roll call</th>
+                                <th scope="col">Kind</th>
+                                <th scope="col" className="viw-num">Weight</th>
+                                <th scope="col">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {b.votes.map((v: CuratedBillVote, idx) => (
+                                <tr
+                                  key={`${v.chamber}-${v.rollCall}-${idx}`}
+                                  className={v.weight === 0 ? 'viw-about-weight-excluded' : ''}
+                                >
+                                  <td>{v.chamber}</td>
+                                  <td className="viw-num">{v.rollCall}</td>
+                                  <td>{labelForVoteKind(v.kind)}</td>
+                                  <td className="viw-num">
+                                    {v.weight === 0 ? 'excluded' : v.weight.toFixed(2)}
+                                  </td>
+                                  <td className="viw-about-vote-action">{v.action}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function AboutSystemPanel() {
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // AC-46.4: Escape closes the panel when focus is inside.
+  const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') setOpen(false);
+  };
+
+  return (
+    <div className="viw-about">
+      <button
+        type="button"
+        className="viw-about-trigger"
+        aria-expanded={open}
+        aria-controls="viw-about-panel"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span aria-hidden="true">ⓘ</span> About this system
+      </button>
+      {open && (
+        <div
+          id="viw-about-panel"
+          ref={panelRef}
+          className="viw-about-panel"
+          role="region"
+          aria-label="About this system"
+          onKeyDown={onKeyDown}
+          tabIndex={-1}
+        >
+          <h2 className="viw-about-heading">How the Ukraine Support Score works</h2>
+          <p>
+            Every member's score is a single number between <strong>−1</strong>{' '}
+            (strongly opposed) and <strong>+1</strong> (strongly supportive),
+            computed only from their public record on curated Ukraine-related
+            bills.
+          </p>
+
+          <h3 className="viw-about-subheading">Formula</h3>
+          <p className="viw-about-formula">
+            <code>score = Σ(sign × amp × weight) ÷ Σ(amp × weight)</code>
+          </p>
+          <p>
+            Worked example: a member who cosponsors one pro-Ukraine bill
+            (sign +1, amp 1.5, weight 1.0 → contribution +1.50) and votes Aye
+            on cloture for another (sign +1, amp 1.0, weight 0.45 →
+            contribution +0.45) scores{' '}
+            <code>(+1.50 + +0.45) ÷ (1.50 + 0.45) = +1.00</code> — a full
+            supporter.
+          </p>
+
+          <h3 className="viw-about-subheading">Valence (sign × amplifier)</h3>
+          <table className="viw-about-table">
+            <thead>
+              <tr>
+                <th scope="col">Valence</th>
+                <th scope="col" className="viw-num">Sign</th>
+                <th scope="col" className="viw-num">Amp</th>
+                <th scope="col">Meaning</th>
+              </tr>
+            </thead>
+            <tbody>
+              {VALENCE_ORDER.map((v) => (
+                <tr key={v} className={`viw-valence-${v}`}>
+                  <th scope="row">{VALENCE_LABEL[v]}</th>
+                  <td className="viw-num">{VALENCE_SIGN[v] > 0 ? '+1' : VALENCE_SIGN[v] < 0 ? '−1' : '0'}</td>
+                  <td className="viw-num">{VALENCE_AMPLIFIER[v].toFixed(1)}×</td>
+                  <td>{VALENCE_DESCRIPTIONS[v]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 className="viw-about-subheading">Vote weights</h3>
+          <table className="viw-about-table">
+            <thead>
+              <tr>
+                <th scope="col">Vote kind</th>
+                <th scope="col" className="viw-num">Weight</th>
+                <th scope="col">Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              {WEIGHT_ROWS.map((w) => (
+                <tr key={w.kind} className={w.weight === '0.00' ? 'viw-about-weight-excluded' : ''}>
+                  <th scope="row">{w.kind}</th>
+                  <td className="viw-num">{w.weight}</td>
+                  <td>{w.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h3 className="viw-about-subheading">Confidence</h3>
+          <p>
+            Members with fewer than <strong>3</strong> counted actions are
+            labeled <em>"Limited record"</em> and cannot reach the "Strong
+            supporter" or "Strongly opposed" bands. The badge's color
+            saturation grows from ~20% (one action) to 100% (eight or more),
+            so a first-term member and a long-serving one look visually
+            distinct even at the same score.
+          </p>
+
+          <h3 className="viw-about-subheading">Tracked bills</h3>
+          <p>
+            The full list of bills the system scores. Every entry is
+            hand-classified — pick a direction tab, then click a bill to see
+            the specific roll-call votes counted and their weights.
+          </p>
+          <BillsBrowser />
+
+          <p className="viw-about-footer-note">
+            Every weight and direction above is auditable in the repository's
+            commit history. The bill set is pre-curated and will be
+            human-reviewed before each release.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

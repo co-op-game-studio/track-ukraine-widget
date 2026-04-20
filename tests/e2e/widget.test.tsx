@@ -145,4 +145,67 @@ describe('VoterInfoWidget (e2e)', () => {
     expect(screen.getAllByText('Illinois').length).toBeGreaterThan(0);
     expect(screen.getByText(/Congressional District 7/)).toBeInTheDocument();
   });
+
+  // US-7 AC-7.8 (UAT) — every chip in the overview grid SHALL surface the
+  // member's full state name on its own line.
+  it('AC-7.8 — overview chips surface the full state name', async () => {
+    const { container } = render(<VoterInfoWidget apiBase="" />);
+
+    const input = screen.getByLabelText(/home address/i);
+    fireEvent.change(input, { target: { value: '2000 S State St, Chicago, IL 60616' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /look up/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Davis, Danny')).toBeInTheDocument();
+    });
+
+    const stateLines = container.querySelectorAll('.viw-chip-state');
+    // Three chips — two senators + one rep — each must carry a state line.
+    expect(stateLines.length).toBe(3);
+    for (const el of Array.from(stateLines)) {
+      expect(el.textContent).toMatch(/Illinois/i);
+    }
+  });
+
+  // FR-43 UAT — click a chip, open the detail panel, expand the score
+  // breakdown, and verify the panel renders a contribution table. All
+  // three reps here have empty sponsored/cosponsored and empty rosters, so
+  // the badge reads N/A and the breakdown panel reports "No curated actions
+  // found for this member." That's the correct rendering contract and is
+  // the hook we exercise here.
+  it('FR-43 AC-43.9/AC-43.10 — clicking chip then expanding breakdown renders the panel', async () => {
+    const { container } = render(<VoterInfoWidget apiBase="" />);
+
+    const input = screen.getByLabelText(/home address/i);
+    fireEvent.change(input, { target: { value: '2000 S State St, Chicago, IL 60616' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /look up/i }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('Davis, Danny')).toBeInTheDocument();
+    });
+
+    // Open Davis's detail panel by clicking his chip.
+    await act(async () => {
+      fireEvent.click(screen.getByText('Davis, Danny').closest('button')!);
+    });
+
+    // The score badge's header toggle should now be in the DOM.
+    await waitFor(() => {
+      expect(container.querySelector('.viw-score-header-toggle')).not.toBeNull();
+    });
+    const headerToggle = container.querySelector('.viw-score-header-toggle') as HTMLButtonElement;
+    expect(headerToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('#viw-score-breakdown-panel')).toBeNull();
+
+    await act(async () => { fireEvent.click(headerToggle); });
+    expect(headerToggle.getAttribute('aria-expanded')).toBe('true');
+    const panel = container.querySelector('#viw-score-breakdown-panel');
+    expect(panel).not.toBeNull();
+    // Empty-record branch: message rather than table.
+    expect(panel!.textContent).toMatch(/No curated actions found for this member/i);
+  });
 });

@@ -15,6 +15,10 @@ export interface Representative {
   isNonVoting: boolean;
   /** Member's own official site (e.g., hometown.senate.gov). May be null. */
   officialWebsiteUrl?: string | null;
+  /** Year the member first entered Congress (earliest `terms[*].startYear`
+   *  from the Congress.gov member profile). Optional — older KV records
+   *  predate this field. */
+  yearEntered?: number;
 }
 
 export type VoteCast = 'Aye' | 'Nay' | 'Present' | 'Not Voting' | 'Did Not Serve';

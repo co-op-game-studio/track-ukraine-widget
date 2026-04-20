@@ -52,8 +52,11 @@ describe('ResultsPanel', () => {
   });
 
   it('renders the state heading and the district line for district > 0', () => {
-    render(<ResultsPanel result={lookup()} apiBase="" />);
-    expect(screen.getByText('Illinois')).toBeInTheDocument();
+    const { container } = render(<ResultsPanel result={lookup()} apiBase="" />);
+    // The state name also appears inside each MemberChip (AC-7.8 UAT), so
+    // target the heading's own class to keep the assertion specific.
+    expect(container.querySelector('.viw-results-heading-state')?.textContent)
+      .toBe('Illinois');
     expect(screen.getByText(/Congressional District 7/)).toBeInTheDocument();
   });
 

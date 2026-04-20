@@ -92,4 +92,46 @@ describe('MemberChip', () => {
     render(<MemberChip representative={delegate} selected={false} onClick={() => {}} />);
     expect(screen.getByText(/Delegate \(non-voting\)/)).toBeInTheDocument();
   });
+
+  // AC-7.8 (NEW UAT): every chip surfaces the member's full state name on
+  // its own line so senator chips aren't state-ambiguous in search results.
+  it('AC-7.8 — chip renders the full state name on its own line', () => {
+    const { container } = render(
+      <MemberChip representative={senator} selected={false} onClick={() => {}} />,
+    );
+    const stateLine = container.querySelector('.viw-chip-state');
+    expect(stateLine).not.toBeNull();
+    expect(stateLine?.textContent).toMatch(/Illinois/i);
+  });
+
+  it('AC-7.8 — falls back to the 2-letter code when state name is unknown', () => {
+    const bogus: Representative = { ...senator, state: 'ZZ' };
+    const { container } = render(
+      <MemberChip representative={bogus} selected={false} onClick={() => {}} />,
+    );
+    expect(container.querySelector('.viw-chip-state')?.textContent).toBe('ZZ');
+  });
+
+  // Year-entered office — senator subtitle should append " · since 2011".
+  it('UAT — senator chip subtitle includes "since YYYY" when yearEntered is set', () => {
+    const withYear: Representative = { ...senator, yearEntered: 2011 };
+    render(<MemberChip representative={withYear} selected={false} onClick={() => {}} />);
+    expect(screen.getByText(/U\.S\. Senator · since 2011/i)).toBeInTheDocument();
+  });
+
+  it('UAT — house rep chip subtitle includes district AND since-year', () => {
+    const rep: Representative = { ...senator, chamber: 'house', district: 3, yearEntered: 2023 };
+    render(<MemberChip representative={rep} selected={false} onClick={() => {}} />);
+    expect(screen.getByText(/District 3 · since 2023/i)).toBeInTheDocument();
+  });
+
+  it('UAT — omits "since YYYY" when yearEntered is undefined (older KV records)', () => {
+    // Senator without yearEntered — the subtitle stays as the bare chamber name.
+    const { container } = render(
+      <MemberChip representative={senator} selected={false} onClick={() => {}} />,
+    );
+    const subtitle = container.querySelector('.viw-chip-subtitle')?.textContent ?? '';
+    expect(subtitle).toBe('U.S. Senator');
+    expect(subtitle).not.toMatch(/since/i);
+  });
 });
