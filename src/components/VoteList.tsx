@@ -161,7 +161,10 @@ function VoteRow({
       </td>
       <td className="viw-votelist-date" data-label="Date">{safeDate(row.vote.date)}</td>
       <td data-label="Position">
-        <span className={`viw-vote viw-vote-valence-${valenceCss(row.valence)}`}>
+        <span
+          className={`viw-vote ${positionPillClass(row)}`}
+          style={{ filter: positionPillFilter(row) }}
+        >
           {displayPosition(row)}
         </span>
       </td>
@@ -194,4 +197,35 @@ function shortenAction(t: string): string {
   const trimmed = t.trim();
   if (trimmed.length <= 60) return trimmed;
   return trimmed.slice(0, 58) + '…';
+}
+
+/**
+ * Position-pill color class — green for Aye, red for Nay, grey for
+ * Present/Not Voting. Uses the literal member action, not the derived
+ * valence, so procedural rows on neutral bills still communicate which
+ * way the member voted instead of being uniformly grey.
+ */
+function positionPillClass(row: MemberVoteRow): string {
+  switch (row.memberVote) {
+    case 'Aye':        return 'viw-vote-pos-aye';
+    case 'Nay':        return 'viw-vote-pos-nay';
+    case 'Present':
+    case 'Not Voting': return 'viw-vote-pos-unstated';
+    default:           return 'viw-vote-pos-unstated';
+  }
+}
+
+/**
+ * Weight-driven saturation — matches the score-badge treatment from
+ * FR-43 AC-43.3. A weight-1.0 final-passage Aye pops at full saturation;
+ * a weight-0.45 cloture Aye reads as ~60% saturated; a weight-0 motion-
+ * to-table vote desaturates toward grey to signal "this doesn't count
+ * toward the score."
+ */
+function positionPillFilter(row: MemberVoteRow): string {
+  // Present / Not Voting don't have an action weight to saturate against.
+  if (row.memberVote !== 'Aye' && row.memberVote !== 'Nay') return '';
+  const w = Math.max(0, Math.min(1, row.vote.weight ?? 0));
+  const x = 0.2 + 0.8 * w;
+  return `saturate(${Math.round(x * 100) / 100})`;
 }

@@ -75,6 +75,7 @@ export function ResultsPanel({ result, apiBase }: ResultsPanelProps) {
                 representative={sen}
                 selected={openId === sen.bioguideId}
                 onClick={() => toggle(sen.bioguideId)}
+                apiBase={apiBase}
               />
             ))}
           </div>
@@ -96,6 +97,7 @@ export function ResultsPanel({ result, apiBase }: ResultsPanelProps) {
                 representative={rep}
                 selected={openId === rep.bioguideId}
                 onClick={() => toggle(rep.bioguideId)}
+                apiBase={apiBase}
               />
             ))}
           </div>
