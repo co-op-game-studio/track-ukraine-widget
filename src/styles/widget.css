@@ -1939,6 +1939,10 @@
   color: var(--viw-white);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  /* "DID NOT VOTE" is three words and 10 chars; let the whole pill wrap
+     as one unit rather than breaking mid-phrase. Also prevents the pill
+     from squeezing to a single-char-per-line slice under narrow columns. */
+  white-space: nowrap;
 }
 .viw-vote-aye { background: var(--viw-valence-voted-pro); }
 .viw-vote-nay { background: var(--viw-valence-voted-anti); }
@@ -1948,6 +1952,13 @@
 .viw-vote.viw-vote-valence-unstated      { background: var(--viw-valence-unstated); }
 .viw-vote.viw-vote-valence-voted-anti    { background: var(--viw-valence-voted-anti); }
 .viw-vote.viw-vote-valence-sponsor-anti  { background: var(--viw-valence-sponsor-anti); }
+/* Position-literal pills (UAT 2026-04-19) — color by the member's
+   actual Aye/Nay, not by derived valence. Saturation is filter-applied
+   per row based on vote.weight so procedurals desaturate naturally. */
+.viw-vote.viw-vote-pos-aye      { background: var(--viw-valence-voted-pro); }
+.viw-vote.viw-vote-pos-nay      { background: var(--viw-valence-voted-anti); }
+.viw-vote.viw-vote-pos-unstated { background: var(--viw-valence-unstated); }
+.viw-vote { transition: filter 200ms ease-out; }
 
 /* Procedural rows */
 .viw-vote-row-procedural { background: rgba(0,0,0,0.015); }
