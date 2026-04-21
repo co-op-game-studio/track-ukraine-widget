@@ -61,6 +61,12 @@ jobs:
           SYNC_TARGET_ENV: ${{ env.TARGET }}
         run: npx tsx scripts/sync-stg-data.ts
 
+      - name: Build widget bundle
+        run: npm run build:lib
+
+      - name: Compute SRI hash
+        run: npm run build:sri
+
       - name: Deploy ${{ env.TARGET }} Worker
         uses: cloudflare/wrangler-action@v3
         with:
