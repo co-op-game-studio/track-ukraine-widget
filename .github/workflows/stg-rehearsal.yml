@@ -100,6 +100,13 @@ jobs:
           fi
           echo "✓ X-Trace-Id canonical: $TRACE"
 
+      - name: Stress test against ${{ env.TARGET }} edge
+        env:
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          HOST: ${{ steps.target.outputs.host }}
+        run: node scripts/stress-test.mjs --host "$HOST" --concurrency 20 --duration 30
+
       - name: AC-30.5 coverage warning
         run: |
-          echo "::warning::${TARGET} rehearsal ran unit tests only; no remote-mode test coverage yet."
+          echo "::warning::${TARGET} rehearsal ran unit tests + remote smoke + stress; add functional remote suite before prod."
