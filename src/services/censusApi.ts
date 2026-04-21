@@ -6,6 +6,7 @@
 import type { CensusGeocodeResponse } from '../types/api';
 import type { GeocodedDistrict } from '../types/domain';
 import { fipsToStateCode } from '../utils/fipsMap';
+import { throwFromResponse } from './errorEnvelope';
 
 const CD_LAYER = '119th Congressional Districts';
 
@@ -24,7 +25,11 @@ export async function geocodeAddress(
   const res = await fetch(url);
 
   if (!res.ok) {
-    throw new Error(`Census geocoder returned ${res.status}`);
+    // Preserves the FR-37 envelope (if upstream emitted one) so hook
+    // consumers can surface userMessage + traceId + retryable via
+    // getEnvelopeFromError. Plain `Error` fallback keeps pre-v2.6.0
+    // contract when upstream is not FR-37-shaped.
+    await throwFromResponse(res, 'Census geocoder');
   }
 
   const data: CensusGeocodeResponse = await res.json();

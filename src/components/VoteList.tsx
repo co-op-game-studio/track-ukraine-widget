@@ -7,18 +7,38 @@ import { useState } from 'react';
 import type { ClusteredMemberVoteWithValence, MemberVoteRow } from '../hooks/useVotingRecord';
 import type { Valence } from '../services/valence';
 import { formatDate } from '../utils/formatters';
+import { ErrorBanner } from './ErrorBanner';
 
 export interface VoteListProps {
   clusters: ClusteredMemberVoteWithValence[];
   loading?: boolean;
   error?: string | null;
+  /** Optional FR-37 envelope fields — when `traceId` is present, errors
+   *  render via `ErrorBanner` instead of the legacy inline div. */
+  errorTraceId?: string;
+  errorOnRetry?: () => void;
 }
 
-export function VoteList({ clusters, loading = false, error = null }: VoteListProps) {
+export function VoteList({
+  clusters,
+  loading = false,
+  error = null,
+  errorTraceId,
+  errorOnRetry,
+}: VoteListProps) {
   if (loading && clusters.length === 0) {
     return <div className="viw-votelist-empty">Loading Ukraine votes…</div>;
   }
   if (error) {
+    if (errorTraceId || errorOnRetry) {
+      return (
+        <ErrorBanner
+          message={error}
+          traceId={errorTraceId}
+          onRetry={errorOnRetry}
+        />
+      );
+    }
     return <div className="viw-votelist-error" role="alert">{error}</div>;
   }
   if (clusters.length === 0) {
@@ -107,8 +127,7 @@ function VoteRow({
       <td className="viw-votelist-bill" data-label="Bill & Vote">
         <div className="viw-votelist-billnum">
           {row.bill.featured && <span className="viw-billlist-featured" aria-hidden>★</span>}
-          {row.bill.type === 'HRES' || row.bill.type === 'SRES' ? '' : ''}
-          {row.bill.type}. {row.bill.number}
+          <span className="viw-votelist-billslug">{formatBillSlug(row.bill.type, row.bill.number)}</span>
           <span className="viw-vote-chamber-tag">{row.vote.chamber}</span>
           {row.vote.weight > 0 && row.vote.weight < 0.5 && (
             <span className="viw-vote-weight-tag" title="Procedural — low weight">
@@ -141,12 +160,17 @@ function VoteRow({
       </td>
       <td className="viw-votelist-date" data-label="Date">{safeDate(row.vote.date)}</td>
       <td data-label="Position">
-        <span className={`viw-vote viw-vote-valence-${valenceCss(row.valence)}`}>
+        <span
+          className={`viw-vote ${positionPillClass(row)}`}
+          style={{ filter: positionPillFilter(row) }}
+        >
           {displayPosition(row)}
         </span>
       </td>
       <td className="viw-vote-outcome" data-label="Outcome">
-        {row.bill.becameLaw ? 'Became law' : shortenAction(row.vote.action)}
+        {isPrimary && row.bill.becameLaw
+          ? 'Became law'
+          : shortenAction(row.vote.action)}
       </td>
     </tr>
   );
@@ -156,6 +180,18 @@ function VoteRow({
 
 function valenceCss(v: Valence): string {
   return v.replace('-', '-'); // keeps original for clarity; class is viw-valence-${v}
+}
+
+/** House bills print without a period after the type; Senate variants
+ *  get the conventional `S.` form. Matches the score-breakdown panel +
+ *  About panel formatBillSlug, so every slug rendered in the widget
+ *  reads consistently. */
+function formatBillSlug(type: string, number: string): string {
+  const t = type.toUpperCase();
+  if (t === 'S' || t === 'SRES' || t === 'SJRES' || t === 'SCONRES') {
+    return `${t.replace('S', 'S.').replace('..', '.')} ${number}`;
+  }
+  return `${t} ${number}`;
 }
 
 function displayPosition(row: MemberVoteRow): string {
@@ -174,4 +210,35 @@ function shortenAction(t: string): string {
   const trimmed = t.trim();
   if (trimmed.length <= 60) return trimmed;
   return trimmed.slice(0, 58) + '…';
+}
+
+/**
+ * Position-pill color class — green for Aye, red for Nay, grey for
+ * Present/Not Voting. Uses the literal member action, not the derived
+ * valence, so procedural rows on neutral bills still communicate which
+ * way the member voted instead of being uniformly grey.
+ */
+function positionPillClass(row: MemberVoteRow): string {
+  switch (row.memberVote) {
+    case 'Aye':        return 'viw-vote-pos-aye';
+    case 'Nay':        return 'viw-vote-pos-nay';
+    case 'Present':
+    case 'Not Voting': return 'viw-vote-pos-unstated';
+    default:           return 'viw-vote-pos-unstated';
+  }
+}
+
+/**
+ * Weight-driven saturation — matches the score-badge treatment from
+ * FR-43 AC-43.3. A weight-1.0 final-passage Aye pops at full saturation;
+ * a weight-0.45 cloture Aye reads as ~60% saturated; a weight-0 motion-
+ * to-table vote desaturates toward grey to signal "this doesn't count
+ * toward the score."
+ */
+function positionPillFilter(row: MemberVoteRow): string {
+  // Present / Not Voting don't have an action weight to saturate against.
+  if (row.memberVote !== 'Aye' && row.memberVote !== 'Nay') return '';
+  const w = Math.max(0, Math.min(1, row.vote.weight ?? 0));
+  const x = 0.2 + 0.8 * w;
+  return `saturate(${Math.round(x * 100) / 100})`;
 }

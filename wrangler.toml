@@ -42,19 +42,38 @@ ENV_NAME = "prod"
 binding = "KV_VOTER_INFO"
 id = "72d3dbce1a1d4ea4aec74b305d7995e6"
 
-# AC-27.21 — in-Worker per-IP rate limit. Opening a rep's detail fans out
-# to ~30 upstream cache-fill requests (house-vote member rolls + senate
-# XML per curated vote + member profile reads). 300/60s lets a single
-# visitor open multiple reps without 429 while still gating abuse.
-# Zone-level rule in AC-28.3 provides defense-in-depth. See ADR-010.
+# FR-41 — R2 static archive bucket for byte-level-static upstream responses
+# (closed-session Senate XML, House rosters, aged bill-actions/summaries).
+# Must be provisioned via `wrangler r2 bucket create voter-info-widget-archive-prod`
+# BEFORE deploy; worker fails fast if binding configured but bucket absent
+# (AC-41.11). Binding name R2_STATIC is distinct from the retired R2_ASSETS
+# (ADR-011) which served static widget bundles and has been fully replaced
+# by Worker Sites.
+[[r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-prod"
+
+# AC-27.21 (RE-TIGHTENED v2.5.3) — in-Worker per-IP rate limit. After
+# ADR-012 moved roll-call rosters and state-members into KV, per-visit
+# fan-out dropped from ~70 req (v2.5.2 interim) to ~49 req worst case
+# (all KV reads). 60/60s covers one visitor opening all three reps with
+# headroom for re-navigation; anything above is hostile or a stuck
+# client. Zone rule in AC-28.3 is the 2x outer gate.
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 300, period = 60 }
+simple = { limit = 60, period = 60 }
 
 [observability]
 enabled = true
+
+# FR-38 AC-38.1 — Workers Analytics Engine binding per env.
+# Dataset names follow the `voter_info_widget_${env}` convention so a single
+# query in the CF dashboard can slice across envs via the `env` blob field.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_prod"
 
 # ─── DEV (branch: develop) ───────────────────────────────────────────────────
 [env.dev]
@@ -78,6 +97,10 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "743b2feda53648cd8242d3b89538bfac"
 
+[[env.dev.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-dev"
+
 # Dev: 600 req / 60 s / IP — local harnesses iterate fast.
 [[env.dev.unsafe.bindings]]
 name = "RATE_LIMITER"
@@ -87,6 +110,10 @@ simple = { limit = 600, period = 60 }
 
 [env.dev.observability]
 enabled = true
+
+[[env.dev.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_dev"
 
 # ─── UAT (branch: uat) ───────────────────────────────────────────────────────
 [env.uat]
@@ -107,15 +134,24 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "3756142363984d218d5f489151716b30"
 
-# UAT: 60 req / 60 s / IP — reviewers need a looser budget than prod.
+[[env.uat.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-uat"
+
+# UAT: 120 req / 60 s / IP — reviewers iterate faster than prod.
+# RE-TIGHTENED v2.5.3 alongside prod/stg.
 [[env.uat.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1003"
-simple = { limit = 60, period = 60 }
+simple = { limit = 120, period = 60 }
 
 [env.uat.observability]
 enabled = true
+
+[[env.uat.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_uat"
 
 # ─── STG (branch: stg) ───────────────────────────────────────────────────────
 [env.stg]
@@ -136,43 +172,69 @@ run_worker_first = true
 binding = "KV_VOTER_INFO"
 id = "4ff9a8e54b82489fb9a300466bd68686"
 
-# Stg: 300 req / 60 s / IP. A single RepDetail opens ~30 upstream
-# cache-fill requests (house-vote member rolls + senate XML per curated
-# vote + member profile reads). 300/60s lets a single visitor open
-# several reps in succession without 429, while still gating abuse.
-# Mirrors the intended prod posture (FR-30 AC-30.1).
+[[env.stg.r2_buckets]]
+binding = "R2_STATIC"
+bucket_name = "voter-info-widget-archive-stg"
+
+# Stg: 60 req / 60 s / IP — mirrors prod per FR-30 AC-30.1.
+# RE-TIGHTENED v2.5.3 alongside prod.
 [[env.stg.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1004"
-simple = { limit = 300, period = 60 }
+simple = { limit = 60, period = 60 }
 
 [env.stg.observability]
 enabled = true
 
-# ─── Local preview (wrangler dev) ────────────────────────────────────────────
-[env.preview]
-name = "voter-info-widget-proxy-preview"
+[[env.stg.analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "voter_info_widget_stg"
 
-[env.preview.vars]
-ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173"
+# ─── Preview template (FR-47) — per-branch isolated deploys ────────────────
+# Branch-based preview envs are declared as overrides at `wrangler deploy`
+# time from `.github/workflows/preview.yml`. For each `preview/<slug>`
+# branch CI creates a fresh KV namespace, R2 bucket, and analytics
+# dataset, then invokes:
+#
+#   wrangler deploy \
+#     --env preview-template \
+#     --name voter-info-widget-proxy-preview-<slug> \
+#     --kv-namespace KV_VOTER_INFO=<id> \
+#     --r2-bucket R2_STATIC=<bucket> \
+#     --var ENV_NAME:preview-<slug>
+#
+# The block below only carries defaults that apply to EVERY preview —
+# vars, assets, rate limit. Bindings the CLI provides (KV, R2, analytics)
+# are omitted here on purpose; wrangler will merge the CLI values in.
+[env.preview-template]
+name = "voter-info-widget-proxy-preview-template"
+
+[env.preview-template.vars]
+# Previews gate through Cloudflare Access like every other non-prod env
+# (FR-29). PREVIEW_MODE relaxes Origin enforcement so the browser can
+# embed from localhost or from a Fourthwall preview host.
+ALLOWED_ORIGINS = "http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,https://trackukraine.com"
 ALLOW_LOCALHOST = "true"
 PREVIEW_MODE = "true"
-ENV_NAME = "preview"
+# ENV_NAME is overridden per-deploy via --var to "preview-<slug>" so FR-36
+# trace logs + FR-38 analytics correctly attribute traffic to the branch.
+ENV_NAME = "preview-template"
 
-[env.preview.assets]
+[env.preview-template.assets]
 directory = "./dist"
 not_found_handling = "none"
 binding = "ASSETS"
 run_worker_first = true
 
-[[env.preview.kv_namespaces]]
-binding = "KV_VOTER_INFO"
-id = "743b2feda53648cd8242d3b89538bfac"
-
-# Preview: 600 req / 60 s / IP — same posture as dev.
-[[env.preview.unsafe.bindings]]
+# Preview rate-limit namespace — each preview deploy overrides this id
+# to a slug-derived offset via --var so concurrent previews don't share a
+# token bucket.
+[[env.preview-template.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1005"
 simple = { limit = 600, period = 60 }
+
+[env.preview-template.observability]
+enabled = true

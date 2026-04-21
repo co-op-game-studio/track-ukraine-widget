@@ -107,6 +107,551 @@
   text-align: center;
 }
 
+/* ── AboutSystemPanel (FR-46) ── */
+
+.viw-about {
+  margin-top: 0.75rem;
+  text-align: center;
+}
+.viw-about-trigger {
+  appearance: none;
+  background: var(--viw-off);
+  border: 2px solid var(--viw-black);
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  color: var(--viw-black);
+  cursor: pointer;
+  display: inline-block;
+  margin: 0.5rem auto 0;
+  text-transform: uppercase;
+}
+.viw-about-trigger:hover {
+  background: var(--viw-yellow);
+}
+.viw-about-trigger:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-about-panel {
+  margin-top: 0.75rem;
+  padding: 1rem 1.25rem 1.25rem;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  color: var(--viw-black);
+  text-align: left;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+.viw-about-heading {
+  font-family: var(--viw-font);
+  font-size: 1.05rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 0 0 0.5rem;
+}
+.viw-about-subheading {
+  font-family: var(--viw-font);
+  font-size: 0.85rem;
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 1rem 0 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--viw-off);
+}
+.viw-about-formula code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--viw-off);
+  padding: 0.15rem 0.4rem;
+  font-size: 0.85rem;
+}
+.viw-about-panel p code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: var(--viw-off);
+  padding: 0.05rem 0.3rem;
+  font-size: 0.78rem;
+}
+.viw-about-table {
+  /* Every About-panel table gets the same treatment: bordered card with
+     header row that carries borders on every side (including left/right
+     on the header row's cells), cells top-aligned so wrapping text
+     doesn't stretch a row vertically, horizontal scroll on narrow widths
+     to prevent column clipping. */
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--viw-black);
+  font-size: 0.78rem;
+  margin: 0.25rem 0 0.5rem;
+  table-layout: auto;
+}
+.viw-about-table th,
+.viw-about-table td {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--viw-off);
+  text-align: left;
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.viw-about-table thead th {
+  background: var(--viw-off);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.72rem;
+  border: 1px solid var(--viw-black);
+  border-bottom-width: 2px;
+}
+.viw-about-table .viw-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.viw-about-table tbody tr.viw-valence-sponsor-pro   th,
+.viw-about-table tbody tr.viw-valence-sponsor-pro   td { background-color: var(--viw-valence-sponsor-pro-bg); }
+.viw-about-table tbody tr.viw-valence-voted-pro     th,
+.viw-about-table tbody tr.viw-valence-voted-pro     td { background-color: var(--viw-valence-voted-pro-bg); }
+.viw-about-table tbody tr.viw-valence-voted-anti    th,
+.viw-about-table tbody tr.viw-valence-voted-anti    td { background-color: var(--viw-valence-voted-anti-bg); }
+.viw-about-table tbody tr.viw-valence-sponsor-anti  th,
+.viw-about-table tbody tr.viw-valence-sponsor-anti  td { background-color: var(--viw-valence-sponsor-anti-bg); }
+.viw-about-table tbody tr.viw-about-weight-excluded th,
+.viw-about-table tbody tr.viw-about-weight-excluded td {
+  color: var(--viw-muted);
+  font-style: italic;
+}
+.viw-about-sources {
+  margin: 0 0 0.5rem;
+  padding-left: 1.2rem;
+}
+
+/* ── AboutSystemPanel bills browser (FR-46 Part B) ── */
+.viw-about-browser {
+  margin-top: 0.5rem;
+}
+.viw-about-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin-bottom: 0;
+  border-bottom: 2px solid var(--viw-black);
+}
+.viw-about-tab {
+  appearance: none;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  border-bottom: 0;
+  padding: 0.35rem 0.75rem;
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.78rem;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--viw-muted);
+  cursor: pointer;
+  margin-bottom: -2px; /* overlap the bottom border so active tab reads connected */
+}
+.viw-about-tab:hover { color: var(--viw-black); }
+.viw-about-tab:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-about-tab-active {
+  background: var(--viw-yellow);
+  color: var(--viw-black);
+}
+/* Direction-colored idle tints (override white background; active state
+   still takes yellow to preserve "this is the open tab" signal). */
+.viw-about-tab-dir-pro-ukraine:not(.viw-about-tab-active) {
+  background: var(--viw-valence-voted-pro-bg);
+}
+.viw-about-tab-dir-anti-ukraine:not(.viw-about-tab-active) {
+  background: var(--viw-valence-voted-anti-bg);
+}
+.viw-about-tab-dir-neutral:not(.viw-about-tab-active) {
+  background: var(--viw-off);
+}
+/* Active tab shows a direction-colored left border accent so voters can
+   still tell which direction they've selected at a glance. */
+.viw-about-tab-dir-pro-ukraine.viw-about-tab-active {
+  box-shadow: inset 0 -3px 0 var(--viw-valence-voted-pro);
+}
+.viw-about-tab-dir-anti-ukraine.viw-about-tab-active {
+  box-shadow: inset 0 -3px 0 var(--viw-valence-voted-anti);
+}
+.viw-about-tab-count {
+  font-weight: 400;
+  font-style: normal;
+  color: var(--viw-muted);
+  margin-left: 0.2rem;
+}
+/* Full / short tab labels swap at the mobile breakpoint so all tabs fit
+   without wrapping. Tablet+ shows "Pro-Ukraine"; mobile shows "Pro". */
+.viw-about-tab-label-short { display: none; }
+.viw-about-tab-label-full  { display: inline; }
+@media (max-width: 639px) {
+  .viw-about-tab-label-short { display: inline; }
+  .viw-about-tab-label-full  { display: none; }
+}
+.viw-about-tab-active .viw-about-tab-count {
+  color: var(--viw-black);
+}
+
+.viw-about-tabpanel {
+  /* No top gap — the table attaches directly to the tab bar so the active
+     tab reads as visually connected to its content (card-like). */
+  padding-top: 0;
+}
+
+.viw-about-bills-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--viw-black);
+  font-size: 0.78rem;
+  table-layout: auto;
+}
+.viw-about-bills-table thead th {
+  background: var(--viw-off);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  /* Side borders on the header-row cells so the label row reads as
+     framed, not as a floating strip above the rows. */
+  border: 1px solid var(--viw-black);
+  border-bottom-width: 2px;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.viw-about-bills-table tbody > tr > th,
+.viw-about-bills-table tbody > tr > td {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--viw-off);
+  vertical-align: top;
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.viw-about-bills-table .viw-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.viw-about-bills-table tbody > tr.viw-valence-sponsor-pro > th,
+.viw-about-bills-table tbody > tr.viw-valence-sponsor-pro > td { background-color: var(--viw-valence-sponsor-pro-bg); }
+.viw-about-bills-table tbody > tr.viw-valence-voted-pro > th,
+.viw-about-bills-table tbody > tr.viw-valence-voted-pro > td { background-color: var(--viw-valence-voted-pro-bg); }
+.viw-about-bills-table tbody > tr.viw-valence-voted-anti > th,
+.viw-about-bills-table tbody > tr.viw-valence-voted-anti > td { background-color: var(--viw-valence-voted-anti-bg); }
+.viw-about-bills-table tbody > tr.viw-valence-sponsor-anti > th,
+.viw-about-bills-table tbody > tr.viw-valence-sponsor-anti > td { background-color: var(--viw-valence-sponsor-anti-bg); }
+
+/* Bill cell — stacked slug / desc / caption like the score breakdown. */
+.viw-about-bill-cell {
+  font-weight: normal; /* override thead bold */
+  max-width: 40ch;
+}
+.viw-about-bill-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 0.35rem;
+  row-gap: 0.05rem;
+  width: 100%;
+}
+.viw-about-bill-toggle:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-about-bill-toggle:hover .viw-about-bill-slug {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.viw-about-bill-slug {
+  grid-column: 1;
+  font-family: var(--viw-font);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.82rem;
+  color: var(--viw-black);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.viw-about-featured {
+  color: var(--viw-yellow-dark, #c69a00);
+  font-size: 0.9rem;
+  font-style: normal;
+}
+.viw-about-bill-desc {
+  grid-column: 1;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--viw-black);
+  line-height: 1.3;
+}
+.viw-about-bill-caption {
+  grid-column: 1;
+  font-size: 0.68rem;
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.viw-about-bill-caret {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  font-size: 0.8rem;
+  color: var(--viw-muted);
+  line-height: 1;
+}
+
+/* Congress.gov external-text link. Small, inline, understated — it's
+   for voters who want to double-check the source; not the primary
+   affordance on the row. */
+.viw-about-bill-link {
+  display: inline-block;
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--viw-black);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.viw-about-bill-link:hover {
+  background: var(--viw-yellow);
+}
+.viw-about-vote-link {
+  display: inline-block;
+  margin-left: 0.25rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--viw-black);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+.viw-about-vote-link:hover {
+  background: var(--viw-yellow);
+}
+
+/* Nested votes table, revealed below a bill row. */
+.viw-about-votes-cell {
+  background: var(--viw-white) !important;
+  padding: 0.6rem 0.75rem !important;
+  border-bottom: 2px solid var(--viw-black) !important;
+}
+.viw-about-votes-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--viw-black);
+  font-size: 0.72rem;
+  table-layout: auto;
+}
+.viw-about-votes-table thead th {
+  background: var(--viw-off);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.66rem;
+  /* Same side-bordered header treatment as the bills table. */
+  border: 1px solid var(--viw-black);
+  border-bottom-width: 2px;
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  white-space: nowrap;
+}
+.viw-about-votes-table tbody th,
+.viw-about-votes-table tbody td {
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--viw-off);
+  vertical-align: top;
+  text-align: left;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.viw-about-votes-table .viw-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.viw-about-votes-table tbody tr.viw-about-weight-excluded td {
+  color: var(--viw-muted);
+  font-style: italic;
+}
+.viw-about-vote-action {
+  max-width: 48ch;
+  font-size: 0.7rem;
+  color: var(--viw-black);
+  line-height: 1.3;
+}
+/* Mobile: collapse each table row to a stacked card. Header row is
+   hidden; each numeric cell carries its own inline label via data-col.
+   The label + value sit on ONE line per cell, not stacked. */
+@media (max-width: 639px) {
+  /* Tighten the outer panel + browser padding so we don't stack
+     margins-on-margins. About panel itself keeps a modest inset; the
+     nested tables don't add more. */
+  .viw-about-panel {
+    padding: 0.65rem 0.75rem 0.85rem;
+  }
+  .viw-about-browser {
+    margin-top: 0.35rem;
+  }
+  .viw-about-tabpanel {
+    padding: 0;
+  }
+  .viw-about-votes-cell {
+    padding: 0.4rem 0 !important;
+  }
+  .viw-about-table,
+  .viw-about-bills-table,
+  .viw-about-votes-table {
+    display: block;
+    border: 1px solid var(--viw-black);
+  }
+  .viw-about-table thead,
+  .viw-about-bills-table thead,
+  .viw-about-votes-table thead { display: none; }
+  .viw-about-table tbody,
+  .viw-about-bills-table tbody,
+  .viw-about-votes-table tbody { display: block; }
+  .viw-about-table tbody tr,
+  .viw-about-bills-table tbody tr,
+  .viw-about-votes-table tbody tr {
+    display: block;
+    padding: 0.4rem 0.5rem;
+    border: 0;
+    border-bottom: 1px solid var(--viw-off);
+  }
+  .viw-about-table tbody tr > *,
+  .viw-about-bills-table tbody tr > *,
+  .viw-about-votes-table tbody tr > * {
+    display: block;
+    border: 0;
+    padding: 0.08rem 0;
+  }
+  .viw-about-table tbody tr > th:first-child,
+  .viw-about-bills-table tbody tr > th:first-child,
+  .viw-about-votes-table tbody tr > th:first-child {
+    font-weight: 700;
+    padding-bottom: 0.2rem;
+  }
+  /* Inline label: "LABEL: value" on a single line. Using inline element
+     via ::before keeps label and value on the same baseline. */
+  .viw-about-table tbody tr td[data-col],
+  .viw-about-bills-table tbody tr td[data-col],
+  .viw-about-votes-table tbody tr td[data-col] {
+    text-align: left !important;
+    white-space: normal;
+  }
+  .viw-about-table tbody tr td[data-col]::before,
+  .viw-about-bills-table tbody tr td[data-col]::before,
+  .viw-about-votes-table tbody tr td[data-col]::before {
+    content: attr(data-col) ": ";
+    display: inline;
+    color: var(--viw-muted);
+    font-weight: 700;
+    font-style: italic;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.65rem;
+    margin-right: 0.25rem;
+  }
+}
+
+.viw-about-no-votes {
+  margin: 0;
+  font-style: italic;
+  color: var(--viw-muted);
+  font-size: 0.72rem;
+}
+
+.viw-about-footer-note {
+  margin: 1.25rem 0 0;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--viw-off);
+  font-size: 0.72rem;
+  color: var(--viw-muted);
+  font-style: italic;
+  text-align: center;
+}
+.viw-about-sample-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0.2rem 0;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--viw-black);
+  cursor: pointer;
+  text-align: left;
+}
+.viw-about-sample-toggle:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-about-sample {
+  margin: 0.4rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--viw-off);
+  border: 1px dashed var(--viw-black);
+}
+.viw-about-sample-caption {
+  margin: 0 0 0.5rem;
+  font-size: 0.76rem;
+}
+.viw-about-sample-json {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  background: var(--viw-white);
+  border: 1px solid var(--viw-black);
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  white-space: pre;
+}
+.viw-about-sample-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  color: var(--viw-muted);
+  font-style: italic;
+}
+
 /* ── AddressInput ── */
 
 .viw-address-form {
@@ -214,6 +759,34 @@
   color: inherit; font-family: inherit;
 }
 
+/* v2.6.0 — trace ID reference line (FR-36 AC-36.5). Muted, monospace,
+ * user-selectable so bug reporters can copy it from the UI. */
+.viw-error-banner-trace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: #6b7280;
+  user-select: text;
+  align-self: center;
+}
+
+/* v2.6.0 — "Try again" button rendered on retryable errors (FR-37 AC-37.5). */
+.viw-error-banner-retry {
+  background: var(--viw-black);
+  color: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  padding: 0.35rem 0.85rem;
+  font-family: inherit;
+  font-weight: 700;
+  text-transform: uppercase;
+  cursor: pointer;
+  align-self: center;
+}
+.viw-error-banner-retry:hover {
+  background: var(--viw-white);
+  color: var(--viw-black);
+}
+
 /* ── Results state heading ── */
 
 .viw-results { margin-top: 0.5rem; }
@@ -305,16 +878,42 @@
   border: 2px solid var(--viw-black);
   border-radius: 0;
   padding: 0.85rem 0.75rem;
-  width: 160px;
+  width: 170px;
+  /* Fixed height + justify-content:space-between pins the name top-block,
+     the photo middle-block, and the footer bottom-block to consistent
+     positions across every chip — so a chip with a 1-line name and one
+     with a 3-line name never appear to "wave" relative to each other. */
+  min-height: 240px;
   cursor: pointer;
   font-family: inherit;
   color: inherit;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: space-between;
   text-align: center;
   gap: 0.4rem;
   transition: transform 0.1s ease, background-color 0.12s ease;
+}
+
+/* Three-section layout (UAT 2026-04-19): name header on top, photo in the
+   middle, chamber/state/party in the footer. Each section claims its
+   space even if it carries different line counts, so tiles align. */
+.viw-chip-header {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 2.4em; /* holds up to 2 lines of .viw-chip-name */
+}
+.viw-chip-footer {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.2rem;
 }
 
 .viw-chip:hover { background: var(--viw-off); }
@@ -377,6 +976,38 @@
   font-weight: 700;
 }
 
+.viw-chip-state {
+  font-size: 0.72rem;
+  color: var(--viw-black);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 900;
+  font-style: italic;
+  margin-top: 0.1rem;
+}
+
+/* Year-entered-office row. Own line below state, above the party pill. */
+.viw-chip-since {
+  font-size: 0.68rem;
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  font-style: italic;
+  margin-top: 0.1rem;
+}
+/* Inline sibling to .viw-detail-state / .viw-detail-chamber. Match
+   font size + letter-spacing so the baseline lines up cleanly and the
+   flex-gap provides the separator (no leading bullet). */
+.viw-detail-since {
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.06em;
+}
+
 .viw-chip-party {
   font-size: 0.62rem;
   font-weight: 900;
@@ -394,6 +1025,7 @@
 .viw-detail-slot {
   display: grid;
   grid-template-rows: 0fr;
+  grid-template-columns: minmax(0, 1fr);
   transition: grid-template-rows 0.28s ease-out;
   overflow: hidden;
 }
@@ -425,6 +1057,7 @@
   gap: 1rem;
   padding: 1rem 1.25rem;
   border-bottom: 2px solid var(--viw-black);
+  position: relative;
 }
 
 .viw-detail-identity {
@@ -442,6 +1075,35 @@
   border: 2px solid var(--viw-black);
   background: var(--viw-off);
   border-radius: 0; /* AC-9.2 flat */
+}
+
+/* Mobile-only: stack photo above text, make everything full-width.
+   Keeps the close button as a floating corner overlay. */
+@media (max-width: 639px) {
+  .viw-detail-identity {
+    flex-direction: column;
+    gap: 0.75rem;
+    align-items: stretch;
+    width: 100%;
+  }
+  .viw-detail-photo {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 4;
+    max-height: 70vh;
+    object-fit: cover;
+    object-position: center top;
+  }
+  .viw-detail-ident-text { width: 100%; }
+  .viw-detail-ident-text .viw-detail-links-row {
+    width: 100%;
+    flex-wrap: nowrap;
+  }
+  .viw-detail-links-row .viw-detail-link {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+  .viw-detail-links-row .viw-detail-socials { flex: 0 0 auto; }
 }
 
 .viw-detail-photo-placeholder {
@@ -491,6 +1153,45 @@
   letter-spacing: 0.06em;
 }
 
+/* Social-media icon-links row (FR-48). Sits below the Official Website
+   button; renders only when the member has handles. Each glyph is a
+   single char pulled from the platform's recognizable logo-adjacent
+   character so we don't drag in an icon-font or SVG sprite. */
+.viw-detail-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+.viw-detail-socials {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.viw-detail-social {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--viw-black);
+  background: var(--viw-white);
+  color: var(--viw-black);
+  text-decoration: none;
+  font-weight: 900;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: background 0.1s ease;
+}
+.viw-detail-social:hover {
+  background: var(--viw-yellow);
+}
+.viw-detail-social:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+
 .viw-detail-link {
   color: var(--viw-black);
   background: var(--viw-yellow);
@@ -518,6 +1219,15 @@
   font-family: inherit;
   flex-shrink: 0;
   transition: background-color 0.1s linear;
+}
+@media (max-width: 639px) {
+  .viw-detail-close {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    z-index: 2;
+    background: var(--viw-white);
+  }
 }
 .viw-detail-close:hover { background: var(--viw-black); color: var(--viw-yellow); }
 
@@ -569,6 +1279,14 @@
   background: var(--viw-off);
   border-top: 2px solid var(--viw-black);
   border-bottom: 2px solid var(--viw-black);
+  /* The entire score band is a click target that toggles the breakdown
+     panel (UAT). Interactive children (buttons, links) keep their own
+     cursors via the children-override below. */
+  cursor: pointer;
+}
+.viw-score button,
+.viw-score a {
+  cursor: pointer; /* keep as-is; overrides in case children inherit */
 }
 
 .viw-score-header {
@@ -576,6 +1294,535 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 1rem;
+  /* FR-43 AC-43.4: header wraps on narrow viewports so the context slug
+     falls below the number but above the gradient bar. */
+  flex-wrap: wrap;
+}
+
+.viw-score-header > .viw-score-context {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.viw-score-header > .viw-score-value {
+  flex: 0 0 auto;
+}
+
+/* UAT: tablet+ header is a single 3-column row:
+   [ title ] [ label over justification, right-justified ] [ value ] (caret).
+   On phones (<640px) it collapses to two rows so nothing truncates. */
+/* Tablet+ (≥640px): true single-row grid — title | stack | value | caret.
+   The stack (label over justification) is right-justified against the value;
+   nothing wraps. */
+.viw-score-header-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "title ctx value caret";
+  column-gap: 1rem;
+  align-items: center;
+  width: 100%;
+}
+.viw-score-header-row > .viw-score-title {
+  grid-area: title;
+  margin-bottom: 0;
+  text-align: left;
+  white-space: nowrap;
+  /* Title cap-height matches the two-line context stack (label ~1rem +
+     justification ~0.8rem line boxes ≈ stack height). Line-height 1 so
+     leading doesn't bloat the row. */
+  font-size: 2rem;
+  line-height: 1;
+}
+.viw-score-context-stack {
+  grid-area: ctx;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  text-align: right;
+  overflow: hidden;
+}
+.viw-score-label {
+  font-family: var(--viw-font);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+  line-height: 1.1;
+  color: var(--viw-black);
+  white-space: nowrap;
+}
+.viw-score-justification {
+  font-size: 0.75rem;
+  line-height: 1.1;
+  color: var(--viw-muted);
+  max-width: 100%;
+  margin-top: 0.15rem;
+}
+/* FR-43 AC-43.16: continuous red→amber→green confidence indicator on
+   the "N actions (M exc)" line. Overrides the muted grey default so the
+   signal is legible at a glance. Color comes from inline style; the
+   class just owns the weight + size bump. */
+.viw-score-justification-confidence {
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+/* Short/full justification swap — by default show the full sentence and
+   hide the short one. Narrow viewports (<900px) swap them to save space. */
+.viw-justification-short { display: none; }
+.viw-justification-full  { display: inline; }
+@media (max-width: 899px) {
+  .viw-justification-short { display: inline; }
+  .viw-justification-full  { display: none; }
+}
+@media (max-width: 639px) {
+  /* Phone: keep the short form too; context-stack already drops to its own row. */
+  .viw-justification-short { display: inline; }
+  .viw-justification-full  { display: none; }
+}
+.viw-score-header-row > .viw-score-value {
+  grid-area: value;
+  text-align: right;
+  /* Value cap-height matches the two-line stack (label + justification),
+     so all three elements are visually the same height. */
+  font-size: 2rem;
+  line-height: 1;
+}
+.viw-score-header-row > .viw-score-header-caret {
+  grid-area: caret;
+  font-size: 0.9rem;
+  color: var(--viw-muted);
+  line-height: 1;
+}
+/* Short/full title swap */
+.viw-title-short { display: none; }
+.viw-title-full  { display: inline; }
+
+/* Phone (<640px): two rows.
+   Row 1: SCORE (short title) + +1.00 (right-justified)
+   Row 2: "Strong supporter · 16 actions (11 exc)" — right-justified against the value above.
+   Label and justification stay on one line (no break) using an inline ·. */
+@media (max-width: 639px) {
+  .viw-title-short { display: inline; }
+  .viw-title-full  { display: none; }
+
+  .viw-score-header-row {
+    grid-template-columns: auto 1fr auto auto;
+    grid-template-areas:
+      "title . value caret"
+      "ctx   ctx ctx ctx";
+    align-items: baseline;
+    row-gap: 0.25rem;
+  }
+  .viw-score-header-row > .viw-score-title { white-space: nowrap; }
+  .viw-score-context-stack {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    align-items: baseline;
+    text-align: right;
+    gap: 0.4rem;
+    white-space: nowrap;
+    width: 100%;
+    min-width: 0;
+  }
+  .viw-score-context-stack .viw-score-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .viw-score-context-stack .viw-score-justification {
+    flex: 0 0 auto;
+  }
+  .viw-score-context-stack .viw-score-label::after {
+    content: " ·";
+    color: var(--viw-muted);
+    font-weight: 400;
+    font-style: normal;
+    margin-left: 0.2rem;
+  }
+  .viw-score-justification { white-space: nowrap; }
+  .viw-score-header-row > .viw-score-header-caret {
+    align-self: center;
+    justify-self: end;
+  }
+}
+.viw-score-header-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0 0 0.5rem 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+.viw-score-header-toggle:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-score-header-toggle:hover .viw-score-header-caret {
+  color: var(--viw-black);
+}
+
+/* The score bar + obstruction note act as a second clickable region that
+   opens the breakdown. Strip default button chrome so it renders exactly
+   like the original div layout. */
+.viw-score-bar-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  display: block;
+  width: 100%;
+}
+.viw-score-bar-toggle:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-score-value-na {
+  font-size: 1.5rem;
+  color: var(--viw-muted);
+}
+
+/* ── Loading state (UAT 2026-04-19): unambiguously "working" ── */
+.viw-score-loading-label {
+  color: var(--viw-black);
+  /* Prevent the loading label from ever shoving the value off the row on
+     narrow widths — it owns only the space it needs. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.viw-score-loading-justification {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.viw-score-value-loading {
+  display: inline-flex;
+  align-items: center;
+  min-width: 4ch;
+  height: 1em;
+}
+.viw-score-value-skeleton {
+  display: block;
+  width: 3.5ch;
+  height: 1em;
+  background: linear-gradient(
+    90deg,
+    var(--viw-off) 0%,
+    var(--viw-off) 40%,
+    #e9e9e9 50%,
+    var(--viw-off) 60%,
+    var(--viw-off) 100%
+  );
+  background-size: 200% 100%;
+  animation: viw-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+
+.viw-score-bar-track-loading {
+  /* Replace the live rainbow gradient with a quiet skeleton shimmer:
+     a soft light-sweep across a neutral grey, not a sliding white block.
+     The shimmer lives on the track's own background so there's no
+     absolute-positioned child sliding around. */
+  background:
+    linear-gradient(
+      90deg,
+      var(--viw-off) 0%,
+      var(--viw-off) 40%,
+      #e9e9e9 50%,
+      var(--viw-off) 60%,
+      var(--viw-off) 100%
+    ) !important;
+  background-size: 200% 100% !important;
+  animation: viw-skeleton-shimmer 1.6s ease-in-out infinite;
+}
+/* Unused — kept as a no-op so any stale DOM reference doesn't 404 the
+   selector. The visible shimmer lives on the track now. */
+.viw-score-bar-shimmer { display: none; }
+
+@keyframes viw-skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viw-score-bar-track-loading,
+  .viw-score-value-skeleton {
+    animation: none;
+    background: var(--viw-off) !important;
+  }
+}
+
+.viw-score-breakdown {
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--viw-white);
+  border: 2px solid var(--viw-black);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--viw-black);
+  /* Click-anywhere-in-whitespace-to-close affordance (UAT): cursor hints
+     that the panel background is an active dismiss target. Individual
+     interactive children (buttons, links) override this. */
+  cursor: pointer;
+}
+.viw-score-breakdown button,
+.viw-score-breakdown a {
+  cursor: pointer; /* preserved — overrides panel-level pointer on children */
+}
+.viw-score-breakdown-intro {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+}
+.viw-score-breakdown-tablewrap {
+  overflow-x: auto;
+  margin: 0 0 0.5rem;
+}
+.viw-score-breakdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+.viw-score-breakdown-table th,
+.viw-score-breakdown-table td {
+  padding: 0.25rem 0.45rem;
+  border-bottom: 1px solid var(--viw-off);
+  vertical-align: top;
+  text-align: left;
+}
+.viw-score-breakdown-table .viw-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.viw-score-breakdown-table thead th {
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.66rem;
+  border-bottom: 2px solid var(--viw-black);
+  background: var(--viw-off);
+}
+.viw-score-breakdown-table tbody th {
+  font-weight: 700;
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.viw-score-row-bill {
+  /* The structured cell lays its slug / description / action stacked, so
+     normal word-wrap is fine. Keep a sane max so a five-column table stays
+     readable on wide viewports. */
+  max-width: 38ch;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.viw-score-row-bill-toggle {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-auto-rows: auto;
+  column-gap: 0.35rem;
+  row-gap: 0.05rem;
+  width: 100%;
+}
+.viw-score-row-bill-toggle:focus-visible {
+  outline: 2px solid var(--viw-black);
+  outline-offset: 2px;
+}
+.viw-score-row-bill-toggle:hover .viw-score-row-bill-slug {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+/* Caret sits in the grid's auto-placed second column next to the slug. */
+.viw-score-row-bill-toggle .viw-score-row-bill-caret {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  font-size: 0.75rem;
+  color: var(--viw-muted);
+  line-height: 1;
+}
+/* Force description / action / detail into column 1 so they flow beneath
+   the slug without the caret leaving an empty column block. */
+.viw-score-row-bill-toggle .viw-score-row-bill-slug,
+.viw-score-row-bill-toggle .viw-score-row-bill-desc,
+.viw-score-row-bill-toggle .viw-score-row-bill-action,
+.viw-score-row-bill-toggle .viw-score-row-bill-detail {
+  grid-column: 1;
+}
+
+/* Structured-data children — render whether the cell is a button or a
+   bare fragment. */
+.viw-score-row-bill-slug {
+  font-family: var(--viw-font);
+  font-weight: 900;
+  font-style: italic;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.76rem;
+  color: var(--viw-black);
+  display: block;
+}
+.viw-score-row-bill-desc {
+  font-size: 0.72rem;
+  color: var(--viw-black);
+  font-weight: 500;
+  display: block;
+}
+.viw-score-row-bill-action {
+  font-size: 0.68rem;
+  color: var(--viw-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  display: block;
+}
+.viw-score-row-bill-detail {
+  font-size: 0.7rem;
+  color: var(--viw-muted);
+  font-style: italic;
+  line-height: 1.3;
+  margin-top: 0.2rem;
+  display: block;
+  grid-column: 1 / -1;
+}
+
+/* Skipped rows keep muted italic everywhere. */
+.viw-score-row-skipped .viw-score-row-bill-slug,
+.viw-score-row-skipped .viw-score-row-bill-desc {
+  color: var(--viw-muted);
+  font-style: italic;
+}
+.viw-score-row-skipped td,
+.viw-score-row-skipped th {
+  color: var(--viw-muted);
+  font-style: italic;
+}
+
+/* Valence-tinted rows: left-edge accent + subtle row background, colored
+   contribution cell. Tinting goes on th/td because <tr> backgrounds are
+   unreliable in some UAs. */
+.viw-score-breakdown-table tbody tr.viw-valence-sponsor-pro th,
+.viw-score-breakdown-table tbody tr.viw-valence-sponsor-pro td {
+  background-color: var(--viw-valence-sponsor-pro-bg);
+}
+.viw-score-breakdown-table tbody tr.viw-valence-voted-pro th,
+.viw-score-breakdown-table tbody tr.viw-valence-voted-pro td {
+  background-color: var(--viw-valence-voted-pro-bg);
+}
+.viw-score-breakdown-table tbody tr.viw-valence-voted-anti th,
+.viw-score-breakdown-table tbody tr.viw-valence-voted-anti td {
+  background-color: var(--viw-valence-voted-anti-bg);
+}
+.viw-score-breakdown-table tbody tr.viw-valence-sponsor-anti th,
+.viw-score-breakdown-table tbody tr.viw-valence-sponsor-anti td {
+  background-color: var(--viw-valence-sponsor-anti-bg);
+}
+.viw-score-breakdown-table tbody tr.viw-valence-unstated th,
+.viw-score-breakdown-table tbody tr.viw-valence-unstated td {
+  background-color: transparent;
+}
+
+/* (UAT 2026-04-19) Left-edge valence stripe removed — the row background
+   tint already conveys the valence, and the stripe read as an "extra
+   border" next to the numeric columns. */
+
+/* Contribution cell takes the full valence color so positives read green,
+   negatives red at a glance. */
+.viw-score-breakdown-table tbody tr.viw-valence-sponsor-pro td:last-child { color: var(--viw-valence-sponsor-pro); font-weight: 900; }
+.viw-score-breakdown-table tbody tr.viw-valence-voted-pro   td:last-child { color: var(--viw-valence-voted-pro); font-weight: 900; }
+.viw-score-breakdown-table tbody tr.viw-valence-voted-anti  td:last-child { color: var(--viw-valence-voted-anti); font-weight: 900; }
+.viw-score-breakdown-table tbody tr.viw-valence-sponsor-anti td:last-child { color: var(--viw-valence-sponsor-anti); font-weight: 900; }
+.viw-score-skip { color: var(--viw-muted); font-style: italic; }
+.viw-score-breakdown-table tfoot th,
+.viw-score-breakdown-table tfoot td {
+  border-top: 2px solid var(--viw-black);
+  border-bottom: 0;
+  font-weight: 900;
+}
+.viw-score-row-total { text-align: right; font-style: italic; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.68rem; }
+.viw-score-row-final { font-size: 0.9rem; }
+.viw-score-breakdown-note {
+  margin: 0.35rem 0 0;
+  font-size: 0.7rem;
+  color: var(--viw-muted);
+  line-height: 1.4;
+}
+.viw-score-breakdown-note strong { color: var(--viw-black); }
+
+/* Phone: stack each table row onto two lines — bill label on line 1,
+   action + sign + amp×weight + contribution on line 2. */
+@media (max-width: 639px) {
+  .viw-score-breakdown-table thead { display: none; }
+  .viw-score-breakdown-table,
+  .viw-score-breakdown-table tbody,
+  .viw-score-breakdown-table tfoot { display: block; }
+  .viw-score-breakdown-table tbody tr {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    grid-template-areas:
+      "bill bill bill bill"
+      "sign mag  .    contrib";
+    column-gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid var(--viw-off);
+  }
+  .viw-score-breakdown-table tbody tr > * {
+    border: 0;
+    padding: 0.05rem 0;
+  }
+  .viw-score-breakdown-table tbody th.viw-score-row-bill {
+    grid-area: bill;
+    max-width: none;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  /* Identify the numeric cells by order — the cell is now 3 td's after the
+     single structured th: sign, amp×weight, contribution. */
+  .viw-score-breakdown-table tbody tr td:nth-of-type(1) { grid-area: sign; }
+  .viw-score-breakdown-table tbody tr td:nth-of-type(2) { grid-area: mag; }
+  .viw-score-breakdown-table tbody tr td:nth-of-type(3) { grid-area: contrib; }
+  /* Footer collapses to a single summary strip */
+  .viw-score-breakdown-table tfoot tr {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.35rem 0 0;
+    border-top: 2px solid var(--viw-black);
+  }
+  .viw-score-breakdown-table tfoot tr > * {
+    border: 0;
+    padding: 0;
+  }
+  .viw-score-row-total { text-align: left; }
 }
 
 .viw-score-title {
@@ -588,6 +1835,16 @@
   color: var(--viw-black);
 }
 
+/* FR-43 AC-43.5: enlarged title treatment. Title acts as a section header
+   rather than a tiny caption. Clamps so it never dominates at huge
+   viewports while still stepping up from the current 0.75rem. */
+.viw-score-title-lg {
+  display: block;
+  font-size: clamp(1rem, 2.2vw, 1.4rem);
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
 .viw-score-value {
   font-family: var(--viw-font);
   font-weight: 900;
@@ -595,6 +1852,9 @@
   font-size: 1.75rem;
   letter-spacing: -0.02em;
   color: var(--viw-black);
+  /* FR-43 AC-43.3: saturation filter animates smoothly when confidence
+     shifts between renders (e.g., after more votes land). */
+  transition: filter 200ms ease-out;
 }
 
 .viw-score-bar { margin: 0.6rem 0 0.4rem; }
@@ -796,6 +2056,10 @@
   color: var(--viw-white);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  /* "DID NOT VOTE" is three words and 10 chars; let the whole pill wrap
+     as one unit rather than breaking mid-phrase. Also prevents the pill
+     from squeezing to a single-char-per-line slice under narrow columns. */
+  white-space: nowrap;
 }
 .viw-vote-aye { background: var(--viw-valence-voted-pro); }
 .viw-vote-nay { background: var(--viw-valence-voted-anti); }
@@ -805,6 +2069,13 @@
 .viw-vote.viw-vote-valence-unstated      { background: var(--viw-valence-unstated); }
 .viw-vote.viw-vote-valence-voted-anti    { background: var(--viw-valence-voted-anti); }
 .viw-vote.viw-vote-valence-sponsor-anti  { background: var(--viw-valence-sponsor-anti); }
+/* Position-literal pills (UAT 2026-04-19) — color by the member's
+   actual Aye/Nay, not by derived valence. Saturation is filter-applied
+   per row based on vote.weight so procedurals desaturate naturally. */
+.viw-vote.viw-vote-pos-aye      { background: var(--viw-valence-voted-pro); }
+.viw-vote.viw-vote-pos-nay      { background: var(--viw-valence-voted-anti); }
+.viw-vote.viw-vote-pos-unstated { background: var(--viw-valence-unstated); }
+.viw-vote { transition: filter 200ms ease-out; }
 
 /* Procedural rows */
 .viw-vote-row-procedural { background: rgba(0,0,0,0.015); }
@@ -1108,6 +2379,32 @@
   position: relative;
   align-items: stretch;
 }
+
+/* Suppress the browser-native search-cancel ("×") button on type="search"
+ * inputs. The status glyph (.viw-search-status) sits in the same trailing
+ * slot and was overlapping the native button on Chrome + Safari. We don't
+ * expose an explicit clear affordance today — users can select-all +
+ * delete. If we want one, render it in the React component so we own its
+ * positioning deterministically. */
+.viw-name-search-row input[type='search']::-webkit-search-cancel-button,
+.viw-name-search-row input[type='search']::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+.viw-name-search-row input[type='search']::-ms-clear,
+.viw-name-search-row input[type='search']::-ms-reveal {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Reserve horizontal space on the right so text never runs beneath the
+ * status glyph, even on long names like "Hoeven" or a typed state list. */
+.viw-name-search-row input[type='search'] {
+  padding-right: 40px;
+}
+
 .viw-search-status {
   position: absolute;
   right: 10px;
