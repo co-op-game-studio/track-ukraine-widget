@@ -35,6 +35,8 @@ function resultToRepresentative(r: NameSearchResult): Representative {
     photoUrl: sanitizeUrl(r.photoUrl),
     isNonVoting: false,
     officialWebsiteUrl: null,
+    yearEntered: r.yearEntered,
+    socials: r.socials,
   };
 }
 
@@ -101,6 +103,7 @@ export function NameSearchResultsPanel({
                 representative={r}
                 selected={openId === r.bioguideId}
                 onClick={() => toggle(r.bioguideId)}
+                apiBase={apiBase}
               />
             ))}
           </div>

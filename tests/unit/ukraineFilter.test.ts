@@ -45,10 +45,14 @@ describe('Ukraine bill filter', () => {
     expect(featured.length).toBeGreaterThanOrEqual(5);
   });
 
-  it('getCuratedBills returns roughly 27 curated bills total', () => {
+  it('getCuratedBills returns a non-trivial number of curated bills (floor check)', () => {
+    // Lower bound sanity — the dataset should always be more than a handful.
+    // Upper bound intentionally loose (500) since the curated set grows with
+    // each Congress and each curator-seed expansion (last seen: 62 post-
+    // v0.1.0 review-ledger application, 2026-04-19).
     const all = getCuratedBills();
     expect(all.length).toBeGreaterThan(20);
-    expect(all.length).toBeLessThan(40);
+    expect(all.length).toBeLessThan(500);
   });
 
   it('getCuratedVotesForChamber("House") returns House votes with billy context', () => {

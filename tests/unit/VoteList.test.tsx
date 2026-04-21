@@ -1,12 +1,9 @@
 /**
- * VoteList — cluster auto-expand behavior (FR-21 AC-21.3).
- *
- * A cluster that contains an obstruction event must render its procedural
- * children visible by default, so the OBSTRUCTION tags in the callout count
- * always match what the voter can see.
+ * VoteList \u2014 cluster render + loading/error/empty + procedural toggle +
+ * obstruction tagging. Traces to: FR-21, AC-21.3, AC-34.3.
  */
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { VoteList } from '../../src/components/VoteList';
 import type { ClusteredMemberVoteWithValence, MemberVoteRow } from '../../src/hooks/useVotingRecord';
 import type { CuratedBill, CuratedBillVote, VoteKind } from '../../src/services/ukraineFilter';
@@ -77,5 +74,77 @@ describe('VoteList auto-expand', () => {
     };
     render(<VoteList clusters={[cluster]} />);
     expect(screen.getByText(/Show 1 procedural vote/)).toBeInTheDocument();
+  });
+});
+
+describe('VoteList states', () => {
+  it('renders a loading placeholder when loading=true and clusters are empty', () => {
+    const { container } = render(<VoteList clusters={[]} loading />);
+    expect(container.querySelector('.viw-votelist-empty')).not.toBeNull();
+    expect(container.textContent).toMatch(/Loading/);
+  });
+
+  it('renders role=alert with the error message when error is set', () => {
+    render(<VoteList clusters={[]} error="Vote feed is down." />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/Vote feed is down\./);
+  });
+
+  it('renders an empty-state message when no clusters and no error', () => {
+    render(<VoteList clusters={[]} />);
+    expect(screen.getByText(/No Ukraine-related votes/i)).toBeInTheDocument();
+  });
+});
+
+describe('VoteList — procedural toggle', () => {
+  it('Show N procedural vote(s) toggle expands, then collapses on re-click', () => {
+    const cluster: ClusteredMemberVoteWithValence = {
+      primary: row(vote(48, 'passage', 1.0), 'Aye', 'voted-pro', false),
+      procedural: [row(vote(47, 'cloture', 0.45), 'Aye', 'voted-pro', false)],
+    };
+    render(<VoteList clusters={[cluster]} />);
+    const toggle = screen.getByRole('button', { name: /Show 1 procedural vote/i });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.textContent).toMatch(/Hide/);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  });
+});
+
+describe('VoteList \u2014 obstruction + procedural tagging', () => {
+  it('renders the OBSTRUCTION tag on rows flagged as obstruction events', () => {
+    const cluster: ClusteredMemberVoteWithValence = {
+      primary: row(vote(48, 'passage', 1.0), 'Nay', 'voted-anti', true),
+      procedural: [],
+    };
+    render(<VoteList clusters={[cluster]} />);
+    expect(screen.getByText('OBSTRUCTION')).toBeInTheDocument();
+  });
+
+  it('renders the procedural tag for low-weight procedural rows (weight in (0, 0.5))', () => {
+    const cluster: ClusteredMemberVoteWithValence = {
+      primary: row(vote(48, 'passage', 1.0), 'Aye', 'voted-pro', false),
+      procedural: [row(vote(47, 'cloture', 0.3), 'Aye', 'voted-pro', false)],
+    };
+    const { container } = render(<VoteList clusters={[cluster]} />);
+    fireEvent.click(screen.getByRole('button', { name: /Show 1 procedural vote/i }));
+    // The low-weight row carries the "procedural" tag. Scope to the tag
+    // span so we don't collide with the toggle button text ("1 procedural
+    // vote").
+    const tag = container.querySelector('.viw-vote-weight-tag');
+    expect(tag?.textContent).toMatch(/procedural/i);
+  });
+
+  it('renders the bill number on the primary row', () => {
+    const cluster: ClusteredMemberVoteWithValence = {
+      primary: row(vote(48, 'passage', 1.0), 'Aye', 'voted-pro', false),
+      procedural: [],
+    };
+    const { container } = render(<VoteList clusters={[cluster]} />);
+    // Slug uses the unified formatBillSlug helper: "HR 815" (no period
+    // after House types). Matches About panel + score-breakdown panel.
+    const slug = container.querySelector('.viw-votelist-billslug')?.textContent;
+    expect(slug).toBe('HR 815');
   });
 });

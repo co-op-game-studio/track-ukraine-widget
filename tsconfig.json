@@ -19,6 +19,18 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true
   },
-  "include": ["src", "tests", "scripts", "proxy/lib.ts"],
+  "include": [
+    "src",
+    "tests",
+    "scripts",
+    "proxy/lib.ts",
+    "proxy/observability/**/*.ts",
+    "proxy/cache/**/*.ts",
+    "proxy/upstreams/**/*.ts",
+    "proxy/security/**/*.ts",
+    "proxy/kv/**/*.ts",
+    "proxy/routes/**/*.ts",
+    "proxy/router.ts"
+  ],
   "exclude": ["proxy/worker.ts", "node_modules", "dist"]
 }

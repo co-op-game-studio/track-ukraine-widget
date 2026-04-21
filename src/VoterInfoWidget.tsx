@@ -4,13 +4,16 @@
  * live name-search).
  * Traces to: T-021, FR-31, all user stories.
  */
+import { useRef } from 'react';
 import { AddressInput } from './components/AddressInput';
 import { NameSearchInput } from './components/NameSearchInput';
 import { NameSearchResultsPanel } from './components/NameSearchResultsPanel';
 import { ErrorBanner } from './components/ErrorBanner';
 import { ResultsPanel } from './components/ResultsPanel';
+import { AboutSystemPanel } from './components/AboutSystemPanel';
 import { useAddressLookup } from './hooks/useAddressLookup';
 import { useNameSearch } from './hooks/useNameSearch';
+import { getEnvelopeFromError } from './services/errorEnvelope';
 
 export interface VoterInfoWidgetProps {
   /** Base URL for proxy API calls. Empty string = same-origin. */
@@ -25,6 +28,14 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
   const search = useNameSearch(apiBase);
   const loading = lookup.status === 'loading';
   const hasActiveSearch = search.query.trim().length >= 2;
+  // Remember the last-submitted address so the ErrorBanner's "Try again"
+  // button (FR-37 AC-37.5) can re-invoke the lookup without re-prompting
+  // the user. Populated on every AddressInput submit.
+  const lastAddressRef = useRef<string | null>(null);
+
+  // FR-37 AC-37.5/AC-37.8: pull the enveloped view off the error if the
+  // service threw one. Otherwise fall back to the pre-v2.6.0 shape.
+  const envelope = lookup.error ? getEnvelopeFromError(lookup.error) : null;
 
   return (
     <div className="viw-root">
@@ -32,6 +43,7 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
       <AddressInput
         onSubmit={(addr) => {
           search.clear();
+          lastAddressRef.current = addr;
           return lookup.lookup(addr);
         }}
         disabled={loading}
@@ -51,7 +63,16 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
       />
 
       {lookup.error && !hasActiveSearch && (
-        <ErrorBanner message={lookup.error.message} onDismiss={lookup.reset} />
+        <ErrorBanner
+          message={envelope?.userMessage ?? lookup.error.message}
+          onDismiss={lookup.reset}
+          traceId={envelope?.traceId}
+          onRetry={
+            envelope?.retryable && lastAddressRef.current
+              ? () => { void lookup.lookup(lastAddressRef.current!); }
+              : undefined
+          }
+        />
       )}
 
       {hasActiveSearch ? (
@@ -75,6 +96,7 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
           <br />
           We do not store or keep any information you enter in this form.
         </small>
+        <AboutSystemPanel />
       </footer>
     </div>
   );

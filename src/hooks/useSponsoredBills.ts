@@ -18,6 +18,7 @@ import {
   lookupCuratedBill,
   type CuratedBill,
 } from '../services/ukraineFilter';
+import { throwFromResponse } from '../services/errorEnvelope';
 import { computeValence, type Valence } from '../services/valence';
 import type { CongressLegislationRawEntry } from '../types/api';
 
@@ -116,7 +117,7 @@ export function useSponsoredBills(
     try {
       const base = apiBase.replace(/\/+$/, '');
       const res = await fetch(`${base}/api/members/${encodeURIComponent(bioguideId)}`);
-      if (!res.ok) throw new Error(`member profile ${res.status}`);
+      if (!res.ok) await throwFromResponse(res, `member profile ${bioguideId}`);
       const profile = (await res.json()) as {
         sponsored?: CongressLegislationRawEntry[];
         cosponsored?: CongressLegislationRawEntry[];
