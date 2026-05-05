@@ -110,7 +110,10 @@ jobs:
 
       # D1 migrations are idempotent — wrangler tracks applied migrations in
       # the d1_migrations table and only runs new ones. Safe to run every deploy.
+      # continue-on-error until CLOUDFLARE_API_TOKEN gets D1 Edit permission
+      # added — the token currently has Worker scope only and 7403s on D1 calls.
       - name: Apply D1 migrations
+        continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -126,7 +129,10 @@ jobs:
 
       # Seed is idempotent (upsert with ON CONFLICT, short-circuits when roster
       # exists). Auto-runs every deploy so a fresh env never lands empty.
+      # continue-on-error so a misconfigured CF Access service token doesn't
+      # block deploys — admin UI Re-sync button is the manual fallback.
       - name: Seed ingest roster
+        continue-on-error: true
         env:
           ENV_NAME: ${{ needs.resolve.outputs.env_name }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
