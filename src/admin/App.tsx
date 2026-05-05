@@ -16,6 +16,7 @@ import { PeopleTab } from './components/PeopleTab';
 import { CurationTab, type CurationView } from './components/curation/CurationTab';
 import { SettingsTab, type SettingsView } from './components/settings/SettingsTab';
 import { AuditTab } from './components/AuditTab';
+import { HelpTab, type HelpView } from './components/help/HelpTab';
 import { ThemeToggle } from './components/ThemeToggle';
 import { useTheme } from './useTheme';
 
@@ -23,7 +24,7 @@ import { useTheme } from './useTheme';
 /*                                  Types                                     */
 /* -------------------------------------------------------------------------- */
 
-export type Section = 'people' | 'bills' | 'curation' | 'activity' | 'settings';
+export type Section = 'people' | 'bills' | 'curation' | 'activity' | 'settings' | 'help';
 
 /** Data passed from Curation > Inbox "Curate" to Curation > Add Quote. */
 export interface QuotePrefill {
@@ -45,15 +46,18 @@ interface RouteState {
   curationView: CurationView;
   /** When section === 'settings', the sub-view. */
   settingsView: SettingsView;
+  /** When section === 'help', the sub-view. */
+  helpView: HelpView;
 }
 
 /* -------------------------------------------------------------------------- */
 /*                              Hash routing                                  */
 /* -------------------------------------------------------------------------- */
 
-const VALID_SECTIONS: Section[] = ['people', 'bills', 'curation', 'activity', 'settings'];
+const VALID_SECTIONS: Section[] = ['people', 'bills', 'curation', 'activity', 'settings', 'help'];
 const VALID_CURATION: CurationView[] = ['inbox', 'add', 'quotes', 'research', 'direct'];
 const VALID_SETTINGS: SettingsView[] = ['keywords', 'tags', 'cache', 'poll-status', 'config'];
+const VALID_HELP: HelpView[] = ['getting-started', 'curation', 'people-polls', 'bills-votes', 'scoring'];
 
 function parseHash(hash: string): RouteState {
   const clean = hash.replace(/^#\/?/, '');
@@ -64,6 +68,7 @@ function parseHash(hash: string): RouteState {
   let bioguide: string | null = null;
   let curationView: CurationView = 'inbox';
   let settingsView: SettingsView = 'keywords';
+  let helpView: HelpView = 'getting-started';
 
   if (section === 'people' && parts[1]) {
     bioguide = parts[1];
@@ -74,14 +79,18 @@ function parseHash(hash: string): RouteState {
   if (section === 'settings' && parts[1] && (VALID_SETTINGS as string[]).includes(parts[1])) {
     settingsView = parts[1] as SettingsView;
   }
+  if (section === 'help' && parts[1] && (VALID_HELP as string[]).includes(parts[1])) {
+    helpView = parts[1] as HelpView;
+  }
 
-  return { section, bioguide, curationView, settingsView };
+  return { section, bioguide, curationView, settingsView, helpView };
 }
 
 function buildHash(state: RouteState): string {
   if (state.section === 'people' && state.bioguide) return `#/people/${state.bioguide}`;
   if (state.section === 'curation') return `#/curation/${state.curationView}`;
   if (state.section === 'settings') return `#/settings/${state.settingsView}`;
+  if (state.section === 'help') return `#/help/${state.helpView}`;
   return `#/${state.section}`;
 }
 
@@ -160,6 +169,16 @@ function Megamenu({
         { label: 'App config', href: '#/settings/config', isActive: (s) => s.section === 'settings' && s.settingsView === 'config', onClick: () => navigate({ section: 'settings', settingsView: 'config' }) },
       ],
     },
+    {
+      heading: 'Help',
+      links: [
+        { label: 'Getting started', href: '#/help/getting-started', isActive: (s) => s.section === 'help' && s.helpView === 'getting-started', onClick: () => navigate({ section: 'help', helpView: 'getting-started' }) },
+        { label: 'Curation guide', href: '#/help/curation', isActive: (s) => s.section === 'help' && s.helpView === 'curation', onClick: () => navigate({ section: 'help', helpView: 'curation' }) },
+        { label: 'People & polls', href: '#/help/people-polls', isActive: (s) => s.section === 'help' && s.helpView === 'people-polls', onClick: () => navigate({ section: 'help', helpView: 'people-polls' }) },
+        { label: 'Bills & votes', href: '#/help/bills-votes', isActive: (s) => s.section === 'help' && s.helpView === 'bills-votes', onClick: () => navigate({ section: 'help', helpView: 'bills-votes' }) },
+        { label: 'Scoring', href: '#/help/scoring', isActive: (s) => s.section === 'help' && s.helpView === 'scoring', onClick: () => navigate({ section: 'help', helpView: 'scoring' }) },
+      ],
+    },
   ];
 
   // Compute the breadcrumb trail for the trigger button label.
@@ -173,6 +192,10 @@ function Megamenu({
     if (state.section === 'settings') {
       const sub = columns[2]!.links.find((l) => l.isActive(state));
       return `Admin · ${sub?.label ?? 'Keywords'}`;
+    }
+    if (state.section === 'help') {
+      const sub = columns[3]!.links.find((l) => l.isActive(state));
+      return `Help · ${sub?.label ?? 'Getting started'}`;
     }
     return 'Activity';
   })();
@@ -326,6 +349,12 @@ export function App() {
           />
         )}
         {state.section === 'activity' && <AuditTab />}
+        {state.section === 'help' && (
+          <HelpTab
+            view={state.helpView}
+            onChangeView={(v) => navigate({ section: 'help', helpView: v })}
+          />
+        )}
       </main>
     </div>
   );
@@ -372,7 +401,7 @@ const menuStyles: Record<string, React.CSSProperties> = {
     boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
     padding: 16,
     display: 'grid',
-    gridTemplateColumns: 'repeat(3, minmax(160px, 1fr))',
+    gridTemplateColumns: 'repeat(4, minmax(150px, 1fr))',
     gap: 24,
     zIndex: 100,
   },
