@@ -6,9 +6,7 @@
  *  upstream feed are dropped — we only need handles. */
 export interface MemberSocials {
   twitter?: string;
-  facebook?: string;
   youtube?: string;
-  instagram?: string;
 }
 
 export interface Representative {

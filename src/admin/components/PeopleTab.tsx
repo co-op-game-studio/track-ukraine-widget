@@ -209,7 +209,7 @@ function PeopleListView({ onOpenProfile }: { onOpenProfile: (bioguideId: string)
   const [entityName, setEntityName] = useState('');
   const [accountCategory, setAccountCategory] = useState('influencer');
   const [addHandles, setAddHandles] = useState<Record<string, string>>({
-    bluesky: '', youtube: '', mastodon: '', facebook: '', instagram: '', threads: '',
+    bluesky: '', youtube: '', mastodon: '', threads: '',
   });
   const [adding, setAdding] = useState(false);
 

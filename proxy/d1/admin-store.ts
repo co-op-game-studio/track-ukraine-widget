@@ -206,7 +206,7 @@ export class ValidationError extends Error {
   }
 }
 
-const VALID_PLATFORMS = new Set(['x', 'facebook', 'youtube', 'instagram', 'other']);
+const VALID_PLATFORMS = new Set(['x', 'youtube', 'other']);
 const VALID_MEDIA_KINDS = new Set(['video', 'audio', 'text', 'image', 'social']);
 const VALID_DIRECTIONS = new Set(['pro-ukraine', 'anti-ukraine', 'ambiguous']);
 const VALID_CHAMBERS = new Set(['House', 'Senate']);

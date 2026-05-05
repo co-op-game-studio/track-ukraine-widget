@@ -52,21 +52,9 @@ const SOCIAL_ICONS: Record<string, ReactElement> = {
       <path d="M22.46 6c-.77.35-1.6.58-2.46.69.88-.53 1.56-1.37 1.88-2.38-.83.5-1.75.86-2.72 1.05C18.37 4.5 17.26 4 16 4c-2.35 0-4.27 1.92-4.27 4.29 0 .34.04.67.11.98C8.28 9.09 5.11 7.38 3 4.79c-.37.63-.58 1.37-.58 2.15 0 1.49.75 2.81 1.91 3.56-.71 0-1.37-.2-1.95-.5v.03c0 2.08 1.48 3.82 3.44 4.21a4.22 4.22 0 0 1-1.93.07 4.28 4.28 0 0 0 4 2.98 8.52 8.52 0 0 1-5.33 1.84c-.34 0-.68-.02-1.02-.06C3.44 20.29 5.7 21 8.12 21 16 21 20.33 14.46 20.33 8.79c0-.19 0-.37-.01-.56.84-.6 1.56-1.36 2.14-2.23z" />
     </svg>
   ),
-  facebook: (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor">
-      <path d="M13.5 21v-7.5h2.5l.4-3H13.5v-2c0-.8.3-1.4 1.4-1.4H16.5V4.3c-.3 0-1.2-.1-2.3-.1-2.3 0-3.7 1.4-3.7 3.9v2.4H8v3h2.5V21h3z" />
-    </svg>
-  ),
   youtube: (
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor">
       <path d="M23 12s0-3.7-.5-5.4a2.8 2.8 0 0 0-2-2C18.8 4 12 4 12 4s-6.8 0-8.5.6a2.8 2.8 0 0 0-2 2C1 8.3 1 12 1 12s0 3.7.5 5.4a2.8 2.8 0 0 0 2 2c1.7.6 8.5.6 8.5.6s6.8 0 8.5-.6a2.8 2.8 0 0 0 2-2c.5-1.7.5-5.4.5-5.4zM10 15.5v-7l6 3.5-6 3.5z" />
-    </svg>
-  ),
-  instagram: (
-    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="3" width="18" height="18" rx="5" />
-      <circle cx="12" cy="12" r="4" />
-      <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
     </svg>
   ),
 };
@@ -78,17 +66,9 @@ function SocialsRow({ name, socials }: { name: string; socials?: Representative[
     const url = sanitizeUrl(`https://twitter.com/${encodeURIComponent(socials.twitter)}`);
     if (url) links.push({ platform: 'Twitter', key: 'twitter', url });
   }
-  if (socials.facebook) {
-    const url = sanitizeUrl(`https://facebook.com/${encodeURIComponent(socials.facebook)}`);
-    if (url) links.push({ platform: 'Facebook', key: 'facebook', url });
-  }
   if (socials.youtube) {
     const url = sanitizeUrl(`https://youtube.com/@${encodeURIComponent(socials.youtube)}`);
     if (url) links.push({ platform: 'YouTube', key: 'youtube', url });
-  }
-  if (socials.instagram) {
-    const url = sanitizeUrl(`https://instagram.com/${encodeURIComponent(socials.instagram)}`);
-    if (url) links.push({ platform: 'Instagram', key: 'instagram', url });
   }
   if (links.length === 0) return null;
   return (

@@ -148,7 +148,7 @@ describe('BillsTab — bill_id derivation (FR-52 AC-52.12)', () => {
     render(<BillsTab />);
     fireEvent.click(await screen.findByText(/119-HR-2118/));
     // Link to Congress.gov should be present, opens in new tab.
-    const link = await screen.findByRole('link', { name: /Open/i });
+    const link = await screen.findByRole('link', { name: /congress\.gov/i });
     expect(link.getAttribute('href')).toBe(
       'https://www.congress.gov/bill/119th-congress/house-bill/2118',
     );
@@ -311,17 +311,17 @@ describe('BillsTab — bill_id derivation (FR-52 AC-52.12)', () => {
   // AC-52.20 (revised) — Latest action shares its row with Date (Date first).
   // Width tier is `long` (60ch cap) so a 360px column won't clip typical
   // action strings while leaving room for Date. Long actions wrap inside.
-  it('AC-52.20: Latest action input occupies its own grid slot at the long width tier', async () => {
+  it('AC-52.20: Latest action renders as a static read-only label (not an input)', async () => {
     await openSampleBillEditor();
-    const latestAction = [...document.querySelectorAll('input[type="text"]')].find((el) => {
+    // latest_action is now kind:'static-text' — rendered as a <span>, not an <input>.
+    const latestActionInput = [...document.querySelectorAll('input[type="text"]')].find((el) => {
       const lbl = el.parentElement?.querySelector('span')?.textContent ?? '';
       return /Latest action$/.test(lbl);
-    }) as HTMLInputElement;
-    expect(latestAction).toBeDefined();
-    const gridSlot = latestAction.closest('div[style*="flex"]') as HTMLDivElement;
-    // long tier → flex: 1 1 360px; max-width 60ch.
-    expect(gridSlot.style.flex).toMatch(/360px/);
-    expect(gridSlot.style.maxWidth).toMatch(/60ch/);
+    });
+    expect(latestActionInput).toBeUndefined();
+    // The static label should be present as a span.
+    const labels = [...document.querySelectorAll('span')].filter(s => /Latest action/i.test(s.textContent ?? ''));
+    expect(labels.length).toBeGreaterThan(0);
   });
 
   // AC-52.14 — list-item ellipsis.

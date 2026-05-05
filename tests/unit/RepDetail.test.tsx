@@ -315,24 +315,18 @@ describe('RepDetail', () => {
       ...durbin,
       socials: {
         twitter: 'senatordurbin',
-        facebook: 'SenatorDurbin',
         youtube: 'senatordurbin',
-        instagram: 'senatordurbin',
       },
     };
     render(<RepDetail representative={withSocials} apiBase="" onClose={() => {}} />);
     expect(screen.getByLabelText(/Durbin.+on Twitter/i)).toHaveAttribute(
       'href', 'https://twitter.com/senatordurbin',
     );
-    expect(screen.getByLabelText(/Durbin.+on Facebook/i)).toHaveAttribute(
-      'href', 'https://facebook.com/SenatorDurbin',
-    );
     expect(screen.getByLabelText(/Durbin.+on YouTube/i)).toHaveAttribute(
       'href', 'https://youtube.com/@senatordurbin',
     );
-    expect(screen.getByLabelText(/Durbin.+on Instagram/i)).toHaveAttribute(
-      'href', 'https://instagram.com/senatordurbin',
-    );
+    expect(screen.queryByLabelText(/Facebook/i)).toBeNull();
+    expect(screen.queryByLabelText(/Instagram/i)).toBeNull();
   });
 
   it('FR-48: renders no social row when socials object is absent or empty', () => {

@@ -30,9 +30,7 @@ export interface MemberProfile {
    *  unitedstates/congress-legislators. Optional. */
   socials?: {
     twitter?: string;
-    facebook?: string;
     youtube?: string;
-    instagram?: string;
   };
   /**
    * FR-55 / ADR-018 §6 — party-mean Ukraine score, used by the embed as the

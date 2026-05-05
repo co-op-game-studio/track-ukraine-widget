@@ -229,15 +229,20 @@ describe('BillCommentsSection — Save flash (AC-52.68)', () => {
   it('AC-52.23(e): Delete fires DELETE with ?reason= populated', async () => {
     const calls: RouteCall[] = [];
     installFetch({ votes: [sampleVote], onCall: (c) => calls.push(c) });
-    // jsdom's window.confirm always returns true unless stubbed; force true.
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    vi.spyOn(window, 'prompt').mockReturnValue('superseded by roll-call 67');
     render(<BillVotesSection billId="117-HR-2471" />);
 
     const weightInput = await screen.findByDisplayValue('0.9');
     const row = weightInput.closest('form, [data-row="vote"]') as HTMLElement;
+
+    // Click Delete to reveal the inline confirm UI.
     const delBtn = within(row).getByRole('button', { name: /^Delete$/i });
     fireEvent.click(delBtn);
+
+    // Fill in the inline reason input and click Confirm delete.
+    const reasonInput = await screen.findByPlaceholderText(/Reason for delete/i);
+    fireEvent.change(reasonInput, { target: { value: 'superseded by roll-call 67' } });
+    const confirmBtn = within(row).getByRole('button', { name: /Confirm delete/i });
+    fireEvent.click(confirmBtn);
 
     await waitFor(() => {
       const del = calls.find((c) => c.method === 'DELETE' && c.url.includes('/votes/v1'));

@@ -121,7 +121,7 @@ export async function ensureIngestSeeded(
 /* ---------- Roster seeding ---------- */
 
 interface NameEntryWithSocials extends NameIndexEntry {
-  socials?: { twitter?: string; facebook?: string; youtube?: string; instagram?: string; mastodon?: string };
+  socials?: { twitter?: string; youtube?: string; mastodon?: string };
 }
 
 interface CongressLegSocial {
@@ -165,8 +165,6 @@ async function seedRosterFromSources(
         const s: Record<string, string> = {};
         if (typeof entry.social.youtube === 'string') s.youtube = entry.social.youtube;
         if (typeof entry.social.youtube_id === 'string') youtubeChannelIds.set(bid, entry.social.youtube_id);
-        if (typeof entry.social.facebook === 'string') s.facebook = entry.social.facebook;
-        if (typeof entry.social.instagram === 'string') s.instagram = entry.social.instagram;
         if (typeof entry.social.mastodon === 'string') { s.mastodon = entry.social.mastodon; mastodonCount++; }
         upstreamSocials.set(bid, s);
       }
@@ -177,7 +175,7 @@ async function seedRosterFromSources(
 
   // Upsert handles.
   let upserted = 0;
-  const platformMap: Record<string, string> = { youtube: 'youtube', facebook: 'facebook', instagram: 'instagram', mastodon: 'mastodon' };
+  const platformMap: Record<string, string> = { youtube: 'youtube', mastodon: 'mastodon' };
 
   for (const m of allMembers) {
     const upstream = upstreamSocials.get(m.bioguideId) ?? {};

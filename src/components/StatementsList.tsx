@@ -145,6 +145,7 @@ function sourceLabel(source: string, kind: 'post' | 'quote'): string {
       case 'facebook': return 'Facebook';
       case 'youtube': return 'YouTube';
       case 'instagram': return 'Instagram';
+      // facebook + instagram: kept for display of existing data, not offered for new posts
       default: return source;
     }
   }
