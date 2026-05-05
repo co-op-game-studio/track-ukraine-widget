@@ -34,6 +34,25 @@ export interface MemberProfile {
     youtube?: string;
     instagram?: string;
   };
+  /**
+   * FR-55 / ADR-018 §6 — party-mean Ukraine score, used by the embed as the
+   * Bayesian shrink target for under-confident reps. Stamped onto each
+   * record by the Worker's read-through fill from a separate KV key
+   * (`scores:v1:party-priors`) computed at publish time by
+   * `scripts/compute-party-priors.ts`.
+   *
+   * `null` when:
+   *   - the priors KV key is missing entirely (cold deploy, before the
+   *     publish job has run for the first time)
+   *   - the rep's party has fewer than 5 full-confidence reps (degenerate
+   *     population — see ADR-018 "Risk" section)
+   *
+   * In either null case, `useUkraineScore` skips the shrink branch and
+   * the displayed score equals the raw score (current pre-V4 behavior).
+   * Older KV records (predating this field) read as `undefined` →
+   * frontend treats `undefined` and `null` interchangeably as "no shrink."
+   */
+  partyPrior?: number | null;
   generatedAt: string;
   schemaVersion: number;
 }
