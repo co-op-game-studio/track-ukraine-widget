@@ -339,14 +339,16 @@ describe('projectAuditFeedPublic (FR-58 AC-58.2)', () => {
 });
 
 describe('projectAuditFeedFull (FR-58 AC-58.1)', () => {
-  it('exposes before / after / reason / traceId on the authenticated feed', () => {
+  it('exposes before / after / reason / trace_id on the authenticated feed', () => {
+    // Field names are snake_case per the AC-58.1 revision — match D1 column
+    // names so handleAudit can return the KV projection unchanged.
     const r = projectAuditFeedFull([sampleAudit], ISO);
     const item = r.items[0] as Record<string, unknown>;
-    expect(item['actorEmail']).toBe('alice@example.com');
+    expect(item['actor_email']).toBe('alice@example.com');
     expect(item['before']).toEqual({ weight: 0.9 });
     expect(item['after']).toEqual({ weight: 2.0 });
     expect(item['reason']).toBe('reweighting');
-    expect(item['traceId']).toBe('tr_abcdef0123456789');
+    expect(item['trace_id']).toBe('tr_abcdef0123456789');
   });
 });
 

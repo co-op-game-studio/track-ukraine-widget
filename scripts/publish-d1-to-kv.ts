@@ -98,6 +98,16 @@ export interface StatsKvRecord {
     directionAnti: number;
   }>;
   commentsTimeseries: Array<{ date: string; count: number }>;
+  /**
+   * FR-56 AC-56.1 — score-derived fields. Written by
+   * `scripts/compute-party-priors.ts` via read-modify-write on top of the
+   * record this script produces. Optional on the type because the base
+   * publish run (`publish-d1-to-kv`) doesn't compute them; the priors
+   * script overlays them in the second step of the publish workflow.
+   */
+  perRepHistogram?: { buckets: number[]; counts: number[] };
+  topAntiUkraine?: Array<{ bioguideId: string; displayName: string; score: number; weightedAntiActions: number }>;
+  partyPriors?: Record<string, number | null>;
 }
 
 export interface AuditFeedKvRecord {
@@ -195,6 +205,17 @@ export function projectAuditFeedPublic(
   return { generatedAt, schemaVersion: 1, items };
 }
 
+/**
+ * Authenticated audit projection (FR-58 AC-58.1, AC-58.3, AC-58.6).
+ *
+ * Field-naming choice: snake_case matches the D1 column names and AC-58.1
+ * spec verbatim. `handleAudit` returns this projection unchanged from KV;
+ * researchers and ops queries rely on the consistency between D1 schema,
+ * KV record, and API response.
+ *
+ * Contrast with the public projection (AC-58.2) which deliberately uses
+ * camelCase + a shorter set of fields.
+ */
 export function projectAuditFeedFull(
   audits: D1Audit[],
   generatedAt: string,
@@ -208,16 +229,16 @@ export function projectAuditFeedFull(
     .slice(0, limit);
   const items = sorted.map((r) => ({
     id: r.id,
-    actorEmail: r.actor_email,
+    actor_email: r.actor_email,
     action: r.action,
-    targetTable: r.target_table,
-    rowId: r.row_id,
-    rowTitle: r.row_title,
+    target_table: r.target_table,
+    row_id: r.row_id,
+    row_title: r.row_title,
     before: r.before_json ? JSON.parse(r.before_json) : null,
     after: r.after_json ? JSON.parse(r.after_json) : null,
     reason: r.reason,
-    traceId: r.trace_id,
-    createdAt: r.created_at,
+    trace_id: r.trace_id,
+    created_at: r.created_at,
   }));
   return { generatedAt, schemaVersion: 1, items };
 }

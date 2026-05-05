@@ -13,8 +13,9 @@ import { KeywordsView } from '../SocialFeedTab';
 import { TagsView } from './TagsView';
 import { PollStatusView } from './PollStatusView';
 import { AppConfigView } from './AppConfigView';
+import { CacheView } from './CacheView';
 
-export type SettingsView = 'keywords' | 'tags' | 'poll-status' | 'config';
+export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'config';
 
 interface ViewSpec {
   id: SettingsView;
@@ -27,6 +28,7 @@ interface ViewSpec {
 const VIEWS: ViewSpec[] = [
   { id: 'keywords',    label: 'Keywords',    help: 'Match keywords for the social ingest pipeline', editable: true },
   { id: 'tags',        label: 'Tags',        help: 'Color-coded labels applied to quotes', editable: true },
+  { id: 'cache',       label: 'Cache',       help: 'Inspect + purge KV cache records', editable: true },
   { id: 'poll-status', label: 'Poll status', help: 'Per-handle health (read-only)', editable: false },
   { id: 'config',      label: 'App config',  help: 'Deployment-time settings (read-only)', editable: false },
 ];
@@ -59,6 +61,7 @@ export function SettingsTab({
       <div style={styles.body}>
         {view === 'keywords'    && <KeywordsView />}
         {view === 'tags'        && <TagsView />}
+        {view === 'cache'       && <CacheView />}
         {view === 'poll-status' && <ReadOnlyWrap reason="Poll status is read-only — failures persist for engineering visibility."><PollStatusView /></ReadOnlyWrap>}
         {view === 'config'      && <ReadOnlyWrap reason="Set per-env in wrangler.toml. Edit there and redeploy to change."><AppConfigView /></ReadOnlyWrap>}
       </div>

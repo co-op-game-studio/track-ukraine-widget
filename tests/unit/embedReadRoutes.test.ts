@@ -273,14 +273,17 @@ describe('handleAuditPublic (FR-58 AC-58.2 / AC-58.4)', () => {
     expect(item).not.toHaveProperty('actor_email');
   });
 
-  it('returns 404 envelope when the feed has not been published yet', async () => {
+  it('returns 200 with empty list when the feed has not been published yet (FR-58 AC-58.5)', async () => {
+    // Updated per AC-58.5: missing-record fallback returns an empty list,
+    // not 404. Embed renders "no recent activity" rather than a hard error.
     const result = await handleAuditPublic(
       makeRequest(),
       makeEnv(new FakeKv()),
       ORIGIN,
     );
-    expect(result.response.status).toBe(404);
-    const body = (await result.response.json()) as { error: string };
-    expect(body.error).toBe('audit_feed_not_found');
+    expect(result.response.status).toBe(200);
+    const body = (await result.response.json()) as { schemaVersion: number; items: unknown[] };
+    expect(body.schemaVersion).toBe(1);
+    expect(body.items).toEqual([]);
   });
 });

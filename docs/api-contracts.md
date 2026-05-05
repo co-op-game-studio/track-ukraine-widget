@@ -645,7 +645,8 @@ interface Comment {
   bill_id: string;
   attached_to_roll_call_id: string | null;  // "{chamber}:{congress}:{session}:{rollCall}" when scoped to a vote
   body_markdown: string;
-  score_adjustment: number;
+  weight: number;                  // AC-52.38: 0..5; replaces legacy score_adjustment
+  direction: -1 | 0 | 1;           // AC-52.38: signed contribution = direction × weight, range [-5, +5]
   author_email: string;
   created_at: string;
   updated_at: string;
@@ -659,7 +660,8 @@ interface SocialPost {
   url: string;
   posted_at: string | null;
   body_text: string;
-  score_adjustment: number;
+  weight: number;                  // AC-52.38: 0..5; replaces legacy score_adjustment
+  direction: -1 | 0 | 1;           // AC-52.38: signed contribution = direction × weight, range [-5, +5]
   comment: string | null;
   author_email: string;
   created_at: string;
@@ -670,12 +672,14 @@ interface SocialPost {
 interface Quote {
   id: string;
   bioguide_id: string;
-  media_kind: "video" | "audio" | "text" | "image";
+  // AC-51.6: enum matches proxy/d1/admin-store.ts:VALID_MEDIA_KINDS (SoT for validation).
+  media_kind: "text" | "news" | "social" | "video" | "audio" | "speech" | "press" | "interview" | "image" | "letter";
   source_url: string;
   source_label: string | null;
   quoted_at: string | null;
   body_text: string;
-  score_adjustment: number;
+  weight: number;                  // AC-52.38: 0..5; replaces legacy score_adjustment
+  direction: -1 | 0 | 1;           // AC-52.38: signed contribution = direction × weight, range [-5, +5]
   comment: string | null;
   author_email: string;
   created_at: string;
@@ -686,12 +690,13 @@ interface AuditRow {
   id: string;
   actor_email: string;
   action: "create" | "update" | "delete";
-  target_table: string;
+  target_table: string;     // matches D1 column name; not "table" (AC-58.1)
   row_id: string;
   row_title: string | null;
   before: unknown | null;
   after: unknown | null;
   reason: string | null;
+  trace_id: string;         // per AC-58.6 — correlates to the request that made the change
   created_at: string;
 }
 ```
@@ -776,7 +781,8 @@ Public read of researcher comments attached to a bill — consumed by `VoteList`
     {
       "id": "01HQXYZ…",
       "bodyMarkdown": "This was the floor vote that …",
-      "scoreAdjustment": -0.05,
+      "weight": 2.5,
+      "direction": -1,
       "attachedToRollCallId": "house:117:2:65",
       "authorEmail": "alice@example.com",
       "createdAt": "2026-05-02T18:43:21Z",
@@ -810,7 +816,8 @@ Public read of curated social posts for a representative — consumed by the Sta
       "url": "https://x.com/SenatorDurbin/status/…",
       "postedAt": "2026-04-28T12:00:00Z",
       "bodyText": "…",
-      "scoreAdjustment": 0.02,
+      "weight": 1.0,
+      "direction": 1,
       "comment": "Cited HR 815 floor speech",
       "authorEmail": "alice@example.com",
       "createdAt": "2026-05-02T18:43:21Z"
@@ -837,12 +844,13 @@ Public read of curated quotes for a representative — consumed by the Quotes ta
   "quotes": [
     {
       "id": "01HQXYZ…",
-      "mediaKind": "video",
+      "mediaKind": "speech",
       "sourceUrl": "https://www.c-span.org/video/?…",
       "sourceLabel": "C-SPAN floor speech, 2024-02-13",
       "quotedAt": "2024-02-13",
       "bodyText": "…",
-      "scoreAdjustment": 0.05,
+      "weight": 2.5,
+      "direction": 1,
       "comment": null,
       "authorEmail": "alice@example.com",
       "createdAt": "2026-05-02T18:43:21Z"

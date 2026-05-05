@@ -1,0 +1,22 @@
+FROZEN — see FR-49 AC-49.4.
+
+The seed script (`scripts/seed-d1-from-json.ts`) has run at least once
+against a deployed environment. Further edits to `ukraineBills.json` SHALL
+NOT propagate to that environment via re-seeding.
+
+Curated bill data is now edited through the admin front-end (FR-52, the
+admin SPA at `/admin`). All write paths flow through D1 with audit trail.
+
+The presence of THIS file is the enforcement mechanism: the seed script
+checks for it and refuses to run unless invoked with `--force-reseed`.
+That escape hatch exists for genuine bootstrap scenarios (e.g., spinning
+up a brand-new env from scratch) — it should never run against an env
+where the curator has already started editing through the admin UI.
+
+To re-bootstrap a fresh env:
+  1. Confirm the target env's D1 has no curator edits worth preserving.
+  2. Run: `tsx scripts/seed-d1-from-json.ts --env <name> --force-reseed`
+
+To unfreeze permanently (e.g., new architectural direction):
+  Delete this file in a PR with explicit reasoning. The seed script will
+  then accept normal `--env <name>` invocations again.

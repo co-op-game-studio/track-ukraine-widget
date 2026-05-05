@@ -10,7 +10,6 @@
  */
 import type { ProxyEnv } from '../env';
 import type { DispatchResult } from './common';
-import { jsonResponse } from './common';
 import { corsHeaders } from '../security/origin-allowlist';
 import { KV_PREFIXES } from '../kv/prefixes';
 
@@ -20,15 +19,29 @@ export async function handleAuditPublic(
   origin: string,
 ): Promise<DispatchResult> {
   const record = await env.KV_VOTER_INFO.get(KV_PREFIXES.auditFeed + 'public', 'text');
-  if (!record) {
-    return {
-      response: jsonResponse(404, { error: 'audit_feed_not_found' }, corsHeaders(origin)),
-      shape: 'worker-emitted',
-    };
-  }
   const headers = new Headers(corsHeaders(origin));
   headers.set('Content-Type', 'application/json; charset=utf-8');
   headers.set('Cache-Control', 'public, max-age=60, s-maxage=120');
+
+  // FR-58 AC-58.5 — missing-record fallback returns an empty list, not 404.
+  // Cold deploys (before publish has run) and KV outages should surface as
+  // "no recent activity" in the embed, not a hard error tile that breaks
+  // the page. Mirrors AC-53.5's same-tolerance rule for the embed.
+  if (!record) {
+    const emptyBody = JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      schemaVersion: 1,
+      items: [],
+    });
+    return {
+      response: new Response(request.method === 'HEAD' ? null : emptyBody, {
+        status: 200,
+        headers,
+      }),
+      shape: 'api-proxied',
+    };
+  }
+
   return {
     response: new Response(request.method === 'HEAD' ? null : (record as string), {
       status: 200,

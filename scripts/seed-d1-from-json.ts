@@ -13,7 +13,7 @@
  * Pure transformation (JSON → SQL) is exported and unit-tested separately;
  * the wrangler shell-out is best-effort and tested by smoke.
  *
- * Traces to FR-49 AC-49.3, ADR-017.
+ * Traces to FR-49 AC-49.3, AC-49.4 (sibling-file freeze marker), ADR-017.
  */
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -274,10 +274,32 @@ async function main() {
   };
   const env = getArg('--env');
   const dryRun = argv.includes('--dry-run');
+  const forceReseed = argv.includes('--force-reseed');
   if (!env || !['dev', 'uat', 'stg', 'prod'].includes(env)) {
-    console.error('Usage: tsx scripts/seed-d1-from-json.ts --env <dev|uat|stg|prod> [--dry-run]');
+    console.error('Usage: tsx scripts/seed-d1-from-json.ts --env <dev|uat|stg|prod> [--dry-run] [--force-reseed]');
     process.exit(2);
   }
+
+  // FR-49 AC-49.4 — sibling marker file freezes the seed once it has run on
+  // any environment. The presence of `src/data/ukraineBills.json.FROZEN`
+  // means "the curator has migrated to the admin front-end; further edits
+  // to the JSON SHALL NOT propagate to deployed envs." `--force-reseed`
+  // bypasses the gate for explicit operator-led reseeds.
+  const frozenMarkerPath = resolve('src/data/ukraineBills.json.FROZEN');
+  let frozen = false;
+  try {
+    readFileSync(frozenMarkerPath, 'utf8');
+    frozen = true;
+  } catch {
+    // Marker absent — first-run / pre-freeze envs.
+  }
+  if (frozen && !forceReseed) {
+    console.error(`[seed-d1] REFUSING TO SEED: ${frozenMarkerPath} is present.`);
+    console.error('[seed-d1] The curated JSON is frozen — edits go through the admin UI now (FR-52).');
+    console.error('[seed-d1] Pass --force-reseed if you really mean to re-seed.');
+    process.exit(3);
+  }
+
   const traceId = generateRunTraceId();
 
   const sourcePath = resolve('src/data/ukraineBills.json');

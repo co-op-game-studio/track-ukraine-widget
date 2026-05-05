@@ -873,7 +873,7 @@ CREATE TABLE social_posts (
 CREATE TABLE quotes (
   id TEXT PRIMARY KEY,
   bioguide_id TEXT NOT NULL,
-  media_kind TEXT NOT NULL,         -- "video" | "audio" | "text" | "image"
+  media_kind TEXT NOT NULL,         -- VALID_MEDIA_KINDS (proxy/d1/admin-store.ts): text | news | social | video | audio | speech | press | interview | image | letter
   source_url TEXT NOT NULL,
   source_label TEXT,
   quoted_at TEXT,
@@ -1077,41 +1077,55 @@ The embed reads `partyPrior` from the member record and passes it to `computeUkr
 
 **Visualization.** When `score === null` and `confidenceTier === 'insufficient'`, `UkraineScoreBadge` renders the neutral gray (`hsl(220, 10%, 55%)`) with copy "Insufficient record". The continuous `confidence` field is 0 in this case, so the saturation gradient (FR-43) reads as desaturated.
 
-### 4.20 Admin SPA Layout (v2.7.0 — FR-52)
+### 4.20 Admin SPA Layout (v2.7.0 — FR-52, REVISED 2026-05-04 — megamenu nav)
 
-The SPA is intentionally austere — six tabs, list-detail per tab, plain HTML controls.
+The SPA is intentionally austere. The top-level nav is a **single megamenu** (one trigger button in the header) opening a 3-column panel; each destination is a list-detail surface with plain HTML controls. The early-draft six-tab strip layout is superseded; the megamenu invariant is normative per spec.md AC-52.69, hash-routing per AC-52.70.
 
 ```
-+----------------------------------------------------+
-| [trackukraine]  V4 Researcher       alice@…  [out] |
-+----------------------------------------------------+
-| [Bills] [Votes] [Comments] [Social] [Quotes] [Log] |
-+----------------------------------------------------+
-| Search/filter bar                                  |
-+--------------------+-------------------------------+
-| List               |  Detail / editor              |
-|  ─ row             |   field 1 [____________]      |
-|  ─ row (selected)  |   field 2 [____________]      |
-|  ─ row             |   ...                         |
-|  ...               |                               |
-|                    |   [save]  [revert]  [delete]  |
-+--------------------+-------------------------------+
++-----------------------------------------------------------+
+| [≡ People · B001234 ▾]              alice@…   [theme]     |
++-----------------------------------------------------------+
+                                                             ← trigger above
++-----------------------------------------------------------+
+| Workspace      | Curation       | Admin                   |
+|   People       |   Inbox        |   Keywords              |
+|   Bills        |   Add quote    |   Tags                  |
+|   Activity     |   All quotes   |   Poll status           |
+|                |   Research     |   App config            |
+|                |   Add by URL   |                         |
++-----------------------------------------------------------+   ← panel (open)
+
++--------------------+--------------------------------------+
+| List               |  Detail / editor                     |
+|  ─ row             |   field 1 [____________]             |
+|  ─ row (selected)  |   field 2 [____________]             |
+|  ─ row             |   ...                                |
+|  ...               |   [save]  [revert]  [delete]         |
++--------------------+--------------------------------------+
 ```
 
-**Tabs and their CRUD shape:**
+**Destinations and their CRUD shape:**
 
-| Tab | List columns | Editor fields |
-|-----|--------------|---------------|
-| Bills | `bill_id`, `title`, `direction`, `featured` | id, title, direction, direction_reason, featured, label, congress_gov_url, summary_json (textarea) |
-| Votes | `bill_id`, `chamber`, `roll_call`, `kind`, `weight` | bill_id (readonly), chamber, congress/session/roll_call, kind, weight (slider 0–5), direction_multiplier (-1/0/+1) |
-| Comments | `bill_id`, body excerpt, `score_adjustment`, `author_email` | bill_id, attached_to_roll_call_id (optional), body_markdown, score_adjustment |
-| Social | `bioguide_id`, platform, body excerpt, `score_adjustment` | bioguide_id, platform, url, posted_at, body_text, score_adjustment, comment |
-| Quotes | `bioguide_id`, media_kind, body excerpt, `score_adjustment` | bioguide_id, media_kind, source_url, source_label, body_text, score_adjustment, comment |
-| Recent Activity | actor, action, target, when | (read-only) |
+| Group · Destination | List columns | Editor fields |
+|---------------------|--------------|---------------|
+| Workspace · People | bioguide, displayName, party, state | profile pane (read-only summary + curated content drilldowns) |
+| Workspace · Bills | `bill_id`, `title`, `direction`, `featured` | id, title, direction, direction_reason, featured, label, congress_gov_url, summary_json (textarea), inline Votes section, inline Comments section (per AC-52.16) |
+| Workspace · Activity | actor, action, target, when | (read-only audit feed) |
+| Curation · Inbox | source, captured_at, status | (queue triage; Curate → Add quote prefilled) |
+| Curation · Add quote | — | bioguide_id, media_kind, source_url, source_label, body_text, weight, direction, comment |
+| Curation · All quotes | bioguide, body excerpt, weight, direction | same fields as Add quote |
+| Curation · Research | — | research scratch surface (notes, candidates) |
+| Curation · Add by URL | — | URL → fetch → quote prefill |
+| Admin · Keywords | term, hits | term, weight |
+| Admin · Tags | name, color, count | name, color (hex), description |
+| Admin · Poll status | source, last_run, status | (read-only) |
+| Admin · App config | key, value | key, value, description |
+
+Standalone Votes / Comments / Social Posts / Quotes / "Recent Activity" top-level destinations from the early FR-52 draft no longer exist as nav entries — Votes and Comments are inline under the Bills editor (AC-52.16, AC-52.65); Quotes are reached via Curation; Social Posts and the audit feed live under Workspace.
 
 **Optimistic update pattern.** On save, the editor PATCHes the server, optimistically updates the list and detail, and on non-2xx response reverts and surfaces a toast with `{ error, traceId }` from the FR-37 envelope. The toast lets the researcher copy the trace ID for debugging.
 
-**No router.** Tab state is `useState<Tab>` in the root; in-tab selection is `useState<RowId | null>`. Deep linking is not v2.7.0 scope — researchers visit `/admin`, click into the tab they want.
+**Hash routing.** Top-level destinations are addressable via `#/<section>[/<sub>]` (per AC-52.70) — e.g. `#/people/B001234`, `#/curation/inbox`, `#/settings/tags`. The root component parses `window.location.hash` on mount and on `hashchange`, and writes the hash on every navigation. There is no client-side router library; a small `parseHash` / `buildHash` pair in `src/admin/App.tsx` is the entire implementation.
 
 ### 4.21 Embed Tab Restructure (v2.7.0 — FR-53)
 

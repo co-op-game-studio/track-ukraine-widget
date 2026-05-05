@@ -21,6 +21,7 @@ import * as store from '../d1/admin-store';
 import { handleIngest } from './api-admin-ingest';
 import { getSocialPollStalenessMin } from '../services/cron-interval';
 import * as tagsStore from '../d1/tags-store';
+import { KV_PREFIXES } from '../kv/prefixes';
 
 const ADMIN_ALLOW_METHODS = 'GET, POST, PATCH, DELETE, OPTIONS';
 
@@ -105,6 +106,14 @@ export async function handleAdmin(
     return await handleTags(id, request, env, adminCtx);
   }
 
+  // /api/admin/cache — operator-only KV inspection + purge (FR-58, AC-58.NEW).
+  // Mitigates audit finding L: gives admins a controlled surface to invalidate
+  // member-profile / bill / quote KV records when curated data has drifted,
+  // rather than relying on TTL expiry. Inspection is GET; purge is POST.
+  if (resource === 'cache') {
+    return await handleCache(id, action, request, env, adminCtx);
+  }
+
   if (resource === 'audit') return await handleAudit(request, env, adminCtx);
   if (resource === 'import-bill') return await handleImportBill(request, env, adminCtx);
   if (resource === 'backfill-bills') return await handleBackfillBills(request, env, adminCtx);
@@ -174,6 +183,149 @@ function parsePosInt(raw: string | undefined, fallback: number): number {
   if (!raw) return fallback;
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+/* -------------------------------------------------------------------------- */
+/*                                Cache control                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Operator-only KV cache inspection + invalidation surface.
+ *
+ *   GET  /api/admin/cache              → counts per known prefix + per-prefix TTLs
+ *   GET  /api/admin/cache/<prefix>     → list keys under a single prefix (capped)
+ *   POST /api/admin/cache/<prefix>     → purge ALL keys under a prefix (with reason)
+ *   DELETE /api/admin/cache/<prefix>/<key> → purge a single key
+ *
+ * Audited via `logEvent` so any purge appears in the structured log with the
+ * actor + traceId + which prefix/key. Mitigates the AC-51.7 letter-vs-spirit
+ * tension that admin-store invalidating cache keys post-D1-write opened up
+ * (the operator now has an explicit, audited surface for the same action).
+ */
+async function handleCache(
+  id: string | undefined,
+  action: string | undefined,
+  request: Request,
+  env: ProxyEnv,
+  ctx: AdminCtx,
+): Promise<DispatchResult> {
+  const kv = env.KV_VOTER_INFO;
+  // Map of safe-to-touch prefix slugs (URL-friendly) → real KV prefix string.
+  // Locked-down list so a stray POST to /api/admin/cache/secrets can't purge
+  // anything we don't intend to expose.
+  const PREFIX_MAP: Record<string, { prefix: string; description: string; ttlSec: number }> = {
+    member:        { prefix: KV_PREFIXES.member,         description: 'Member profile read-through cache (Worker fills from upstream)', ttlSec: 30 * 24 * 3600 },
+    bill:          { prefix: KV_PREFIXES.bill,           description: 'Curated bill snapshot (publish-d1-to-kv)',                       ttlSec: 0 /* no TTL, durable */ },
+    'roll-call':   { prefix: KV_PREFIXES.rollCall,       description: 'Immutable roll-call metadata (publish-to-kv)',                   ttlSec: 0 },
+    'roll-call-roster': { prefix: KV_PREFIXES.rollCallRoster, description: 'Per-vote member rosters (publish-to-kv)',                   ttlSec: 0 },
+    'state-members': { prefix: KV_PREFIXES.stateMembers, description: 'Per-state member directory (publish-to-kv)',                     ttlSec: 0 },
+    'name-index':  { prefix: KV_PREFIXES.nameIndex,      description: 'Name-search shards + meta (publish-to-kv)',                      ttlSec: 0 },
+    cache:         { prefix: KV_PREFIXES.cache,          description: 'Generic Worker read-through cache (per-route TTLs)',             ttlSec: 0 },
+    comment:       { prefix: KV_PREFIXES.comment,        description: 'Per-bill comments projection (publish-d1-to-kv)',                ttlSec: 0 },
+    'social-post': { prefix: KV_PREFIXES.socialPost,     description: 'Per-rep social posts projection (publish-d1-to-kv)',             ttlSec: 0 },
+    quote:         { prefix: KV_PREFIXES.quote,          description: 'Per-rep quotes projection (publish-d1-to-kv)',                   ttlSec: 0 },
+    stats:         { prefix: KV_PREFIXES.stats,          description: 'Stats summary record (publish-d1-to-kv + party-priors overlay)', ttlSec: 0 },
+    'audit-feed':  { prefix: KV_PREFIXES.auditFeed,      description: 'Audit feed projections (publish-d1-to-kv)',                      ttlSec: 0 },
+    scores:        { prefix: KV_PREFIXES.scores,         description: 'Score-derived KV records (party priors)',                        ttlSec: 0 },
+  };
+
+  // GET /api/admin/cache — overview
+  if (!id && request.method === 'GET') {
+    // Counts per prefix. KV.list() is paginated; cap at 1k per prefix to
+    // bound the inspection cost. The exact count for huge prefixes (member
+    // can grow to 600+ records) is fine — just paginate.
+    const summaries = await Promise.all(
+      Object.entries(PREFIX_MAP).map(async ([slug, meta]) => {
+        let count = 0;
+        let cursor: string | undefined = undefined;
+        let pages = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          // Cap inspection at 5 pages so a runaway list can't burn budget.
+          if (pages >= 5) break;
+          const opts = cursor ? { prefix: meta.prefix, cursor } : { prefix: meta.prefix };
+          const r = await kv.list(opts);
+          count += r.keys.length;
+          pages++;
+          if (r.list_complete || !r.cursor) break;
+          cursor = r.cursor;
+        }
+        return {
+          slug,
+          prefix: meta.prefix,
+          description: meta.description,
+          ttlSec: meta.ttlSec,
+          approxCount: count,
+          truncated: pages >= 5,
+        };
+      }),
+    );
+    return ok(ctx, { prefixes: summaries });
+  }
+
+  // /api/admin/cache/<slug> — single prefix
+  if (id && !action) {
+    const meta = PREFIX_MAP[id];
+    if (!meta) return notFound(ctx, `unknown cache prefix slug: ${id}`);
+
+    if (request.method === 'GET') {
+      // List up to 200 keys under this prefix (one page).
+      const r = await kv.list({ prefix: meta.prefix });
+      const keys = r.keys.slice(0, 200).map((k) => k.name);
+      return ok(ctx, {
+        slug: id,
+        prefix: meta.prefix,
+        description: meta.description,
+        ttlSec: meta.ttlSec,
+        keys,
+        truncated: !r.list_complete || r.keys.length > 200,
+      });
+    }
+
+    if (request.method === 'POST') {
+      // Purge ALL under this prefix. Requires `_reason` like other writes.
+      const body = await readBody(request, ctx);
+      if (isDispatchResult(body)) return body;
+      if (!ctx.reason) return reasonRequiredError(ctx);
+
+      let cursor: string | undefined = undefined;
+      let purged = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const opts = cursor ? { prefix: meta.prefix, cursor } : { prefix: meta.prefix };
+        const page = await kv.list(opts);
+        await Promise.all(page.keys.map((k) => kv.delete(k.name).catch(() => { /* best-effort */ })));
+        purged += page.keys.length;
+        if (page.list_complete || !page.cursor) break;
+        cursor = page.cursor;
+      }
+
+      logEvent(
+        { env: ctx.envName, traceId: ctx.traceId },
+        { event: 'admin.cache.purge_prefix', level: 'warn', slug: id, prefix: meta.prefix, purged, actor: ctx.email, reason: ctx.reason },
+      );
+      return ok(ctx, { slug: id, prefix: meta.prefix, purged, reason: ctx.reason });
+    }
+  }
+
+  // /api/admin/cache/<slug>/<key-tail> — single key purge
+  if (id && action && request.method === 'DELETE') {
+    const meta = PREFIX_MAP[id];
+    if (!meta) return notFound(ctx, `unknown cache prefix slug: ${id}`);
+    const url = new URL(request.url);
+    const queryReason = url.searchParams.get('reason')?.trim();
+    if (queryReason) ctx.reason = queryReason;
+    if (!ctx.reason) return reasonRequiredError(ctx);
+    const fullKey = meta.prefix + action;
+    await kv.delete(fullKey);
+    logEvent(
+      { env: ctx.envName, traceId: ctx.traceId },
+      { event: 'admin.cache.purge_key', level: 'warn', key: fullKey, actor: ctx.email, reason: ctx.reason },
+    );
+    return ok(ctx, { key: fullKey, purged: 1, reason: ctx.reason });
+  }
+
+  return badRequest(ctx, 'method_not_allowed', 'Supported: GET /cache, GET /cache/<slug>, POST /cache/<slug>, DELETE /cache/<slug>/<key>');
 }
 
 /**
@@ -697,6 +849,23 @@ const quotesHandlers: ResourceHandlers = {
 /*                                Audit feed                                  */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * GET /api/admin/audit?limit=N[&since=ISO]
+ *
+ * FR-58 AC-58.1, AC-58.3 — serve from the denormalized
+ * `audit-feed:v1:full` KV record written by `scripts/publish-d1-to-kv.ts`,
+ * NOT from D1 per-request. The KV record carries the canonical snake_case
+ * shape (matching D1 column names) so this handler is a thin filter on top
+ * of the cached projection.
+ *
+ * Filtering: `since` and `limit` are applied to the cached items in memory.
+ * The cached record holds up to 100 most-recent rows by default — wide
+ * `since` ranges that need older data fall back to D1 (operator escape
+ * hatch) by passing `?source=d1`.
+ *
+ * Cold-start: if the KV record is missing (publish hasn't run yet), fall
+ * back to D1 once and warn in the response so it's visible to ops.
+ */
 async function handleAudit(
   request: Request,
   env: ProxyEnv,
@@ -708,10 +877,29 @@ async function handleAudit(
   const url = new URL(request.url);
   const limitParam = url.searchParams.get('limit');
   const since = url.searchParams.get('since') ?? undefined;
+  const sourceOverride = url.searchParams.get('source'); // 'd1' for ops escape hatch
   const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 50, 1), 100) : 50;
-  const items = await store.listAudit(env.D1_VOTER_INFO!, { limit, ...(since ? { since } : {}) });
-  // Reshape to API contract — JSON-parse before/after so consumers don't double-parse.
-  const reshaped = items.map((r) => ({
+
+  if (sourceOverride !== 'd1') {
+    // Primary path: read the KV projection.
+    try {
+      const cached = await env.KV_VOTER_INFO.get(KV_PREFIXES.auditFeed + 'full', 'text');
+      if (cached) {
+        const record = JSON.parse(cached as string) as { items: Array<Record<string, unknown>> };
+        let items = record.items;
+        if (since) items = items.filter((r) => String(r['created_at'] ?? '') >= since);
+        items = items.slice(0, limit);
+        return ok(ctx, { items, source: 'kv' });
+      }
+    } catch {
+      // Fall through to D1 fallback below.
+    }
+  }
+
+  // Cold-start / explicit-override / KV miss fallback. Same shape as the KV
+  // projection — keeps clients from caring which path served them.
+  const rows = await store.listAudit(env.D1_VOTER_INFO!, { limit, ...(since ? { since } : {}) });
+  const reshaped = rows.map((r) => ({
     id: r.id,
     actor_email: r.actor_email,
     action: r.action,
@@ -724,7 +912,7 @@ async function handleAudit(
     trace_id: r.trace_id,
     created_at: r.created_at,
   }));
-  return ok(ctx, { items: reshaped });
+  return ok(ctx, { items: reshaped, source: sourceOverride === 'd1' ? 'd1' : 'd1-fallback' });
 }
 
 /* -------------------------------------------------------------------------- */

@@ -53,7 +53,7 @@ interface RouteState {
 
 const VALID_SECTIONS: Section[] = ['people', 'bills', 'curation', 'activity', 'settings'];
 const VALID_CURATION: CurationView[] = ['inbox', 'add', 'quotes', 'research', 'direct'];
-const VALID_SETTINGS: SettingsView[] = ['keywords', 'tags', 'poll-status', 'config'];
+const VALID_SETTINGS: SettingsView[] = ['keywords', 'tags', 'cache', 'poll-status', 'config'];
 
 function parseHash(hash: string): RouteState {
   const clean = hash.replace(/^#\/?/, '');
@@ -155,6 +155,7 @@ function Megamenu({
       links: [
         { label: 'Keywords', href: '#/settings/keywords', isActive: (s) => s.section === 'settings' && s.settingsView === 'keywords', onClick: () => navigate({ section: 'settings', settingsView: 'keywords' }) },
         { label: 'Tags', href: '#/settings/tags', isActive: (s) => s.section === 'settings' && s.settingsView === 'tags', onClick: () => navigate({ section: 'settings', settingsView: 'tags' }) },
+        { label: 'Cache', href: '#/settings/cache', isActive: (s) => s.section === 'settings' && s.settingsView === 'cache', onClick: () => navigate({ section: 'settings', settingsView: 'cache' }) },
         { label: 'Poll status', href: '#/settings/poll-status', isActive: (s) => s.section === 'settings' && s.settingsView === 'poll-status', onClick: () => navigate({ section: 'settings', settingsView: 'poll-status' }) },
         { label: 'App config', href: '#/settings/config', isActive: (s) => s.section === 'settings' && s.settingsView === 'config', onClick: () => navigate({ section: 'settings', settingsView: 'config' }) },
       ],
