@@ -7,7 +7,12 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { App } from '../../src/admin/App';
+
+function renderApp() {
+  return render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+}
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -25,7 +30,7 @@ function openMegamenu(): HTMLElement {
 
 describe('Admin App megamenu (FR-52 AC-52.16 + AC-52.65, v4 nav)', () => {
   it('exposes the v4 sections via the megamenu (Bills + Curation + Activity + Admin)', () => {
-    render(<App />);
+    renderApp();
     const menu = openMegamenu();
     // Every top-level destination is a real <a href> link in the megamenu.
     expect(within(menu).getByRole('link', { name: /^Bills$/ })).toBeInTheDocument();
@@ -40,13 +45,13 @@ describe('Admin App megamenu (FR-52 AC-52.16 + AC-52.65, v4 nav)', () => {
   });
 
   it('does NOT expose a standalone Votes destination (AC-52.16)', () => {
-    render(<App />);
+    renderApp();
     const menu = openMegamenu();
     expect(within(menu).queryByRole('link', { name: /^Votes$/ })).toBeNull();
   });
 
   it('does NOT expose a standalone Comments destination (AC-52.65)', () => {
-    render(<App />);
+    renderApp();
     const menu = openMegamenu();
     expect(within(menu).queryByRole('link', { name: /^Comments$/ })).toBeNull();
   });

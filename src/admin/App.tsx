@@ -3,28 +3,26 @@
  *
  * Single megamenu nav (per CLAUDE.md "Workflow conventions"). All sections
  * live under one menu, grouped into columns:
- *   People | Bills | Curation { Inbox, Add quote, Quotes, Research, Direct add }
- *   | Activity | Settings { Keywords, Tags, Poll status, App config }
+ *   Workspace | Curation | Admin | Help
  *
- * Hash-routing keeps deep-links working (e.g. #/people/B001234 opens the
- * profile in a new tab; #/settings/tags lands on the Tags CRUD).
+ * Routing: react-router-dom v7 HashRouter (hash = no server-config required;
+ * CF Workers serves /admin/index.html and the SPA owns everything after #).
  */
 import { useEffect, useRef, useState } from 'react';
+import { Routes, Route, NavLink, useNavigate, Navigate } from 'react-router-dom';
 import { get, post } from './fetcher';
 import { BillsTab } from './components/BillsTab';
 import { PeopleTab } from './components/PeopleTab';
-import { CurationTab, type CurationView } from './components/curation/CurationTab';
-import { SettingsTab, type SettingsView } from './components/settings/SettingsTab';
+import { CurationTab } from './components/curation/CurationTab';
+import { SettingsTab } from './components/settings/SettingsTab';
 import { AuditTab } from './components/AuditTab';
-import { HelpTab, type HelpView } from './components/help/HelpTab';
+import { HelpTab } from './components/help/HelpTab';
 import { ThemeToggle } from './components/ThemeToggle';
 import { useTheme } from './useTheme';
 
 /* -------------------------------------------------------------------------- */
 /*                                  Types                                     */
 /* -------------------------------------------------------------------------- */
-
-export type Section = 'people' | 'bills' | 'curation' | 'activity' | 'settings' | 'help';
 
 /** Data passed from Curation > Inbox "Curate" to Curation > Add Quote. */
 export interface QuotePrefill {
@@ -38,71 +36,15 @@ export interface QuotePrefill {
   queueItemId: string;
 }
 
-interface RouteState {
-  section: Section;
-  /** When section === 'people', the optional bioguide selector. */
-  bioguide: string | null;
-  /** When section === 'curation', the sub-view. */
-  curationView: CurationView;
-  /** When section === 'settings', the sub-view. */
-  settingsView: SettingsView;
-  /** When section === 'help', the sub-view. */
-  helpView: HelpView;
-}
-
-/* -------------------------------------------------------------------------- */
-/*                              Hash routing                                  */
-/* -------------------------------------------------------------------------- */
-
-const VALID_SECTIONS: Section[] = ['people', 'bills', 'curation', 'activity', 'settings', 'help'];
-const VALID_CURATION: CurationView[] = ['inbox', 'add', 'quotes', 'research', 'direct'];
-const VALID_SETTINGS: SettingsView[] = ['keywords', 'tags', 'cache', 'poll-status', 'config'];
-const VALID_HELP: HelpView[] = ['getting-started', 'curation', 'people-polls', 'bills-votes', 'scoring'];
-
-function parseHash(hash: string): RouteState {
-  const clean = hash.replace(/^#\/?/, '');
-  const parts = clean.split('/').filter(Boolean);
-  const first = parts[0] ?? 'people';
-  const section: Section = (VALID_SECTIONS as string[]).includes(first) ? (first as Section) : 'people';
-
-  let bioguide: string | null = null;
-  let curationView: CurationView = 'inbox';
-  let settingsView: SettingsView = 'keywords';
-  let helpView: HelpView = 'getting-started';
-
-  if (section === 'people' && parts[1]) {
-    bioguide = parts[1];
-  }
-  if (section === 'curation' && parts[1] && (VALID_CURATION as string[]).includes(parts[1])) {
-    curationView = parts[1] as CurationView;
-  }
-  if (section === 'settings' && parts[1] && (VALID_SETTINGS as string[]).includes(parts[1])) {
-    settingsView = parts[1] as SettingsView;
-  }
-  if (section === 'help' && parts[1] && (VALID_HELP as string[]).includes(parts[1])) {
-    helpView = parts[1] as HelpView;
-  }
-
-  return { section, bioguide, curationView, settingsView, helpView };
-}
-
-function buildHash(state: RouteState): string {
-  if (state.section === 'people' && state.bioguide) return `#/people/${state.bioguide}`;
-  if (state.section === 'curation') return `#/curation/${state.curationView}`;
-  if (state.section === 'settings') return `#/settings/${state.settingsView}`;
-  if (state.section === 'help') return `#/help/${state.helpView}`;
-  return `#/${state.section}`;
-}
-
 /* -------------------------------------------------------------------------- */
 /*                                  Megamenu                                  */
 /* -------------------------------------------------------------------------- */
 
 interface MenuLink {
   label: string;
-  href: string;
-  isActive: (s: RouteState) => boolean;
-  onClick: () => void;
+  to: string;
+  /** Whether this link should match the current path (exact or prefix). */
+  end?: boolean;
 }
 
 interface MenuColumn {
@@ -110,17 +52,49 @@ interface MenuColumn {
   links: MenuLink[];
 }
 
-function Megamenu({
-  state,
-  navigate,
-  open,
-  setOpen,
-}: {
-  state: RouteState;
-  navigate: (next: Partial<RouteState>) => void;
-  open: boolean;
-  setOpen: (v: boolean) => void;
-}): React.ReactElement {
+const COLUMNS: MenuColumn[] = [
+  {
+    heading: 'Workspace',
+    links: [
+      { label: 'People',   to: '/people',   end: true },
+      { label: 'Bills',    to: '/bills',    end: true },
+      { label: 'Activity', to: '/activity', end: true },
+    ],
+  },
+  {
+    heading: 'Curation',
+    links: [
+      { label: 'Inbox',      to: '/curation/inbox' },
+      { label: 'Add quote',  to: '/curation/add' },
+      { label: 'All quotes', to: '/curation/quotes' },
+      { label: 'Research',   to: '/curation/research' },
+      { label: 'Add by URL', to: '/curation/direct' },
+    ],
+  },
+  {
+    heading: 'Admin',
+    links: [
+      { label: 'Keywords',    to: '/settings/keywords' },
+      { label: 'Tags',        to: '/settings/tags' },
+      { label: 'Cache',       to: '/settings/cache' },
+      { label: 'Poll status', to: '/settings/poll-status' },
+      { label: 'App config',  to: '/settings/config' },
+    ],
+  },
+  {
+    heading: 'Help',
+    links: [
+      { label: 'Getting started', to: '/help/getting-started' },
+      { label: 'Curation guide',  to: '/help/curation' },
+      { label: 'People & polls',  to: '/help/people-polls' },
+      { label: 'Bills & votes',   to: '/help/bills-votes' },
+      { label: 'Scoring',         to: '/help/scoring' },
+    ],
+  },
+];
+
+function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElement {
+  const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   // Close on outside click + Escape.
@@ -138,73 +112,13 @@ function Megamenu({
       window.removeEventListener('mousedown', onDoc);
       window.removeEventListener('keydown', onKey);
     };
-  }, [open, setOpen]);
-
-  const columns: MenuColumn[] = [
-    {
-      heading: 'Workspace',
-      links: [
-        { label: 'People', href: '#/people', isActive: (s) => s.section === 'people', onClick: () => navigate({ section: 'people', bioguide: null }) },
-        { label: 'Bills', href: '#/bills', isActive: (s) => s.section === 'bills', onClick: () => navigate({ section: 'bills' }) },
-        { label: 'Activity', href: '#/activity', isActive: (s) => s.section === 'activity', onClick: () => navigate({ section: 'activity' }) },
-      ],
-    },
-    {
-      heading: 'Curation',
-      links: [
-        { label: 'Inbox', href: '#/curation/inbox', isActive: (s) => s.section === 'curation' && s.curationView === 'inbox', onClick: () => navigate({ section: 'curation', curationView: 'inbox' }) },
-        { label: 'Add quote', href: '#/curation/add', isActive: (s) => s.section === 'curation' && s.curationView === 'add', onClick: () => navigate({ section: 'curation', curationView: 'add' }) },
-        { label: 'All quotes', href: '#/curation/quotes', isActive: (s) => s.section === 'curation' && s.curationView === 'quotes', onClick: () => navigate({ section: 'curation', curationView: 'quotes' }) },
-        { label: 'Research', href: '#/curation/research', isActive: (s) => s.section === 'curation' && s.curationView === 'research', onClick: () => navigate({ section: 'curation', curationView: 'research' }) },
-        { label: 'Add by URL', href: '#/curation/direct', isActive: (s) => s.section === 'curation' && s.curationView === 'direct', onClick: () => navigate({ section: 'curation', curationView: 'direct' }) },
-      ],
-    },
-    {
-      heading: 'Admin',
-      links: [
-        { label: 'Keywords', href: '#/settings/keywords', isActive: (s) => s.section === 'settings' && s.settingsView === 'keywords', onClick: () => navigate({ section: 'settings', settingsView: 'keywords' }) },
-        { label: 'Tags', href: '#/settings/tags', isActive: (s) => s.section === 'settings' && s.settingsView === 'tags', onClick: () => navigate({ section: 'settings', settingsView: 'tags' }) },
-        { label: 'Cache', href: '#/settings/cache', isActive: (s) => s.section === 'settings' && s.settingsView === 'cache', onClick: () => navigate({ section: 'settings', settingsView: 'cache' }) },
-        { label: 'Poll status', href: '#/settings/poll-status', isActive: (s) => s.section === 'settings' && s.settingsView === 'poll-status', onClick: () => navigate({ section: 'settings', settingsView: 'poll-status' }) },
-        { label: 'App config', href: '#/settings/config', isActive: (s) => s.section === 'settings' && s.settingsView === 'config', onClick: () => navigate({ section: 'settings', settingsView: 'config' }) },
-      ],
-    },
-    {
-      heading: 'Help',
-      links: [
-        { label: 'Getting started', href: '#/help/getting-started', isActive: (s) => s.section === 'help' && s.helpView === 'getting-started', onClick: () => navigate({ section: 'help', helpView: 'getting-started' }) },
-        { label: 'Curation guide', href: '#/help/curation', isActive: (s) => s.section === 'help' && s.helpView === 'curation', onClick: () => navigate({ section: 'help', helpView: 'curation' }) },
-        { label: 'People & polls', href: '#/help/people-polls', isActive: (s) => s.section === 'help' && s.helpView === 'people-polls', onClick: () => navigate({ section: 'help', helpView: 'people-polls' }) },
-        { label: 'Bills & votes', href: '#/help/bills-votes', isActive: (s) => s.section === 'help' && s.helpView === 'bills-votes', onClick: () => navigate({ section: 'help', helpView: 'bills-votes' }) },
-        { label: 'Scoring', href: '#/help/scoring', isActive: (s) => s.section === 'help' && s.helpView === 'scoring', onClick: () => navigate({ section: 'help', helpView: 'scoring' }) },
-      ],
-    },
-  ];
-
-  // Compute the breadcrumb trail for the trigger button label.
-  const trigger = (() => {
-    if (state.section === 'people') return state.bioguide ? `People · ${state.bioguide}` : 'People';
-    if (state.section === 'bills') return 'Bills';
-    if (state.section === 'curation') {
-      const sub = columns[1]!.links.find((l) => l.isActive(state));
-      return `Curation · ${sub?.label ?? 'Inbox'}`;
-    }
-    if (state.section === 'settings') {
-      const sub = columns[2]!.links.find((l) => l.isActive(state));
-      return `Admin · ${sub?.label ?? 'Keywords'}`;
-    }
-    if (state.section === 'help') {
-      const sub = columns[3]!.links.find((l) => l.isActive(state));
-      return `Help · ${sub?.label ?? 'Getting started'}`;
-    }
-    return 'Activity';
-  })();
+  }, [open]);
 
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="menu"
         style={{
@@ -213,36 +127,28 @@ function Megamenu({
         }}
       >
         <span style={menuStyles.hamburger}>≡</span>
-        <span>{trigger}</span>
+        <span>Menu</span>
         <span style={{ opacity: 0.6 }}>▾</span>
       </button>
       {open && (
         <div style={menuStyles.panel} role="menu">
-          {columns.map((col) => (
+          {COLUMNS.map((col) => (
             <div key={col.heading} style={menuStyles.column}>
               <div style={menuStyles.columnHeading}>{col.heading}</div>
-              {col.links.map((link) => {
-                const active = link.isActive(state);
-                return (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    onClick={(e) => {
-                      // Allow ctrl/middle-click to open in new tab; intercept plain clicks.
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1) return;
-                      e.preventDefault();
-                      link.onClick();
-                      setOpen(false);
-                    }}
-                    style={{
-                      ...menuStyles.link,
-                      ...(active ? menuStyles.linkActive : {}),
-                    }}
-                  >
-                    {link.label}
-                  </a>
-                );
-              })}
+              {col.links.map((link) => (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  end={link.end}
+                  onClick={() => { setOpen(false); onNavigate(); }}
+                  style={({ isActive }) => ({
+                    ...menuStyles.link,
+                    ...(isActive ? menuStyles.linkActive : {}),
+                  })}
+                >
+                  {link.label}
+                </NavLink>
+              ))}
             </div>
           ))}
         </div>
@@ -256,52 +162,13 @@ function Megamenu({
 /* -------------------------------------------------------------------------- */
 
 export function App() {
-  // Initialize from URL hash so deep-links land on the right view.
-  const initial = parseHash(typeof window !== 'undefined' ? window.location.hash : '');
-  const [state, setState] = useState<RouteState>(initial);
   const [whoami, setWhoami] = useState<string | null>(null);
   const [whoamiError, setWhoamiError] = useState<string | null>(null);
   const [quotePrefill, setQuotePrefill] = useState<QuotePrefill | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   useTheme();
   useAutoBackfill(whoami);
-
-  function navigate(patch: Partial<RouteState>) {
-    setState((prev) => ({ ...prev, ...patch }));
-  }
-
-  // Browser back/forward → restore state from the hash.
-  useEffect(() => {
-    function onPopState() {
-      setState(parseHash(window.location.hash));
-    }
-    window.addEventListener('popstate', onPopState);
-    return () => window.removeEventListener('popstate', onPopState);
-  }, []);
-
-  // Mirror state → hash. First render uses replaceState; subsequent uses pushState
-  // so the back button steps through navigation history.
-  const firstRender = useRef(true);
-  useEffect(() => {
-    const hash = buildHash(state);
-    if (window.location.hash === hash) return;
-    if (firstRender.current) {
-      firstRender.current = false;
-      window.history.replaceState(null, '', hash);
-    } else {
-      window.history.pushState(null, '', hash);
-    }
-  }, [state]);
-
-  function navigateToPerson(bioguideId: string) {
-    navigate({ section: 'people', bioguide: bioguideId });
-  }
-
-  function curateAsQuote(data: QuotePrefill) {
-    setQuotePrefill(data);
-    navigate({ section: 'curation', curationView: 'add' });
-  }
 
   useEffect(() => {
     get<{ email: string }>('/api/admin/whoami')
@@ -311,12 +178,17 @@ export function App() {
       });
   }, []);
 
+  function curateAsQuote(data: QuotePrefill) {
+    setQuotePrefill(data);
+    navigate('/curation/add');
+  }
+
   return (
     <div style={styles.root}>
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <strong style={styles.title}>Track Ukraine — Admin</strong>
-          <Megamenu state={state} navigate={navigate} open={menuOpen} setOpen={setMenuOpen} />
+          <Megamenu onNavigate={() => {}} />
         </div>
         <div style={styles.headerRight}>
           <span style={styles.whoami}>
@@ -330,34 +202,33 @@ export function App() {
         </div>
       </header>
       <main style={styles.body}>
-        {state.section === 'people' && <PeopleTab initialBioguide={state.bioguide} />}
-        {state.section === 'bills' && <BillsTab />}
-        {state.section === 'curation' && (
-          <CurationTab
-            view={state.curationView}
-            onChangeView={(v) => navigate({ section: 'curation', curationView: v })}
-            onNavigateToPerson={navigateToPerson}
-            onCurateAsQuote={curateAsQuote}
-            prefill={quotePrefill}
-            onPrefillConsumed={() => setQuotePrefill(null)}
-          />
-        )}
-        {state.section === 'settings' && (
-          <SettingsTab
-            view={state.settingsView}
-            onChangeView={(v) => navigate({ section: 'settings', settingsView: v })}
-          />
-        )}
-        {state.section === 'activity' && <AuditTab />}
-        {state.section === 'help' && (
-          <HelpTab
-            view={state.helpView}
-            onChangeView={(v) => navigate({ section: 'help', helpView: v })}
-          />
-        )}
+        <Routes>
+          <Route path="/people"            element={<PeopleTab initialBioguide={null} />} />
+          <Route path="/people/:bioguide"  element={<PeopleTabRoute />} />
+          <Route path="/bills"             element={<BillsTab />} />
+          <Route path="/curation/:view"    element={<CurationTab onNavigateToPerson={(id) => navigate(`/people/${id}`)} onCurateAsQuote={curateAsQuote} prefill={quotePrefill} onPrefillConsumed={() => setQuotePrefill(null)} />} />
+          <Route path="/curation"          element={<Navigate to="/curation/inbox" replace />} />
+          <Route path="/settings/:view"    element={<SettingsTab />} />
+          <Route path="/settings"          element={<Navigate to="/settings/keywords" replace />} />
+          <Route path="/activity"          element={<AuditTab />} />
+          <Route path="/help/:view"        element={<HelpTab />} />
+          <Route path="/help"              element={<Navigate to="/help/getting-started" replace />} />
+          <Route path="/"                  element={<Navigate to="/people" replace />} />
+        </Routes>
       </main>
     </div>
   );
+}
+
+function PeopleTabRoute() {
+  const { bioguide } = useParams();
+  return <PeopleTab initialBioguide={bioguide ?? null} />;
+}
+
+function useParams() {
+  // Re-export from react-router so PeopleTabRoute stays co-located.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  return require('react-router-dom').useParams() as Record<string, string | undefined>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -395,7 +266,7 @@ const menuStyles: Record<string, React.CSSProperties> = {
     position: 'absolute',
     top: 'calc(100% + 4px)',
     left: 0,
-    minWidth: 600,
+    minWidth: 680,
     background: 'var(--tk-surface)',
     border: '2px solid var(--tk-border-soft)',
     boxShadow: '0 8px 24px rgba(0,0,0,0.3)',

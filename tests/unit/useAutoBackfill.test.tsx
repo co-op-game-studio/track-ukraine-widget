@@ -17,7 +17,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { App } from '../../src/admin/App';
+
+function renderApp() {
+  return render(<MemoryRouter initialEntries={['/']}><App /></MemoryRouter>);
+}
 
 interface BackfillCall {
   url: string;
@@ -78,7 +83,7 @@ describe('useAutoBackfill (AC-52.46 + AC-52.47)', () => {
 
     const calls: BackfillCall[] = [];
     installFetch({ onBackfillCall: (c) => calls.push(c) });
-    render(<App />);
+    renderApp();
     // Wait long enough for whoami to land + the effect to settle.
     await waitFor(() => expect(screen.getByText(/Logged in as/i)).toBeInTheDocument());
     // Give the effect a tick.
@@ -105,7 +110,7 @@ describe('useAutoBackfill (AC-52.46 + AC-52.47)', () => {
         },
       ],
     });
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(1));
     await waitFor(() => expect(window.localStorage.getItem('tk-backfilled')).toBeTruthy());
     expect(window.localStorage.getItem('tk-backfill-cursor')).toBeNull();
@@ -121,7 +126,7 @@ describe('useAutoBackfill (AC-52.46 + AC-52.47)', () => {
         { processed: 1, ok: 1, failed: 0, next_after: null, done: true, summary: [] },
       ],
     });
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(3), { timeout: 3000 });
     // First call has no `after` query, subsequent calls do.
     expect(calls[0]!.url).not.toMatch(/after=/);
@@ -141,7 +146,7 @@ describe('useAutoBackfill (AC-52.46 + AC-52.47)', () => {
         { processed: 1, ok: 1, failed: 0, next_after: null, done: true, summary: [] },
       ],
     });
-    render(<App />);
+    renderApp();
     await waitFor(() => expect(calls.length).toBeGreaterThanOrEqual(1));
     // First call carries the resumed cursor.
     expect(calls[0]!.url).toMatch(/after=118-S-3/);
@@ -158,7 +163,7 @@ describe('useAutoBackfill (AC-52.46 + AC-52.47)', () => {
       }
       return new Response('{"items":[]}', { status: 200 });
     });
-    render(<App />);
+    renderApp();
     // Wait for the call + the catch path to run.
     await new Promise((r) => setTimeout(r, 200));
     expect(window.localStorage.getItem('tk-backfilled')).toBeNull();
@@ -170,7 +175,7 @@ describe('useAutoBackfill (AC-52.46 + AC-52.47)', () => {
       whoamiStatus: 401,
       onBackfillCall: (c) => calls.push(c),
     });
-    render(<App />);
+    renderApp();
     await new Promise((r) => setTimeout(r, 100));
     expect(calls.length).toBe(0);
   });

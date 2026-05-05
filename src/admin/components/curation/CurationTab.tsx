@@ -1,17 +1,9 @@
 /**
  * Curation tab — single funnel for the discover→score pipeline.
  *
- * Sub-views (controlled by parent via hash routing):
- *   inbox    — pending social-post queue (was: Social ▸ Feed Queue)
- *   add      — Add Quote form (was: Quotes ▸ Add Quote, now the default landing)
- *   quotes   — All quotes list/edit (was: Quotes ▸ All Quotes)
- *   research — Ad-hoc social search by person (was: Social ▸ Research)
- *   direct   — Paste a URL → fetch → curate (was: Social ▸ Add by URL)
- *
- * Aesthetic convergence: every sub-view uses the same card layout, colors,
- * and spacing so the funnel is visually obvious — a card you see in Inbox
- * looks the same after you score it as a quote.
+ * Sub-views driven by React Router via /curation/:view.
  */
+import { NavLink, useParams, Navigate } from 'react-router-dom';
 import { QueueView, ResearchView, DirectAddView } from '../SocialFeedTab';
 import { AddQuoteView } from './AddQuoteView';
 import { QuotesListView } from './QuotesListView';
@@ -20,44 +12,44 @@ import type { QuotePrefill } from '../../App';
 export type CurationView = 'inbox' | 'add' | 'quotes' | 'research' | 'direct';
 
 const VIEWS: Array<{ id: CurationView; label: string; help: string }> = [
-  { id: 'inbox',    label: 'Inbox',     help: 'Pending posts to triage' },
-  { id: 'add',      label: 'Add quote', help: 'Score a quote from any source' },
+  { id: 'inbox',    label: 'Inbox',      help: 'Pending posts to triage' },
+  { id: 'add',      label: 'Add quote',  help: 'Score a quote from any source' },
   { id: 'quotes',   label: 'All quotes', help: 'Browse + edit existing quotes' },
-  { id: 'research', label: 'Research',  help: 'Search a person’s social feeds' },
+  { id: 'research', label: 'Research',   help: 'Search a person\'s social feeds' },
   { id: 'direct',   label: 'Add by URL', help: 'Paste a social URL to ingest' },
 ];
 
+const VALID: Set<string> = new Set(VIEWS.map((v) => v.id));
+
 export function CurationTab({
-  view,
-  onChangeView,
   onNavigateToPerson,
   onCurateAsQuote,
   prefill,
   onPrefillConsumed,
 }: {
-  view: CurationView;
-  onChangeView: (v: CurationView) => void;
   onNavigateToPerson: (bioguideId: string) => void;
   onCurateAsQuote: (data: QuotePrefill) => void;
   prefill: QuotePrefill | null;
   onPrefillConsumed: () => void;
 }) {
+  const { view = 'inbox' } = useParams<{ view: string }>();
+  if (!VALID.has(view)) return <Navigate to="/curation/inbox" replace />;
+
   return (
     <div style={styles.root}>
       <nav style={styles.subNav}>
         {VIEWS.map((v) => (
-          <button
+          <NavLink
             key={v.id}
-            type="button"
-            onClick={() => onChangeView(v.id)}
+            to={`/curation/${v.id}`}
             title={v.help}
-            style={{
+            style={({ isActive }) => ({
               ...styles.subTab,
-              ...(view === v.id ? styles.subTabActive : {}),
-            }}
+              ...(isActive ? styles.subTabActive : {}),
+            })}
           >
             {v.label}
-          </button>
+          </NavLink>
         ))}
       </nav>
       <div style={styles.body}>
@@ -80,6 +72,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflowX: 'auto',
   },
   subTab: {
+    display: 'block',
     background: 'transparent',
     color: 'var(--tk-muted)',
     border: '2px solid transparent',
@@ -90,8 +83,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--tk-font)',
     fontSize: 'var(--tk-fs-xs)',
     fontWeight: 700,
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.04em',
+    textDecoration: 'none',
+    whiteSpace: 'nowrap' as const,
   },
   subTabActive: {
     color: 'var(--tk-fg)',

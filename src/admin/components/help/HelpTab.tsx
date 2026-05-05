@@ -1,7 +1,8 @@
 /**
  * Help section — static researcher documentation.
- * Sub-nav mirrors the SettingsTab pattern; all content is fully static (no API calls).
+ * Sub-views driven by React Router via /help/:view.
  */
+import { NavLink, useParams, Navigate } from 'react-router-dom';
 import { GettingStarted } from './GettingStarted';
 import { CurationGuide } from './CurationGuide';
 import { PeopleAndPolls } from './PeopleAndPolls';
@@ -10,13 +11,7 @@ import { ScoringExplained } from './ScoringExplained';
 
 export type HelpView = 'getting-started' | 'curation' | 'people-polls' | 'bills-votes' | 'scoring';
 
-interface ViewSpec {
-  id: HelpView;
-  label: string;
-  help: string;
-}
-
-const VIEWS: ViewSpec[] = [
+const VIEWS: Array<{ id: HelpView; label: string; help: string }> = [
   { id: 'getting-started', label: 'Getting started', help: 'Orientation for new researchers' },
   { id: 'curation',        label: 'Curation guide',  help: 'How to score statements and manage the inbox' },
   { id: 'people-polls',    label: 'People & polls',  help: 'Handles, polling, and rep profiles' },
@@ -24,29 +19,27 @@ const VIEWS: ViewSpec[] = [
   { id: 'scoring',         label: 'Scoring',         help: 'How the Ukraine score is computed' },
 ];
 
-export function HelpTab({
-  view,
-  onChangeView,
-}: {
-  view: HelpView;
-  onChangeView: (v: HelpView) => void;
-}) {
+const VALID: Set<string> = new Set(VIEWS.map((v) => v.id));
+
+export function HelpTab() {
+  const { view = 'getting-started' } = useParams<{ view: string }>();
+  if (!VALID.has(view)) return <Navigate to="/help/getting-started" replace />;
+
   return (
     <div style={styles.root}>
       <nav style={styles.subNav}>
         {VIEWS.map((v) => (
-          <button
+          <NavLink
             key={v.id}
-            type="button"
-            onClick={() => onChangeView(v.id)}
+            to={`/help/${v.id}`}
             title={v.help}
-            style={{
+            style={({ isActive }) => ({
               ...styles.subTab,
-              ...(view === v.id ? styles.subTabActive : {}),
-            }}
+              ...(isActive ? styles.subTabActive : {}),
+            })}
           >
             {v.label}
-          </button>
+          </NavLink>
         ))}
       </nav>
       <div style={styles.body}>
@@ -69,6 +62,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflowX: 'auto',
   },
   subTab: {
+    display: 'block',
     background: 'transparent',
     color: 'var(--tk-muted)',
     border: '2px solid transparent',
@@ -79,9 +73,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--tk-font)',
     fontSize: 'var(--tk-fs-xs)',
     fontWeight: 700,
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.04em',
-    whiteSpace: 'nowrap',
+    textDecoration: 'none',
+    whiteSpace: 'nowrap' as const,
   },
   subTabActive: {
     color: 'var(--tk-fg)',

@@ -1,14 +1,10 @@
 /**
- * Admin tab — home for cross-cutting admin knobs.
+ * Admin settings tab. Sub-views driven by React Router via /settings/:view.
  *
- * Per CLAUDE.md "Workflow conventions": anything that's "operator-edited
- * configuration data" lives here, not inline on workflow tabs. Today only
- * Keywords + Tags are user-editable; Poll status and App config are read-only
- * (we render them visibly but with `editable: false` so curators see the
- * settings exist while not being able to fiddle with them).
- *
- * Routes still use the `settings` URL prefix to avoid breaking deep-links.
+ * Per CLAUDE.md: anything "operator-edited configuration data" lives here.
+ * Poll status and App config are read-only (shown but wrapped in ReadOnlyWrap).
  */
+import { NavLink, useParams, Navigate } from 'react-router-dom';
 import { KeywordsView } from '../SocialFeedTab';
 import { TagsView } from './TagsView';
 import { PollStatusView } from './PollStatusView';
@@ -21,7 +17,6 @@ interface ViewSpec {
   id: SettingsView;
   label: string;
   help: string;
-  /** When false, the view is shown but rendered greyed out / read-only. */
   editable: boolean;
 }
 
@@ -33,29 +28,27 @@ const VIEWS: ViewSpec[] = [
   { id: 'config',      label: 'App config',  help: 'Deployment-time settings (read-only)', editable: false },
 ];
 
-export function SettingsTab({
-  view,
-  onChangeView,
-}: {
-  view: SettingsView;
-  onChangeView: (v: SettingsView) => void;
-}) {
+const VALID: Set<string> = new Set(VIEWS.map((v) => v.id));
+
+export function SettingsTab() {
+  const { view = 'keywords' } = useParams<{ view: string }>();
+  if (!VALID.has(view)) return <Navigate to="/settings/keywords" replace />;
+
   return (
     <div style={styles.root}>
       <nav style={styles.subNav}>
         {VIEWS.map((v) => (
-          <button
+          <NavLink
             key={v.id}
-            type="button"
-            onClick={() => onChangeView(v.id)}
+            to={`/settings/${v.id}`}
             title={v.help}
-            style={{
+            style={({ isActive }) => ({
               ...styles.subTab,
-              ...(view === v.id ? styles.subTabActive : {}),
-            }}
+              ...(isActive ? styles.subTabActive : {}),
+            })}
           >
             {v.label}
-          </button>
+          </NavLink>
         ))}
       </nav>
       <div style={styles.body}>
@@ -69,10 +62,6 @@ export function SettingsTab({
   );
 }
 
-/** Wraps a sub-view in a "locked" frame: visible but visually muted with a
- *  banner explaining why it's not editable, and a CSS layer that blocks
- *  pointer events on form controls underneath. Buttons that perform GET-only
- *  actions (refresh, copy trace ID) stay clickable since they don't mutate. */
 function ReadOnlyWrap({ children, reason }: { children: React.ReactNode; reason: string }) {
   return (
     <div style={lockStyles.wrap}>
@@ -100,18 +89,13 @@ const lockStyles: Record<string, React.CSSProperties> = {
     color: 'var(--tk-muted)',
     fontSize: 'var(--tk-fs-sm)',
   },
-  lockIcon: {
-    fontSize: 14,
-  },
+  lockIcon: { fontSize: 14 },
   content: {
     opacity: 0.65,
     border: '2px solid var(--tk-border-soft)',
     borderTop: 'none',
     padding: 12,
     background: 'var(--tk-bg)',
-    // Block writes by intercepting pointer events on form fields.
-    // Read-only buttons (refresh, copy) still work by being explicit about
-    // pointer-events in their own component.
   },
 };
 
@@ -124,6 +108,7 @@ const styles: Record<string, React.CSSProperties> = {
     overflowX: 'auto',
   },
   subTab: {
+    display: 'block',
     background: 'transparent',
     color: 'var(--tk-muted)',
     border: '2px solid transparent',
@@ -134,8 +119,10 @@ const styles: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--tk-font)',
     fontSize: 'var(--tk-fs-xs)',
     fontWeight: 700,
-    textTransform: 'uppercase',
+    textTransform: 'uppercase' as const,
     letterSpacing: '0.04em',
+    textDecoration: 'none',
+    whiteSpace: 'nowrap' as const,
   },
   subTabActive: {
     color: 'var(--tk-fg)',
