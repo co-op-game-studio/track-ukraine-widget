@@ -38,17 +38,31 @@ export const LOW_CONFIDENCE_THRESHOLD = 3;
  *  [0, 1] gradient naturally instead of the old binary clamp. */
 export const MODERATE_CONFIDENCE_THRESHOLD = 8;
 
+/** FR-55 — Below this many contributing actions, refuse to score: badge
+ *  reads "Insufficient record" instead of a colored score. ADR-018. */
+export const NEW_REP_THRESHOLD = 2;
+
+/** FR-55 — Bayesian shrink half-life. With `k=4`, shrink weight
+ *  `w = 1/(1 + contributing/k)` is 0.5 at 4 actions, 0.33 at 8, 0.2 at 16. */
+export const SHRINK_K = 4;
+
 export interface ScoreInput {
   valence: Valence;
   /** Weight in [0, 1] — from the curated JSON for votes, or 1.0 for sponsorship. */
   weight: number;
 }
 
-export type ConfidenceTier = 'low' | 'moderate' | 'full';
+export type ConfidenceTier = 'insufficient' | 'low' | 'moderate' | 'full';
 
 export interface UkraineScore {
-  /** Normalized score in [-1, +1], or null if no signed contributions. */
+  /** Normalized score in [-1, +1], or null if no signed contributions
+   *  OR `confidenceTier === 'insufficient'` (FR-55). */
   score: number | null;
+  /**
+   * FR-55 — the un-shrunken score. Always populated when there's any
+   * signed contribution; useful for analytics + the admin debug panel.
+   */
+  rawScore: number | null;
   /** Count of actions that contributed (excludes unstated + procedural). */
   contributing: number;
   /** Count of actions considered (including those excluded). */
@@ -63,20 +77,31 @@ export interface UkraineScore {
    * `min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD)`.
    * Drives the UkraineScoreBadge saturation filter so mid-rangers look
    * visually distinct from both first-timers and long-serving members.
+   * 0 when `confidenceTier === 'insufficient'`.
    */
   confidence: number;
   /**
-   * FR-43 AC-43.1: discretized tier derived from the same signal. Used by
-   * `scoreLabel` ("Limited record" copy) and by tests that branch on a
-   * named category. `'low'` below LOW_CONFIDENCE_THRESHOLD, `'full'` at
-   * or above MODERATE_CONFIDENCE_THRESHOLD, `'moderate'` between.
+   * FR-43 AC-43.1, FR-55 AC-55.1 — discretized tier. Used by `scoreLabel`
+   * ("Insufficient record" / "Limited record" copy) and by tests that
+   * branch on a named category.
+   *   - `'insufficient'` below NEW_REP_THRESHOLD
+   *   - `'low'` between NEW_REP_THRESHOLD and LOW_CONFIDENCE_THRESHOLD
+   *   - `'full'` at or above MODERATE_CONFIDENCE_THRESHOLD
+   *   - `'moderate'` between
    */
   confidenceTier: ConfidenceTier;
+}
+
+/** FR-55 — optional priors passed to `computeUkraineScore`. When absent or
+ *  `partyPrior === null`, shrink is skipped. */
+export interface ScorePriors {
+  partyPrior: number | null;
 }
 
 /** Compute the tier name from a raw contributing count. Exported for reuse
  *  by test helpers + curator debug tools. */
 export function deriveConfidenceTier(contributing: number): ConfidenceTier {
+  if (contributing < NEW_REP_THRESHOLD) return 'insufficient';
   if (contributing < LOW_CONFIDENCE_THRESHOLD) return 'low';
   if (contributing < MODERATE_CONFIDENCE_THRESHOLD) return 'moderate';
   return 'full';
@@ -84,10 +109,28 @@ export function deriveConfidenceTier(contributing: number): ConfidenceTier {
 
 /** Compute the continuous confidence index from a raw contributing count. */
 export function deriveConfidence(contributing: number): number {
+  if (contributing < NEW_REP_THRESHOLD) return 0;
   return Math.min(1, contributing / MODERATE_CONFIDENCE_THRESHOLD);
 }
 
-export function computeUkraineScore(actions: ScoreInput[]): UkraineScore {
+/**
+ * FR-55 / ADR-018 — Bayesian shrink toward the party prior.
+ *
+ * Below `NEW_REP_THRESHOLD`, score is null (badge reads "Insufficient record").
+ * Between threshold and `MODERATE_CONFIDENCE_THRESHOLD`, the raw score is
+ * shrunk toward `partyPrior` by weight `w = 1 / (1 + contributing / k)`.
+ * At or above `MODERATE_CONFIDENCE_THRESHOLD`, no shrink (raw score wins).
+ *
+ * When `partyPrior === null` (cold-start; no full-confidence reps in this
+ * party yet), shrink is skipped — degenerates to current behavior.
+ *
+ * @param actions   contributing score inputs
+ * @param priors    optional `{ partyPrior }`. Pass `undefined` to skip shrink.
+ */
+export function computeUkraineScore(
+  actions: ScoreInput[],
+  priors?: ScorePriors,
+): UkraineScore {
   let numerator = 0;
   let denominator = 0;
   let contributing = 0;
@@ -108,10 +151,39 @@ export function computeUkraineScore(actions: ScoreInput[]): UkraineScore {
     contributing++;
   }
 
-  const score = denominator === 0 ? null : numerator / denominator;
+  const rawScore = denominator === 0 ? null : numerator / denominator;
   const confidenceTier = deriveConfidenceTier(contributing);
+
+  // FR-55 AC-55.2 — refuse to score below NEW_REP_THRESHOLD.
+  if (confidenceTier === 'insufficient') {
+    return {
+      score: null,
+      rawScore,
+      contributing,
+      total: actions.length,
+      lowConfidence: false,
+      confidence: 0,
+      confidenceTier,
+    };
+  }
+
+  // FR-55 AC-55.3 / AC-55.4 — shrink toward the party prior if available
+  // and we're below full confidence. Cold-start (`partyPrior === null`) →
+  // no shrink, raw score wins.
+  let displayScore: number | null = rawScore;
+  if (
+    rawScore !== null &&
+    priors &&
+    priors.partyPrior !== null &&
+    confidenceTier !== 'full'
+  ) {
+    const w = 1 / (1 + contributing / SHRINK_K);
+    displayScore = (1 - w) * rawScore + w * priors.partyPrior;
+  }
+
   return {
-    score,
+    score: displayScore,
+    rawScore,
     contributing,
     total: actions.length,
     lowConfidence: confidenceTier === 'low' && contributing > 0,

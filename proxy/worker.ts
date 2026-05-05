@@ -19,6 +19,9 @@
  */
 
 import { handleFetch, type ProxyEnv } from './lib';
+import { runFreshnessCron } from './services/freshness-cron';
+import { ensureIngestSeeded } from './services/ingest-seed';
+import { runSocialPollCron } from './services/social-poll-cron';
 
 type Env = Omit<ProxyEnv, 'KV_VOTER_INFO' | 'ASSETS' | 'RATE_LIMITER'> & {
   KV_VOTER_INFO: KVNamespace;
@@ -32,5 +35,39 @@ type Env = Omit<ProxyEnv, 'KV_VOTER_INFO' | 'ASSETS' | 'RATE_LIMITER'> & {
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     return handleFetch(request, env as unknown as ProxyEnv, caches.default, ctx);
+  },
+
+  /**
+   * AC-52.49 — scaling-backoff freshness cron. Configured in wrangler.toml
+   * to run every hour. Picks bills whose
+   * `last_freshness_check_at + interval(updated_at)` ≤ now, re-runs the
+   * importer (which short-circuits on unchanged upstream `updateDate`).
+   */
+  async scheduled(
+    event: ScheduledEvent,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    const proxyEnv = env as unknown as ProxyEnv;
+    const origin = (env.ALLOWED_ORIGINS ?? '').split(',')[0]?.trim()
+      || 'https://vote.cogs.it.com';
+
+    // FR-59 — refresh social ingest roster, Bluesky handles, and keywords.
+    // Always runs (idempotent check-then-update-or-insert). Also runs on
+    // first fetch after deploy — cron is the ongoing refresh.
+    ctx.waitUntil(
+      ensureIngestSeeded(proxyEnv).catch(() => undefined),
+    );
+
+    // AC-52.49 — bill freshness cron.
+    ctx.waitUntil(
+      runFreshnessCron(proxyEnv, origin).catch(() => undefined),
+    );
+
+    // FR-59 — poll all supported social platforms for new posts.
+    ctx.waitUntil(
+      runSocialPollCron(proxyEnv).catch(() => undefined),
+    );
+    void event;
   },
 };

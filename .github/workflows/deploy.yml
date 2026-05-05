@@ -108,12 +108,39 @@ jobs:
           CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
         run: npx tsx scripts/publish-to-kv.ts --env ${{ needs.resolve.outputs.env_name }}
 
+      # D1 migrations are idempotent — wrangler tracks applied migrations in
+      # the d1_migrations table and only runs new ones. Safe to run every deploy.
+      - name: Apply D1 migrations
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: d1 migrations apply D1_VOTER_INFO --remote ${{ env.WRANGLER_ENV && format('--env {0}', env.WRANGLER_ENV) || '' }}
+
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy ${{ env.WRANGLER_ENV && format('--env {0}', env.WRANGLER_ENV) || '' }}
+
+      # Seed is idempotent (upsert with ON CONFLICT, short-circuits when roster
+      # exists). Auto-runs every deploy so a fresh env never lands empty.
+      - name: Seed ingest roster
+        env:
+          ENV_NAME: ${{ needs.resolve.outputs.env_name }}
+          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+        shell: bash
+        run: |
+          case "$ENV_NAME" in
+            prod) HOST="https://vote.cogs.it.com";     AUTH=() ;;
+            stg)  HOST="https://stg.vote.cogs.it.com"; AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+            uat)  HOST="https://uat.vote.cogs.it.com"; AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+            dev)  HOST="https://dev.vote.cogs.it.com"; AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+          esac
+          curl -sS -fX POST "$HOST/api/admin/ingest/seed" "${AUTH[@]}" \
+            -H "Content-Type: application/json" -d "{}" --max-time 120
 
       - name: Post-deploy smoke
         env:

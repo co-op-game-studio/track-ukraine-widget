@@ -23,6 +23,7 @@
     "upstreams/**/*.ts",
     "security/**/*.ts",
     "kv/**/*.ts",
+    "d1/**/*.ts",
     "routes/**/*.ts",
     "router.ts"
   ]

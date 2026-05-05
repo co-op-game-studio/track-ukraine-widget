@@ -123,10 +123,9 @@ describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', ()
     render(<VoterInfoWidget apiBase="" />);
     await driveToRepDetail();
 
-    // Switch to Legislation tab where useSponsoredBills' error surfaces.
-    const legTab = await screen.findByRole('tab', { name: /Ukraine Legislation/i });
-    fireEvent.click(legTab);
-
+    // V4 (FR-53 AC-53.2): votes + legislation are merged on the default
+    // "Record" tab; useSponsoredBills' error surfaces in BillList without
+    // switching tabs.
     const banner = await waitFor(() => {
       const el = document.querySelector('.viw-error-banner');
       if (!el) throw new Error('ErrorBanner not yet rendered in RepDetail');
@@ -159,10 +158,8 @@ describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', ()
     render(<VoterInfoWidget apiBase="" />);
     await driveToRepDetail();
 
-    // Switch to Legislation tab. "UKRAINE LEGISLATION" is the visible label.
-    const legTab = await screen.findByRole('tab', { name: /Ukraine Legislation/i });
-    fireEvent.click(legTab);
-
+    // V4 (FR-53 AC-53.2): BillList renders on the default Record tab —
+    // no tab switch needed.
     const banner = await waitFor(() => {
       const el = document.querySelector('.viw-error-banner');
       if (!el) throw new Error('BillList error banner not rendered');

@@ -8,6 +8,35 @@ Embeddable, stateless web component that lets U.S. voters look up their federal 
 
 **Never add `Co-Authored-By: Claude` (or any Claude/AI co-author trailer) to commit messages.** No exceptions. Commits should look like they were written by the human author — no AI attribution, no `🤖 Generated with Claude Code` footers, nothing of the sort. This applies to every commit, every PR description, every amend.
 
+## Workflow conventions (this project)
+
+- **Big chunks, not nibbles.** When asked to ship a multi-part change, build the whole thing end-to-end (migration → backend → frontend → typecheck → build → deploy → walk it) before checking in. Don't pause between sub-steps to re-confirm intent the user already gave; only stop for genuine forks. "Stop being timid."
+- **Always `npm run build:all`, never just `build`.** The repo has three Vite build modes that share `dist/`: SPA preview (`build`), embed IIFE (`build:lib`, the public widget), admin SPA (`build:admin`). Order matters because the SPA build wipes `dist/` and the lib build has `emptyOutDir: false`. Running `build` alone leaves `voter-info-widget.iife.js` missing and the widget 404s on every embedder. Always run `npm run build:all` (or in shell: `vite build && vite build --mode lib && vite build --config vite.admin.config.ts && node scripts/build-sri.mjs`) before `wrangler deploy`. Adding a deploy script that wraps both is a tech-debt item.
+
+## CF Access posture (per-env)
+
+Cloudflare Access protects the entire `*.vote.cogs.it.com` zone for dev / uat / stg. Prod (`vote.cogs.it.com`) has Access **disabled** so the widget is publicly fetchable for embedders.
+
+For non-prod envs, the **admin SPA** (`/admin*`, `/api/admin/*`) **must stay gated** — that's the whole point of CF Access. But the **public widget asset + read-only data API paths** need bypass policies so embedders can test against dev/uat/stg without an SSO challenge:
+
+- `/voter-info-widget.iife.js` — the widget bundle
+- `/voter-info-widget.iife.js.sri` — SRI manifest
+- `/assets/*` — preview-page hashed JS/CSS
+- `/api/members/*`, `/api/bills/*`, `/api/roll-calls/*`, `/api/roll-call-rosters/*`, `/api/state-members/*`, `/api/name-search`, `/api/comments/*`, `/api/social-posts/*`, `/api/quotes/*`, `/api/audit/public`, `/api/stats`
+- `/api/census/*`, `/api/congress/*`, `/api/senate/*` — upstream proxies
+
+**To configure** (per env): CF dashboard → Zero Trust → Access → Applications → `dev.vote.cogs.it.com` (or uat/stg) → Policies → Add policy:
+- Action: **Bypass**
+- Include: Everyone
+- Path: starts with — add one entry per path above
+
+This is dashboard-only; never lives in code. If the bypass is wrong on any env, the widget will 302 to SSO instead of serving — easy to spot in network tab.
+- **One nav surface.** The admin SPA uses a **single megamenu** as the top-level nav (not a row of tabs and not multiple menus mixed with tabs). All sections live under that one menu, grouped into columns (People, Bills, Curation, Activity, Settings, etc.). When adding a new section, add it to the megamenu groups in `App.tsx` — never bolt on a parallel tab bar.
+- **Settings is the home for cross-cutting knobs.** Anything that's "operator-edited configuration data" (keywords, tags, poll knobs, app config display) lives under `Settings ▸ ...`. Workflow tabs (Curation, People) never embed their own config UI inline. If a workflow needs a knob, add it under Settings and link to it.
+- **Trace IDs are user-visible on errors.** Every admin write already logs a `traceId`. Surfacing it in the UI on failures (copyable monospace, "?" link to troubleshooting docs) is the standard pattern, not an afterthought. Person-profile poll-status panels and Settings ▸ Poll Status both render trace IDs alongside error text.
+- **Tags are a system primitive.** When adding categorization to any resource, prefer the shared `tags` table (color-coded, audited, single CRUD UI under Settings ▸ Tags) over per-resource enum columns. Quotes are the first consumer; future resources should follow the same pattern.
+- **Shared cards over bespoke layouts.** When the same conceptual object appears on multiple screens (a quote on Curation list + Profile history + Inbox), use a shared `<CurationCard>` component. Different funnels should look the same.
+
 ## Specification Documents
 
 All development must trace back to these specs:

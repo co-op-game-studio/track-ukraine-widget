@@ -96,7 +96,7 @@ export function VoterInfoWidget({ apiBase = '', showErrorDetails = false }: Vote
           <br />
           We do not store or keep any information you enter in this form.
         </small>
-        <AboutSystemPanel />
+        <AboutSystemPanel apiBase={apiBase} />
       </footer>
     </div>
   );

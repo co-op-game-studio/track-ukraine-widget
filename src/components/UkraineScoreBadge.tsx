@@ -378,13 +378,18 @@ export function UkraineScoreBadge({
 
   function renderRight() {
     if (!score || score.score === null) {
+      // FR-55 AC-55.5 — insufficient-record copy distinguishes "newer rep,
+      // < 2 contributing actions" from "no record found at all".
+      const insufficient = score?.confidenceTier === 'insufficient' && (score?.contributing ?? 0) > 0;
+      const label = insufficient ? 'Insufficient record' : 'No record';
+      const justification = insufficient
+        ? `Only ${score!.contributing} contributing action so far — too few to score reliably.`
+        : 'No curated Ukraine votes or sponsorships found for this member yet.';
       return (
         <>
           <div className="viw-score-context-stack">
-            <span className="viw-score-label">No record</span>
-            <span className="viw-score-justification">
-              No curated Ukraine votes or sponsorships found for this member yet.
-            </span>
+            <span className="viw-score-label">{label}</span>
+            <span className="viw-score-justification">{justification}</span>
           </div>
           <span className="viw-score-value viw-score-value-na">N/A</span>
         </>

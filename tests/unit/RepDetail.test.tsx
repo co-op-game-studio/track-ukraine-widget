@@ -157,12 +157,14 @@ describe('RepDetail', () => {
     expect(container.textContent).not.toMatch(/District\s+null/i);
   });
 
-  it('renders "Delegate (non-voting)" for non-voting delegates and disables Votes tab', () => {
+  it('renders "Delegate (non-voting)" for non-voting delegates and shows the no-vote-record hint on the Record tab (FR-53)', () => {
     render(<RepDetail representative={dcDelegate} apiBase="" onClose={() => {}} />);
     expect(screen.getByText(/Delegate \(non-voting\)/)).toBeInTheDocument();
-    // Votes tab SHALL be disabled for non-voting house delegates.
-    const votesTab = screen.getByRole('tab', { name: /Ukraine Votes/i }) as HTMLButtonElement;
-    expect(votesTab.disabled).toBe(true);
+    // Record tab is the default; for non-voting delegates the body shows the
+    // "Non-voting delegate — no floor vote record" hint in place of VoteList.
+    expect(
+      screen.getByText(/Non-voting delegate — no floor vote record/i),
+    ).toBeInTheDocument();
   });
 
   it('shows the "Official website" link when URL is present and sanitizes http(s) only', () => {
@@ -215,13 +217,29 @@ describe('RepDetail', () => {
     expect(container.querySelector('.viw-score')).toBeNull();
   });
 
-  it('switches tabs between Votes and Legislation', () => {
+  it('renders Record + Statements tabs only (FR-53 AC-53.2 REVISED — two tabs)', () => {
     render(<RepDetail representative={durbin} apiBase="" onClose={() => {}} />);
-    const billsTab = screen.getByRole('tab', { name: /Ukraine Legislation/i });
-    fireEvent.click(billsTab);
-    expect(billsTab.getAttribute('aria-selected')).toBe('true');
-    const votesTab = screen.getByRole('tab', { name: /Ukraine Votes/i });
-    expect(votesTab.getAttribute('aria-selected')).toBe('false');
+    const recordTab = screen.getByRole('tab', { name: /^Record$/i });
+    const statementsTab = screen.getByRole('tab', { name: /^Statements$/i });
+    // Default = Record.
+    expect(recordTab.getAttribute('aria-selected')).toBe('true');
+    // Switch to Statements.
+    fireEvent.click(statementsTab);
+    expect(statementsTab.getAttribute('aria-selected')).toBe('true');
+    expect(recordTab.getAttribute('aria-selected')).toBe('false');
+    // No Quotes tab — quotes are merged into Statements per AC-53.2 revised.
+    expect(screen.queryByRole('tab', { name: /^Quotes$/i })).toBeNull();
+  });
+
+  it('Record tab renders legislation ABOVE voting record (FR-53 AC-53.2 REVISED)', () => {
+    const { container } = render(
+      <RepDetail representative={durbin} apiBase="" onClose={() => {}} />,
+    );
+    const headings = [...container.querySelectorAll('.viw-detail-section-heading')];
+    expect(headings.length).toBeGreaterThanOrEqual(2);
+    // Legislation first, voting record second.
+    expect(headings[0]!.textContent).toMatch(/Ukraine legislation/i);
+    expect(headings[1]!.textContent).toMatch(/Ukraine voting record/i);
   });
 
   it('renders the non-voting delegate hint in the body when delegate selects Votes', () => {
@@ -297,24 +315,18 @@ describe('RepDetail', () => {
       ...durbin,
       socials: {
         twitter: 'senatordurbin',
-        facebook: 'SenatorDurbin',
         youtube: 'senatordurbin',
-        instagram: 'senatordurbin',
       },
     };
     render(<RepDetail representative={withSocials} apiBase="" onClose={() => {}} />);
     expect(screen.getByLabelText(/Durbin.+on Twitter/i)).toHaveAttribute(
       'href', 'https://twitter.com/senatordurbin',
     );
-    expect(screen.getByLabelText(/Durbin.+on Facebook/i)).toHaveAttribute(
-      'href', 'https://facebook.com/SenatorDurbin',
-    );
     expect(screen.getByLabelText(/Durbin.+on YouTube/i)).toHaveAttribute(
       'href', 'https://youtube.com/@senatordurbin',
     );
-    expect(screen.getByLabelText(/Durbin.+on Instagram/i)).toHaveAttribute(
-      'href', 'https://instagram.com/senatordurbin',
-    );
+    expect(screen.queryByLabelText(/Facebook/i)).toBeNull();
+    expect(screen.queryByLabelText(/Instagram/i)).toBeNull();
   });
 
   it('FR-48: renders no social row when socials object is absent or empty', () => {

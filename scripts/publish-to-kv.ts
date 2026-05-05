@@ -148,6 +148,7 @@ interface MemberSocials {
   facebook?: string;
   youtube?: string;
   instagram?: string;
+  mastodon?: string;
 }
 
 interface NameIndexEntry {
@@ -218,6 +219,7 @@ async function fetchSocialsMap(): Promise<Map<string, MemberSocials>> {
       if (typeof entry.social.facebook === 'string')  s.facebook = entry.social.facebook;
       if (typeof entry.social.youtube === 'string')   s.youtube = entry.social.youtube;
       if (typeof entry.social.instagram === 'string') s.instagram = entry.social.instagram;
+      if (typeof entry.social.mastodon === 'string')  s.mastodon = entry.social.mastodon;
       if (Object.keys(s).length > 0) result.set(bid, s);
     }
   } catch (err) {
