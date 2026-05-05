@@ -78,12 +78,10 @@ const schema: FieldSchema<BillRow>[] = [
     label: 'Direction rationale', kind: 'text', width: 'long',
     placeholder: 'Why this bill is pro/anti — visible to other researchers' },
 
-  // ─── external metadata ─────────────────────────────────────────────────
-  { group: 'External', key: 'congress_gov_url', label: 'Congress.gov URL', kind: 'url', width: 'long' },
-  // Date first, latest_action second — both on one line. The action string
-  // can be long (AC-52.20) so it takes the remaining row width.
-  { group: 'External', key: 'latest_action_date', label: 'Date (YYYY-MM-DD)', kind: 'text', width: 'medium' },
-  { group: 'External', key: 'latest_action', label: 'Latest action', kind: 'text', width: 'long' },
+  // ─── external metadata — read-only, sourced from Congress.gov ──────────
+  { group: 'External', key: 'congress_gov_url', label: 'Congress.gov URL', kind: 'static-url', width: 'full' },
+  { group: 'External', key: 'latest_action_date', label: 'Latest action date', kind: 'static-text', width: 'medium' },
+  { group: 'External', key: 'latest_action', label: 'Latest action', kind: 'static-text', width: 'long' },
 ];
 
 export function BillsTab() {

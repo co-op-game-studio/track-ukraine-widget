@@ -170,6 +170,8 @@ function VoteEditor({ billId, vote, onSaved }: VoteEditorProps) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
   // AC-52.68 — when Save is clicked on an existing row with an empty
   // change-notes input, flash the input red so the researcher sees why
   // nothing happened. Auto-clears after 800ms.
@@ -231,13 +233,11 @@ function VoteEditor({ billId, vote, onSaved }: VoteEditorProps) {
 
   async function onDelete() {
     if (!vote) return;
-    if (!window.confirm(`Delete vote ${vote.chamber} roll ${vote.roll_call}?`)) return;
-    const r = window.prompt('Change notes (required for delete):', '');
-    if (!r || !r.trim()) return;
+    if (!deleteReason.trim()) { setErr('A reason is required to delete.'); return; }
     setBusy(true);
     setErr(null);
     try {
-      await del(`/api/admin/votes/${vote.id}?reason=${encodeURIComponent(r.trim())}`);
+      await del(`/api/admin/votes/${vote.id}?reason=${encodeURIComponent(deleteReason.trim())}`);
       onSaved();
     } catch (e) {
       const fe = e as FetchError;
@@ -518,13 +518,34 @@ function VoteEditor({ billId, vote, onSaved }: VoteEditorProps) {
             />
           </FieldLabel>
         )}
-        <button type="submit" disabled={saveDisabled} style={styles.saveBtn}>
-          {isNew ? 'Add' : 'Save'}
-        </button>
-        {!isNew && (
-          <button type="button" onClick={onDelete} disabled={busy} style={styles.deleteBtn}>
-            Delete
-          </button>
+        {!isNew && pendingDelete ? (
+          <>
+            <input
+              type="text"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Reason for delete (required)"
+              autoFocus
+              style={{ ...styles.reasonInput, flex: 1 }}
+            />
+            <button type="button" onClick={onDelete} disabled={busy} style={styles.deleteBtn}>
+              {busy ? 'Deleting…' : 'Confirm delete'}
+            </button>
+            <button type="button" onClick={() => { setPendingDelete(false); setDeleteReason(''); setErr(null); }} style={styles.saveBtn}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="submit" disabled={saveDisabled} style={styles.saveBtn}>
+              {isNew ? 'Add' : 'Save'}
+            </button>
+            {!isNew && (
+              <button type="button" onClick={() => { setPendingDelete(true); setErr(null); }} disabled={busy} style={styles.deleteBtn}>
+                Delete
+              </button>
+            )}
+          </>
         )}
       </div>
       {err && <div style={styles.error}>{err}</div>}
@@ -640,6 +661,8 @@ function CommentEditor({ billId, comment, onSaved }: CommentEditorProps) {
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
   // AC-52.68 — flash the change-notes input when Save is clicked with empty
   // reason on update flow.
   const [flashReason, setFlashReason] = useState(false);
@@ -692,13 +715,11 @@ function CommentEditor({ billId, comment, onSaved }: CommentEditorProps) {
 
   async function onDelete() {
     if (!comment) return;
-    if (!window.confirm('Delete this comment?')) return;
-    const r = window.prompt('Change notes (required for delete):', '');
-    if (!r || !r.trim()) return;
+    if (!deleteReason.trim()) { setErr('A reason is required to delete.'); return; }
     setBusy(true);
     setErr(null);
     try {
-      await del(`/api/admin/comments/${comment.id}?reason=${encodeURIComponent(r.trim())}`);
+      await del(`/api/admin/comments/${comment.id}?reason=${encodeURIComponent(deleteReason.trim())}`);
       onSaved();
     } catch (e) {
       const fe = e as FetchError;
@@ -760,7 +781,7 @@ function CommentEditor({ billId, comment, onSaved }: CommentEditorProps) {
         </div>
       </div>
       <div style={styles.actionRow}>
-        {!isNew && (
+        {!isNew && !pendingDelete && (
           <input
             type="text"
             value={reason}
@@ -774,13 +795,34 @@ function CommentEditor({ billId, comment, onSaved }: CommentEditorProps) {
             aria-invalid={flashReason}
           />
         )}
-        <button type="submit" disabled={saveDisabled} style={styles.saveBtn}>
-          {isNew ? 'Add' : 'Save'}
-        </button>
-        {!isNew && (
-          <button type="button" onClick={onDelete} disabled={busy} style={styles.deleteBtn}>
-            Delete
-          </button>
+        {!isNew && pendingDelete ? (
+          <>
+            <input
+              type="text"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Reason for delete (required)"
+              autoFocus
+              style={{ ...styles.reasonInput, flex: 1 }}
+            />
+            <button type="button" onClick={onDelete} disabled={busy} style={styles.deleteBtn}>
+              {busy ? 'Deleting…' : 'Confirm delete'}
+            </button>
+            <button type="button" onClick={() => { setPendingDelete(false); setDeleteReason(''); setErr(null); }} style={styles.saveBtn}>
+              Cancel
+            </button>
+          </>
+        ) : (
+          <>
+            <button type="submit" disabled={saveDisabled} style={styles.saveBtn}>
+              {isNew ? 'Add' : 'Save'}
+            </button>
+            {!isNew && (
+              <button type="button" onClick={() => { setPendingDelete(true); setErr(null); }} disabled={busy} style={styles.deleteBtn}>
+                Delete
+              </button>
+            )}
+          </>
         )}
       </div>
       {err && <div style={styles.error}>{err}</div>}

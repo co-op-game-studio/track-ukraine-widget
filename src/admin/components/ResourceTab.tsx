@@ -20,7 +20,9 @@ export type FieldKind =
   | 'slider'
   | 'select'
   | 'checkbox'
-  | 'url';
+  | 'url'
+  | 'static-url'
+  | 'static-text';
 
 /** AC-52.15 + AC-52.31 — width hints for grouped layout.
  *  - short ≈ 8ch — numeric IDs (congress, session, roll-call#, score)
@@ -606,6 +608,36 @@ function Field<T>({ schema, value, onChange, readOnly = false }: FieldProps<T>) 
           onChange={(e) => onChange(e.target.checked)}
           disabled={readOnly}
         />
+      )}
+      {schema.kind === 'static-url' && (() => {
+        const safe = sanitizeUrl((v as string) ?? '');
+        return safe ? (
+          <a
+            href={safe}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              color: 'var(--accent)',
+              fontSize: 'var(--tk-fs-sm)',
+              fontFamily: 'var(--tk-font)',
+              textDecoration: 'none',
+              wordBreak: 'break-all',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            {safe} <span style={{ fontSize: 10 }}>↗</span>
+          </a>
+        ) : (
+          <span style={{ color: 'var(--tk-muted)', fontSize: 'var(--tk-fs-sm)', fontStyle: 'italic' }}>—</span>
+        );
+      })()}
+      {schema.kind === 'static-text' && (
+        <span style={{ color: 'var(--tk-fg)', fontSize: 'var(--tk-fs-sm)', fontFamily: 'var(--tk-font)' }}>
+          {(v as string) ?? <span style={{ color: 'var(--tk-muted)', fontStyle: 'italic' }}>—</span>}
+        </span>
       )}
       {showInlineHelp && <span style={styles.help}>{schema.help}</span>}
     </label>

@@ -24,6 +24,10 @@ export function TagsView() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteError, setDeleteError] = useState<{ msg: string; traceId: string | null } | null>(null);
+  const [deleteInFlight, setDeleteInFlight] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -33,6 +37,38 @@ export function TagsView() {
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  function startDelete(id: string) {
+    setDeleting(id);
+    setDeleteReason('');
+    setDeleteError(null);
+    setEditing(null);
+  }
+
+  function cancelDelete() {
+    setDeleting(null);
+    setDeleteReason('');
+    setDeleteError(null);
+  }
+
+  async function confirmDelete(t: TagRow) {
+    if (!deleteReason.trim()) {
+      setDeleteError({ msg: 'A reason is required to delete a tag.', traceId: null });
+      return;
+    }
+    setDeleteError(null);
+    setDeleteInFlight(true);
+    try {
+      await delApi(`/api/admin/tags/${t.id}?reason=${encodeURIComponent(deleteReason.trim())}`);
+      setDeleting(null);
+      setDeleteReason('');
+      load();
+    } catch (e) {
+      setDeleteError({ msg: friendlyError(e), traceId: traceIdOf(e) });
+    } finally {
+      setDeleteInFlight(false);
+    }
+  }
 
   return (
     <div style={S.root}>
@@ -66,6 +102,37 @@ export function TagsView() {
             onSave={() => { setEditing(null); load(); }}
             onCancel={() => setEditing(null)}
           />
+        ) : deleting === t.id ? (
+          <div key={t.id} style={{ ...S.formBox, borderColor: 'var(--tk-danger)', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Tag tag={t} />
+              <span style={{ color: 'var(--tk-danger)', fontWeight: 700, fontSize: 'var(--tk-fs-sm)' }}>
+                Delete this tag? It will be removed from all quotes.
+              </span>
+            </div>
+            <div style={S.row}>
+              <span style={{ ...S.fieldLabel, whiteSpace: 'nowrap' }}>Reason</span>
+              <input
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                style={{ ...S.input, flex: 1 }}
+                placeholder="Why are you deleting this tag?"
+                autoFocus
+              />
+            </div>
+            {deleteError && <ErrorBanner msg={deleteError.msg} traceId={deleteError.traceId} onDismiss={() => setDeleteError(null)} />}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => confirmDelete(t)}
+                disabled={deleteInFlight}
+                style={{ ...S.tinyBtn, padding: '6px 14px', color: 'var(--tk-danger)', border: '2px solid var(--tk-danger)' }}
+              >
+                {deleteInFlight ? 'Deleting…' : 'Confirm delete'}
+              </button>
+              <button type="button" onClick={cancelDelete} style={{ ...S.tinyBtn, padding: '6px 14px' }}>Cancel</button>
+            </div>
+          </div>
         ) : (
           <div key={t.id} style={S.row}>
             <Tag tag={t} />
@@ -75,15 +142,7 @@ export function TagsView() {
             <button type="button" onClick={() => setEditing(t.id)} style={S.tinyBtn}>Edit</button>
             <button
               type="button"
-              onClick={async () => {
-                if (!confirm(`Delete tag "${t.label}"? This will remove it from all quotes.`)) return;
-                try {
-                  await delApi(`/api/admin/tags/${t.id}`);
-                  load();
-                } catch (e) {
-                  alert(`Delete failed: ${errorMsg(e)}`);
-                }
-              }}
+              onClick={() => startDelete(t.id)}
               style={{ ...S.tinyBtn, color: 'var(--tk-danger)' }}
             >
               Delete
@@ -110,8 +169,10 @@ function TagForm({
   const [label, setLabel] = useState(existing?.label ?? '');
   const [color, setColor] = useState(existing?.color ?? DEFAULT_COLORS[0]!);
   const [description, setDescription] = useState(existing?.description ?? '');
+  const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorTraceId, setErrorTraceId] = useState<string | null>(null);
 
   // Derive slug from label as user types (only when creating + slug untouched).
   function onLabelChange(v: string) {
@@ -123,19 +184,22 @@ function TagForm({
 
   async function save() {
     setError(null);
-    if (!label.trim()) { setError('Label is required'); return; }
-    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) { setError('Slug must be lowercase kebab-case'); return; }
-    if (!/^#[0-9a-fA-F]{6}$/.test(color)) { setError('Color must be a 6-digit hex (#rrggbb)'); return; }
+    setErrorTraceId(null);
+    if (!label.trim()) { setError('Label is required.'); return; }
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(slug)) { setError('Slug must be lowercase kebab-case (e.g. "on-floor").'); return; }
+    if (!/^#[0-9a-fA-F]{6}$/.test(color)) { setError('Color must be a 6-digit hex value (e.g. #ef4444).'); return; }
+    if (mode === 'edit' && !reason.trim()) { setError('Please describe why you\'re making this change.'); return; }
     setSaving(true);
     try {
       if (mode === 'create') {
         await post('/api/admin/tags', { slug, label, color, description: description || null });
       } else if (existing) {
-        await patchApi(`/api/admin/tags/${existing.id}`, { slug, label, color, description: description || null });
+        await patchApi(`/api/admin/tags/${existing.id}`, { slug, label, color, description: description || null, _reason: reason.trim() });
       }
       onSave();
     } catch (e) {
-      setError(errorMsg(e));
+      setError(friendlyError(e));
+      setErrorTraceId(traceIdOf(e));
     } finally {
       setSaving(false);
     }
@@ -186,12 +250,69 @@ function TagForm({
           />
         </div>
       </Field>
-      {error && <div style={{ color: 'var(--tk-danger)', fontSize: 'var(--tk-fs-sm)' }}>{error}</div>}
+      {mode === 'edit' && (
+        <Field label="Reason for change">
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            style={S.input}
+            placeholder="Briefly describe what you changed and why"
+          />
+        </Field>
+      )}
+      {error && <ErrorBanner msg={error} traceId={errorTraceId} />}
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="button" onClick={save} disabled={saving} style={S.actionBtn}>{saving ? 'Saving…' : mode === 'create' ? 'Create tag' : 'Save changes'}</button>
         <button type="button" onClick={onCancel} style={{ ...S.tinyBtn, padding: '6px 14px' }}>Cancel</button>
       </div>
     </div>
+  );
+}
+
+function ErrorBanner({ msg, traceId, onDismiss }: { msg: string; traceId: string | null; onDismiss?: () => void }) {
+  return (
+    <div style={{ background: 'color-mix(in srgb, var(--tk-danger) 12%, transparent)', border: '1px solid var(--tk-danger)', padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+        <span style={{ color: 'var(--tk-danger)', fontWeight: 700, fontSize: 'var(--tk-fs-sm)', flex: 1 }}>{msg}</span>
+        {onDismiss && (
+          <button type="button" onClick={onDismiss} style={{ background: 'none', border: 'none', color: 'var(--tk-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>✕</button>
+        )}
+      </div>
+      {traceId && <CopyableTraceId traceId={traceId} />}
+    </div>
+  );
+}
+
+function CopyableTraceId({ traceId }: { traceId: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard.writeText(traceId).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }).catch(() => {});
+      }}
+      title="Click to copy this trace ID"
+      style={{
+        background: 'var(--tk-bg)',
+        color: 'var(--tk-fg)',
+        border: '1px solid var(--tk-border-soft)',
+        padding: '2px 6px',
+        cursor: 'pointer',
+        fontSize: 'var(--tk-fs-xs)',
+        fontFamily: 'var(--tk-font-mono)',
+        display: 'inline-flex',
+        gap: 6,
+        width: 'fit-content',
+        alignSelf: 'flex-start',
+      }}
+    >
+      <span style={{ color: 'var(--tk-muted)' }}>trace:</span>
+      <span>{traceId}</span>
+      <span style={{ color: copied ? '#22c55e' : 'var(--tk-muted)' }}>{copied ? '✓' : '⧉'}</span>
+    </button>
   );
 }
 
@@ -208,14 +329,27 @@ function Field({ label, children, style }: { label: string; children: React.Reac
   );
 }
 
-function errorMsg(e: unknown): string {
-  if (e instanceof Error) return e.message;
+function friendlyError(e: unknown): string {
   if (typeof e === 'object' && e !== null) {
     const obj = e as Record<string, unknown>;
     if (typeof obj.detail === 'string') return obj.detail;
-    if (typeof obj.error === 'string') return obj.error;
+    if (typeof obj.error === 'string') {
+      // Map known backend codes to human-readable messages.
+      if (obj.error === 'reason_required') return 'A reason for this change is required.';
+      if (obj.error === 'invalid_tag') return typeof obj.detail === 'string' ? obj.detail : 'The tag data is invalid. Check the slug and color format.';
+      if (obj.error === 'not_found') return 'This tag no longer exists — it may have been deleted by another user.';
+      if (obj.error === 'unauthorized') return 'Your session has expired. Please refresh the page and sign in again.';
+    }
   }
-  return String(e);
+  return 'Something went wrong. Please try again or contact support if the problem persists.';
+}
+
+function traceIdOf(e: unknown): string | null {
+  if (typeof e === 'object' && e !== null) {
+    const obj = e as Record<string, unknown>;
+    if (typeof obj.traceId === 'string') return obj.traceId;
+  }
+  return null;
 }
 
 const INPUT_BASE: React.CSSProperties = {
