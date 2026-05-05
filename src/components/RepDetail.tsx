@@ -5,14 +5,18 @@
  *
  * Traces to: US-2, US-3, US-4, US-5, US-7, US-8 (v2.2.0), US-9 (design).
  */
-import { useEffect, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import type { Representative } from '../types/domain';
 import { stateCodeToName } from '../utils/fipsMap';
 import { useVotingRecord } from '../hooks/useVotingRecord';
 import { useSponsoredBills } from '../hooks/useSponsoredBills';
 import { useUkraineScore } from '../hooks/useUkraineScore';
+import { useRepComments } from '../hooks/useRepComments';
+import { useRepStatements } from '../hooks/useRepStatements';
+import { useRepQuotes } from '../hooks/useRepQuotes';
 import { VoteList } from './VoteList';
 import { BillList } from './BillList';
+import { StatementsList } from './StatementsList';
 import { UkraineScoreBadge } from './UkraineScoreBadge';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
 import { getEnvelopeFromError } from '../services/errorEnvelope';
@@ -23,7 +27,7 @@ export interface RepDetailProps {
   onClose: () => void;
 }
 
-type Tab = 'votes' | 'bills';
+type Tab = 'record' | 'statements';
 
 function partyCssClass(abbr: string): string {
   if (abbr === 'D') return 'dem';
@@ -108,18 +112,22 @@ function SocialsRow({ name, socials }: { name: string; socials?: Representative[
 }
 
 export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) {
-  const [tab, setTab] = useState<Tab>('votes');
+  const [tab, setTab] = useState<Tab>('record');
   // Enrich the representative with profile data (photoUrl, website, district)
   // fetched from /api/members/{bioguideId}. This makes the name-search path
   // render the same rich card as the address path without the address flow
   // having to pass photoUrl through.
   const [enriched, setEnriched] = useState<Representative>(representative);
+  // FR-55 AC-55.6 — party prior comes from `member:v1:{id}.partyPrior` and
+  // is threaded into useUkraineScore for Bayesian shrink.
+  const [partyPrior, setPartyPrior] = useState<number | null>(null);
   // Broken-image fallback — mirrors MemberChip. If Congress.gov's photo URL
   // 404s or is blocked, fall back to the placeholder instead of the
   // browser's default broken-image glyph.
   const [photoFailed, setPhotoFailed] = useState(false);
   useEffect(() => {
     setEnriched(representative);
+    setPartyPrior(null);
     setPhotoFailed(false);
     const base = apiBase.replace(/\/+$/, '');
     let cancelled = false;
@@ -131,6 +139,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
         district?: number | null;
         officialName?: string;
         yearEntered?: number;
+        partyPrior?: number | null;
       } | null) => {
         if (!p || cancelled) return;
         // AC-31.1: every URL sourced from /api/members/{id} passes through
@@ -146,13 +155,38 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
           name: curr.name || p.officialName || curr.name,
           yearEntered: curr.yearEntered ?? p.yearEntered,
         }));
+        if (typeof p.partyPrior === 'number') {
+          setPartyPrior(p.partyPrior);
+        }
       })
       .catch(() => { /* keep base representative if profile lookup fails */ });
     return () => { cancelled = true; };
   }, [representative, apiBase]);
   const votingRecord = useVotingRecord(enriched, apiBase);
   const bills = useSponsoredBills(enriched.bioguideId, apiBase);
-  const score = useUkraineScore(votingRecord.data, bills.data);
+  const score = useUkraineScore(votingRecord.data, bills.data, { partyPrior });
+
+  // V4: collect every bill_id appearing in this rep's surfaces — votes
+  // (cluster.primary.bill) + sponsored / cosponsored — and feed them into
+  // useRepComments so VoteList can render comment-expand affordances on
+  // matching rows. Stable string-derived dep so a re-render doesn't refetch.
+  const billIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of votingRecord.data?.clusters ?? []) {
+      const b = c.primary.bill;
+      set.add(`${b.congress}-${b.type}-${b.number}`);
+    }
+    for (const b of bills.data?.sponsored ?? []) {
+      set.add(`${b.curated.congress}-${b.curated.type}-${b.curated.number}`);
+    }
+    for (const b of bills.data?.cosponsored ?? []) {
+      set.add(`${b.curated.congress}-${b.curated.type}-${b.curated.number}`);
+    }
+    return [...set];
+  }, [votingRecord.data, bills.data]);
+  const repComments = useRepComments(billIds, apiBase);
+  const statements = useRepStatements(enriched.bioguideId, apiBase);
+  const quotes = useRepQuotes(enriched.bioguideId, apiBase);
 
   useEffect(() => {
     // Auto-load on mount (or when member switches)
@@ -240,63 +274,76 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
         <button
           role="tab"
           type="button"
-          aria-selected={tab === 'votes'}
-          className={`viw-detail-tab ${tab === 'votes' ? 'active' : ''}`}
-          onClick={() => setTab('votes')}
-          disabled={enriched.isNonVoting && enriched.chamber === 'house'}
+          aria-selected={tab === 'record'}
+          className={`viw-detail-tab ${tab === 'record' ? 'active' : ''}`}
+          onClick={() => setTab('record')}
         >
-          Ukraine Votes
+          Record
         </button>
         <button
           role="tab"
           type="button"
-          aria-selected={tab === 'bills'}
-          className={`viw-detail-tab ${tab === 'bills' ? 'active' : ''}`}
-          onClick={() => setTab('bills')}
+          aria-selected={tab === 'statements'}
+          className={`viw-detail-tab ${tab === 'statements' ? 'active' : ''}`}
+          onClick={() => setTab('statements')}
         >
-          Ukraine Legislation
+          Statements
         </button>
       </nav>
 
       <div className="viw-detail-body">
-        {tab === 'votes' &&
-          (enriched.isNonVoting && enriched.chamber === 'house' ? (
-            <div className="viw-detail-nonvoting">Non-voting delegate — no floor vote record.</div>
-          ) : (
-            <VoteList
-              clusters={votingRecord.data?.clusters ?? []}
-              loading={votingRecord.status === 'loading'}
+        {tab === 'record' && (
+          <>
+            {/* AC-53.2 (revised) — legislation renders ABOVE voting record. */}
+            <h4 className="viw-detail-section-heading">Ukraine legislation</h4>
+            <BillList
+              sponsored={bills.data?.sponsored ?? []}
+              cosponsored={bills.data?.cosponsored ?? []}
+              loading={bills.status === 'loading'}
               error={(() => {
-                const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
-                return env?.userMessage ?? votingRecord.error?.message ?? null;
+                const env = bills.error ? getEnvelopeFromError(bills.error) : null;
+                return env?.userMessage ?? bills.error?.message ?? null;
               })()}
               errorTraceId={(() => {
-                const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                const env = bills.error ? getEnvelopeFromError(bills.error) : null;
                 return env?.traceId;
               })()}
               errorOnRetry={(() => {
-                const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
-                return env?.retryable ? () => votingRecord.load() : undefined;
+                const env = bills.error ? getEnvelopeFromError(bills.error) : null;
+                return env?.retryable ? () => bills.load() : undefined;
               })()}
             />
-          ))}
-        {tab === 'bills' && (
-          <BillList
-            sponsored={bills.data?.sponsored ?? []}
-            cosponsored={bills.data?.cosponsored ?? []}
-            loading={bills.status === 'loading'}
-            error={(() => {
-              const env = bills.error ? getEnvelopeFromError(bills.error) : null;
-              return env?.userMessage ?? bills.error?.message ?? null;
-            })()}
-            errorTraceId={(() => {
-              const env = bills.error ? getEnvelopeFromError(bills.error) : null;
-              return env?.traceId;
-            })()}
-            errorOnRetry={(() => {
-              const env = bills.error ? getEnvelopeFromError(bills.error) : null;
-              return env?.retryable ? () => bills.load() : undefined;
-            })()}
+            <h4 className="viw-detail-section-heading">Ukraine voting record</h4>
+            {enriched.isNonVoting && enriched.chamber === 'house' ? (
+              <div className="viw-detail-nonvoting">Non-voting delegate — no floor vote record.</div>
+            ) : (
+              <VoteList
+                clusters={votingRecord.data?.clusters ?? []}
+                loading={votingRecord.status === 'loading'}
+                error={(() => {
+                  const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                  return env?.userMessage ?? votingRecord.error?.message ?? null;
+                })()}
+                errorTraceId={(() => {
+                  const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                  return env?.traceId;
+                })()}
+                errorOnRetry={(() => {
+                  const env = votingRecord.error ? getEnvelopeFromError(votingRecord.error) : null;
+                  return env?.retryable ? () => votingRecord.load() : undefined;
+                })()}
+                commentsByBill={repComments.commentsByBill}
+              />
+            )}
+          </>
+        )}
+        {tab === 'statements' && (
+          <StatementsList
+            posts={statements.posts}
+            quotes={quotes.quotes}
+            loading={
+              statements.status === 'loading' || quotes.status === 'loading'
+            }
           />
         )}
       </div>

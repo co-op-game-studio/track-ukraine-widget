@@ -535,6 +535,362 @@ Routes under this section are served directly from the Worker's `KV_VOTER_INFO` 
 
 ---
 
+## 7. V4 Admin + Editorial Routes (NEW v2.7.0)
+
+These routes are introduced by V4 (FR-49..FR-58). They split into three classes:
+
+- **Admin write API** (`/api/admin/*`) — gated by Cloudflare Access at the edge AND independently JWT-verified by the Worker (FR-50). Source of truth is D1.
+- **Embed read API** (`/api/comments/*`, `/api/social-posts/*`, `/api/quotes/*`) — public; reads from KV records written by the publish pipeline (FR-51). Tolerates 404 as "empty list" per AC-53.5.
+- **Stats + audit feed** (`/api/stats/*`, `/api/audit/public`) — public-aggregate; the authenticated audit feed is `/api/admin/audit`.
+
+### 7.1 Admin auth (Cloudflare Access JWT)
+
+Every admin request carries two CF-set headers:
+
+```
+Cf-Access-Jwt-Assertion: <RS256 JWT signed by team key>
+Cf-Access-Authenticated-User-Email: alice@example.com   (informational only)
+```
+
+The Worker uses **only the JWT** to identify the actor — the plain email header is ignored to prevent spoofing on a misconfigured route. The verify path:
+
+1. Extract `Cf-Access-Jwt-Assertion` (missing → `401 admin_jwt_required`).
+2. Verify RS256 signature against the team JWKS at `https://<CF_ACCESS_TEAM>.cloudflareaccess.com/cdn-cgi/access/certs` (cached in module-scope memo + KV `cache:v1:cf-access-jwks`, 1 h TTL).
+3. Check `aud` claim matches `CF_ACCESS_AUD`.
+4. Check `iss` claim matches `https://<CF_ACCESS_TEAM>.cloudflareaccess.com`.
+5. Check `exp` is in the future, `iat`/`nbf` are not in the future (60 s clock skew).
+6. Read `email` from the verified claims.
+
+Failure modes (FR-37 envelope):
+
+| Status | `error` | When |
+|--------|---------|------|
+| 500 | `admin_misconfigured` | `CF_ACCESS_TEAM` or `CF_ACCESS_AUD` env not set |
+| 401 | `admin_jwt_required` | `Cf-Access-Jwt-Assertion` header absent |
+| 401 | `admin_jwt_invalid` | Signature / `aud` / `iss` / `exp` / `iat` / `nbf` check failed; `detail` carries a stable reason code |
+| 503 | `admin_jwks_unavailable` | JWKS endpoint unreachable |
+| 500 | `admin_actor_missing` | JWT verified but lacks `email` claim (CF Access shape changed) |
+
+The Worker does NOT consult any env-var email allowlist — that policy lives in Cloudflare Access. Disabling `*.workers.dev` and preview URLs in `wrangler.toml` (`workers_dev = false`, `preview_urls = false`) is the matching infrastructure-side hardening so the only inbound path to the Worker is the gated zone hostname.
+
+### 7.2 `GET /api/admin/whoami`
+
+Returns the validated identity for the SPA's header badge.
+
+```json
+{ "email": "alice@example.com" }
+```
+
+`Cache-Control: no-store`.
+
+### 7.3 Researcher CRUD: bills / votes / comments / social-posts / quotes
+
+Each resource exposes the same shape:
+
+| Method | Path | Body | Returns |
+|--------|------|------|---------|
+| GET | `/api/admin/{resource}?limit=&offset=&q=&billId=&bioguideId=` | — | `{ items: T[], total: number }` |
+| GET | `/api/admin/{resource}/{id}` | — | `T` |
+| POST | `/api/admin/{resource}` | `Partial<T>` (server fills id, timestamps) | `{ row: T, audit: AuditRow }` |
+| PATCH | `/api/admin/{resource}/{id}` | `Partial<T>` | `{ row: T, audit: AuditRow }` |
+| DELETE | `/api/admin/{resource}/{id}` | — | `{ deleted: true, audit: AuditRow }` |
+
+Resources and their D1 row shapes (see design.md §4.16 for SQL):
+
+```ts
+// /api/admin/bills
+interface Bill {
+  id: string;                  // ULID, server-assigned
+  bill_id: string;             // e.g. "117-HR-2471"
+  congress: number;
+  type: string;                // "HR" | "S" | "HJRES" | …
+  number: string;
+  featured: boolean;
+  label: string | null;
+  title: string;
+  latest_action: string | null;
+  latest_action_date: string | null;
+  became_law: boolean;
+  congress_gov_url: string | null;
+  direction: "pro-ukraine" | "anti-ukraine" | "ambiguous";
+  direction_reason: string | null;
+  summary_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// /api/admin/votes
+interface Vote {
+  id: string;
+  bill_id: string;
+  chamber: "House" | "Senate";
+  congress: number;
+  session: number;
+  roll_call: number;
+  date: string;
+  url: string | null;
+  action: string | null;
+  action_date: string | null;
+  weight: number;              // FR-54: 0..5
+  direction_multiplier: -1 | 0 | 1;
+  kind: string;                // "final-passage" | "concur" | …
+  weight_reason: string | null; // FR-54 AC-54.6: standing rationale for the current weight + multiplier
+  created_at: string;
+  updated_at: string;
+}
+
+// /api/admin/comments
+interface Comment {
+  id: string;
+  bill_id: string;
+  attached_to_roll_call_id: string | null;  // "{chamber}:{congress}:{session}:{rollCall}" when scoped to a vote
+  body_markdown: string;
+  score_adjustment: number;
+  author_email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// /api/admin/social-posts
+interface SocialPost {
+  id: string;
+  bioguide_id: string;
+  platform: "x" | "facebook" | "youtube" | "instagram" | "other";
+  url: string;
+  posted_at: string | null;
+  body_text: string;
+  score_adjustment: number;
+  comment: string | null;
+  author_email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// /api/admin/quotes
+interface Quote {
+  id: string;
+  bioguide_id: string;
+  media_kind: "video" | "audio" | "text" | "image";
+  source_url: string;
+  source_label: string | null;
+  quoted_at: string | null;
+  body_text: string;
+  score_adjustment: number;
+  comment: string | null;
+  author_email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AuditRow {
+  id: string;
+  actor_email: string;
+  action: "create" | "update" | "delete";
+  target_table: string;
+  row_id: string;
+  row_title: string | null;
+  before: unknown | null;
+  after: unknown | null;
+  reason: string | null;
+  created_at: string;
+}
+```
+
+**Validation rules:**
+
+- `Vote.weight ∈ [0, 5]` — clamp negative; reject above 5 with `400 invalid_weight`.
+- `Vote.direction_multiplier ∈ {-1, 0, 1}` — reject other values with `400 invalid_direction_multiplier`.
+- `Comment.bill_id` MUST reference an existing `bills.bill_id` — `400 unknown_bill_id` if not.
+- `Comment.attached_to_roll_call_id` MAY be `null`; when set, MUST match an existing `votes` row — `400 unknown_roll_call_id` if not.
+- `SocialPost.url` MUST pass `sanitizeUrl` (existing utility) — `400 invalid_url` if not.
+- `SocialPost.platform` MUST be one of the enum values — `400 invalid_platform`.
+- All POST / PATCH bodies MUST be `Content-Type: application/json` — `415 unsupported_media_type` if not.
+
+**Audit `reason` (change notes) — FR-50 AC-50.8.**
+
+Every body MAY carry a leading-underscore namespaced field `_reason: string` carrying the audit-log change notes. `_reason` is stripped from the body before it reaches the resource validators, so it never collides with a column. Posture per method:
+
+| Method | `_reason` posture |
+|--------|-------------------|
+| `POST` (create) | optional |
+| `PATCH` (update) | **required**; missing or whitespace-only → `400 reason_required` |
+| `DELETE` | **required**; supply via body OR `?reason=…` query param; missing → `400 reason_required` |
+
+The reason flows into `audit_log.reason` and is exposed on the authenticated audit feed (`/api/admin/audit`) — never on the public feed (`/api/audit/public`).
+
+**Errors** all follow the FR-37 envelope shape: `{ error, traceId, ...optional fields }`.
+
+### 7.4 `GET /api/admin/audit`
+
+Authenticated audit feed — full row data including `before` / `after` JSON.
+
+**Query params:** `?limit=N` (max 100, default 50), `?since=ISO`.
+
+**Response (200):**
+
+```json
+{ "items": [ AuditRow, … ] }
+```
+
+`Cache-Control: no-store` (always-fresh for the SPA's Recent Activity tab).
+
+### 7.5 `GET /api/audit/public`
+
+Public, redacted audit feed for the embed's "Recent researcher updates" panel (AC-53.4).
+
+**Query params:** `?limit=N` (max 50, default 20).
+
+**Response (200):**
+
+```json
+{
+  "items": [
+    {
+      "id": "01HQXYZ…",
+      "actorLocalPart": "alice",
+      "action": "update",
+      "table": "votes",
+      "rowTitle": "117-HR-2471 / House roll 65",
+      "createdAt": "2026-05-02T18:43:21Z"
+    }
+  ]
+}
+```
+
+**Redactions:** email domain stripped (`alice@example.com → "alice"`); `before` / `after` / `reason` NOT exposed. Per AC-58.2.
+
+**Cache-Control:** `public, max-age=60, s-maxage=120`.
+
+### 7.6 `GET /api/comments/{billId}`
+
+Public read of researcher comments attached to a bill — consumed by `VoteList` row expand (AC-53.1).
+
+**Path param:** `billId` — e.g. `117-HR-2471`.
+
+**Response (200):**
+
+```json
+{
+  "billId": "117-HR-2471",
+  "comments": [
+    {
+      "id": "01HQXYZ…",
+      "bodyMarkdown": "This was the floor vote that …",
+      "scoreAdjustment": -0.05,
+      "attachedToRollCallId": "house:117:2:65",
+      "authorEmail": "alice@example.com",
+      "createdAt": "2026-05-02T18:43:21Z",
+      "updatedAt": "2026-05-02T18:43:21Z"
+    }
+  ],
+  "generatedAt": "2026-05-02T19:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+**Response (404):** treated by callers as `{ comments: [] }` per AC-53.5. Worker SHALL still return `404` with FR-37 envelope so trace correlation works.
+
+**Cache-Control:** `public, max-age=60, s-maxage=300`.
+
+### 7.7 `GET /api/social-posts/{bioguideId}`
+
+Public read of curated social posts for a representative — consumed by the Statements tab (AC-53.2).
+
+**Path param:** `bioguideId` — e.g. `D000563`.
+
+**Response (200):**
+
+```json
+{
+  "bioguideId": "D000563",
+  "posts": [
+    {
+      "id": "01HQXYZ…",
+      "platform": "x",
+      "url": "https://x.com/SenatorDurbin/status/…",
+      "postedAt": "2026-04-28T12:00:00Z",
+      "bodyText": "…",
+      "scoreAdjustment": 0.02,
+      "comment": "Cited HR 815 floor speech",
+      "authorEmail": "alice@example.com",
+      "createdAt": "2026-05-02T18:43:21Z"
+    }
+  ],
+  "generatedAt": "2026-05-02T19:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+**Cache-Control:** `public, max-age=60, s-maxage=300`.
+
+### 7.8 `GET /api/quotes/{bioguideId}`
+
+Public read of curated quotes for a representative — consumed by the Quotes tab (AC-53.2).
+
+**Path param:** `bioguideId`.
+
+**Response (200):**
+
+```json
+{
+  "bioguideId": "D000563",
+  "quotes": [
+    {
+      "id": "01HQXYZ…",
+      "mediaKind": "video",
+      "sourceUrl": "https://www.c-span.org/video/?…",
+      "sourceLabel": "C-SPAN floor speech, 2024-02-13",
+      "quotedAt": "2024-02-13",
+      "bodyText": "…",
+      "scoreAdjustment": 0.05,
+      "comment": null,
+      "authorEmail": "alice@example.com",
+      "createdAt": "2026-05-02T18:43:21Z"
+    }
+  ],
+  "generatedAt": "2026-05-02T19:00:00Z",
+  "schemaVersion": 1
+}
+```
+
+**Cache-Control:** `public, max-age=60, s-maxage=300`.
+
+### 7.9 `GET /api/stats/v1/summary`
+
+Public statistics blob (FR-56). Returned from a single KV record `stats:v1:summary` updated by the publish pipeline.
+
+**Response (200):**
+
+```json
+{
+  "generatedAt": "2026-05-02T19:00:00Z",
+  "schemaVersion": 1,
+  "perBill": [
+    { "billId": "117-HR-2471", "voteCount": 5, "weightTotal": 2.8, "directionPro": 5, "directionAnti": 0 }
+  ],
+  "perRepHistogram": {
+    "buckets": [-1.0, -0.9, -0.8, …, 0.9, 1.0],
+    "counts":  [12, 5, 4, …, 22, 31]
+  },
+  "topAntiUkraine": [
+    { "bioguideId": "X000123", "displayName": "…", "score": -0.94, "weightedAntiActions": 8.2 }
+  ],
+  "commentsTimeseries": [
+    { "date": "2026-04-25", "count": 3 },
+    { "date": "2026-04-26", "count": 7 }
+  ],
+  "partyPriors": { "D": 0.71, "R": -0.42, "I": null }
+}
+```
+
+**Response (503):** `{ error: "stats_not_ready", traceId, retryAfterSeconds: 60 }` with `Retry-After: 60`. Per AC-56.4.
+
+**Cache-Control:** `public, max-age=300, s-maxage=900`.
+
+**Rate limit:** 30 requests / 60s per IP, separate budget from the other public routes.
+
+---
+
 ## 6. Spec Refresh Workflow
 
 When we suspect the external OpenAPI spec has changed:

@@ -27,6 +27,17 @@ name = "voter-info-widget-proxy"
 main = "proxy/worker.ts"
 compatibility_date = "2025-01-01"
 
+# FR-50 AC-50.1 (V4 — admin auth at the edge): disable the
+# `*.workers.dev` subdomain so the Worker is unreachable outside the
+# zone hostname where Cloudflare Access enforces auth on /admin and
+# /api/admin/*. Without this, an attacker could hit
+# `voter-info-widget-proxy.<acct>.workers.dev/api/admin/...` and the
+# Access app would not gate the request — they'd still be blocked by
+# the Worker's JWT verify, but the admin path's existence would be
+# leaked. Belt and suspenders.
+workers_dev = false
+preview_urls = false
+
 [assets]
 directory = "./dist"
 not_found_handling = "none"
@@ -37,10 +48,38 @@ run_worker_first = true
 [vars]
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 ENV_NAME = "prod"
+# FR-50 AC-50.2 — Cloudflare Access team subdomain + Application AUD tag
+# for JWT verification. Both are non-secret routing identifiers (NFR-7.2):
+# the team subdomain is public; the AUD tag is a 64-hex-char identifier
+# from the CF Access dashboard. Set these per env from the CF dashboard
+# once the Access app is provisioned. Empty values cause admin routes
+# to return 500 admin_misconfigured (fail-loud).
+CF_ACCESS_TEAM = "coopgames"
+CF_ACCESS_AUD = "ed8776c235a184c9548d99ca685f0fc40f4599f3fc46971426dd96cdc24700ed"
+# FR-59 — admin client poll fan-out concurrency. Cap parallel /poll-handle
+# requests per session. Prod: conservative to stay under Worker subrequest
+# budget and upstream API rate limits.
+POLL_CONCURRENCY = "4"
+# FR-59 — social poll cron schedule (mirror of [triggers].crons below).
+# CF Workers don't expose trigger schedules to runtime code, so this env var
+# is the single source of truth for the staleness window: handles polled
+# within (interval - 5min) are skipped to avoid double-pulls.
+SOCIAL_POLL_CRON = "0 6 * * *"
 
 [[kv_namespaces]]
 binding = "KV_VOTER_INFO"
 id = "72d3dbce1a1d4ea4aec74b305d7995e6"
+
+# FR-49 AC-49.1 — D1 database for the V4 admin backend.
+# Provisioned per env (run `wrangler d1 create viw_researcher_<env>` once
+# per env, then paste the database_id below). Migrations live in
+# `migrations/d1/` and are applied via
+# `wrangler d1 migrations apply --env <env>`.
+[[d1_databases]]
+binding = "D1_VOTER_INFO"
+database_name = "viw_researcher_prod"
+database_id = "d22db275-7b64-472a-873b-76dd97020603"
+migrations_dir = "migrations/d1"
 
 # FR-41 — R2 static archive bucket for byte-level-static upstream responses
 # (closed-session Senate XML, House rosters, aged bill-actions/summaries).
@@ -68,6 +107,13 @@ simple = { limit = 60, period = 60 }
 [observability]
 enabled = true
 
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[observability.traces]
+enabled = true
+
 # FR-38 AC-38.1 — Workers Analytics Engine binding per env.
 # Dataset names follow the `voter_info_widget_${env}` convention so a single
 # query in the CF dashboard can slice across envs via the `env` blob field.
@@ -86,6 +132,13 @@ ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 ALLOW_LOCALHOST = "true"
 PREVIEW_MODE = "true"
 ENV_NAME = "dev"
+CF_ACCESS_TEAM = "coopgames"
+CF_ACCESS_AUD = "ed8776c235a184c9548d99ca685f0fc40f4599f3fc46971426dd96cdc24700ed"
+# Dev: conservative fan-out so testing doesn't burn through YouTube/Twitter
+# daily quotas. Frontend additionally paces requests at ~250ms each, so total
+# rate stays well under every provider's per-second limit.
+POLL_CONCURRENCY = "2"
+SOCIAL_POLL_CRON = "0 6 * * *"
 
 [env.dev.assets]
 directory = "./dist"
@@ -96,6 +149,12 @@ run_worker_first = true
 [[env.dev.kv_namespaces]]
 binding = "KV_VOTER_INFO"
 id = "743b2feda53648cd8242d3b89538bfac"
+
+[[env.dev.d1_databases]]
+binding = "D1_VOTER_INFO"
+database_name = "viw_researcher_dev"
+database_id = "05e0fc19-127c-4a7e-9708-1055996b134c"
+migrations_dir = "migrations/d1"
 
 [[env.dev.r2_buckets]]
 binding = "R2_STATIC"
@@ -111,9 +170,27 @@ simple = { limit = 600, period = 60 }
 [env.dev.observability]
 enabled = true
 
+[env.dev.observability.logs]
+enabled = true
+invocation_logs = true
+
+[env.dev.observability.traces]
+enabled = true
+
 [[env.dev.analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "voter_info_widget_dev"
+
+# AC-52.49 — scaling-backoff freshness cron. Hourly tick; the cron picks
+# bills due per the per-row backoff schedule (1h / 3h / 12h / 24h depending
+# on recency). Capped at 25 refreshes per tick to stay under Congress.gov's
+# rate limit budget.
+[env.dev.triggers]
+# Daily at 06:00 UTC. Social feeds don't change fast enough to justify hourly,
+# and YouTube quota / Twitter monthly cap are budget-bound — pulling N times a
+# day burns through caps for marginal new posts. Manual re-poll on a specific
+# person is always available from the profile.
+crons = ["0 6 * * *"]
 
 # ─── UAT (branch: uat) ───────────────────────────────────────────────────────
 [env.uat]
@@ -123,6 +200,10 @@ name = "voter-info-widget-proxy-uat"
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 PREVIEW_MODE = "true"
 ENV_NAME = "uat"
+CF_ACCESS_TEAM = "coopgames"
+CF_ACCESS_AUD = "ed8776c235a184c9548d99ca685f0fc40f4599f3fc46971426dd96cdc24700ed"
+POLL_CONCURRENCY = "4"
+SOCIAL_POLL_CRON = "0 6 * * *"
 
 [env.uat.assets]
 directory = "./dist"
@@ -133,6 +214,12 @@ run_worker_first = true
 [[env.uat.kv_namespaces]]
 binding = "KV_VOTER_INFO"
 id = "3756142363984d218d5f489151716b30"
+
+[[env.uat.d1_databases]]
+binding = "D1_VOTER_INFO"
+database_name = "viw_researcher_uat"
+database_id = "530a894e-8fc2-431f-9ade-d288fc9e0a1d"
+migrations_dir = "migrations/d1"
 
 [[env.uat.r2_buckets]]
 binding = "R2_STATIC"
@@ -149,6 +236,13 @@ simple = { limit = 120, period = 60 }
 [env.uat.observability]
 enabled = true
 
+[env.uat.observability.logs]
+enabled = true
+invocation_logs = true
+
+[env.uat.observability.traces]
+enabled = true
+
 [[env.uat.analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "voter_info_widget_uat"
@@ -161,6 +255,10 @@ name = "voter-info-widget-proxy-stg"
 ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 PREVIEW_MODE = "true"
 ENV_NAME = "stg"
+CF_ACCESS_TEAM = "coopgames"
+CF_ACCESS_AUD = "ed8776c235a184c9548d99ca685f0fc40f4599f3fc46971426dd96cdc24700ed"
+POLL_CONCURRENCY = "4"
+SOCIAL_POLL_CRON = "0 6 * * *"
 
 [env.stg.assets]
 directory = "./dist"
@@ -171,6 +269,12 @@ run_worker_first = true
 [[env.stg.kv_namespaces]]
 binding = "KV_VOTER_INFO"
 id = "4ff9a8e54b82489fb9a300466bd68686"
+
+[[env.stg.d1_databases]]
+binding = "D1_VOTER_INFO"
+database_name = "viw_researcher_stg"
+database_id = "24506b27-d533-45a9-bb16-2d182630d587"
+migrations_dir = "migrations/d1"
 
 [[env.stg.r2_buckets]]
 binding = "R2_STATIC"
@@ -185,6 +289,13 @@ namespace_id = "1004"
 simple = { limit = 60, period = 60 }
 
 [env.stg.observability]
+enabled = true
+
+[env.stg.observability.logs]
+enabled = true
+invocation_logs = true
+
+[env.stg.observability.traces]
 enabled = true
 
 [[env.stg.analytics_engine_datasets]]
@@ -237,4 +348,11 @@ namespace_id = "1005"
 simple = { limit = 600, period = 60 }
 
 [env.preview-template.observability]
+enabled = true
+
+[env.preview-template.observability.logs]
+enabled = true
+invocation_logs = true
+
+[env.preview-template.observability.traces]
 enabled = true

@@ -1,0 +1,64 @@
+name: Publish D1 → KV
+
+# FR-51 AC-51.8 — projects D1 admin tables into KV read-snapshot keys.
+# Cron runs against dev + uat every 15 minutes; stg + prod are manual via
+# workflow_dispatch to keep deploy-ladder discipline.
+
+on:
+  schedule:
+    # Every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - uat
+          - stg
+          - prod
+      dry_run:
+        description: 'Dry run (do not write KV)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Cron runs target dev + uat. Manual runs override via the
+        # workflow_dispatch input filter at the step level.
+        env: ${{ github.event_name == 'schedule' && fromJSON('["dev","uat"]') || fromJSON(format('["{0}"]', inputs.env)) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: voter-info-widget/package-lock.json
+
+      - name: Install dependencies
+        working-directory: voter-info-widget
+        run: npm ci
+
+      - name: Run publish-d1-to-kv
+        working-directory: voter-info-widget
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            npx tsx scripts/publish-d1-to-kv.ts --env ${{ matrix.env }} --dry-run
+          else
+            npx tsx scripts/publish-d1-to-kv.ts --env ${{ matrix.env }}
+          fi

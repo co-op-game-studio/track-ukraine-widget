@@ -10,10 +10,13 @@ import type { VotingRecordData, MemberVoteRow } from '../../src/hooks/useVotingR
 import type { SponsoredBillsData, UkraineBill } from '../../src/hooks/useSponsoredBills';
 
 function score(value: number | null, total = 10, contributing = 10, lowConfidence = false): UkraineScore {
-  const confidence = Math.min(1, contributing / 8);
+  const confidence = contributing < 2 ? 0 : Math.min(1, contributing / 8);
   const confidenceTier: UkraineScore['confidenceTier'] =
-    contributing < 3 ? 'low' : contributing < 8 ? 'moderate' : 'full';
-  return { score: value, total, contributing, lowConfidence, confidence, confidenceTier };
+    contributing < 2 ? 'insufficient'
+    : contributing < 3 ? 'low'
+    : contributing < 8 ? 'moderate'
+    : 'full';
+  return { score: value, rawScore: value, total, contributing, lowConfidence, confidence, confidenceTier };
 }
 
 describe('UkraineScoreBadge', () => {
@@ -138,11 +141,12 @@ describe('UkraineScoreBadge', () => {
       expect(value.style.filter).toMatch(/saturate\(0\.6\b/);
     });
 
-    it('AC-43.3: applies filter: saturate(~0.3) at low-confidence 1 action', () => {
-      const { container } = render(<UkraineScoreBadge score={score(0.5, 1, 1, true)} />);
+    it('AC-43.3: applies filter: saturate(~0.4) at low-confidence 2 actions (FR-55 NEW_REP_THRESHOLD)', () => {
+      // contributing=2 hits NEW_REP_THRESHOLD; tier=low; confidence=0.25.
+      // 0.2 + 0.8 * 0.25 = 0.4
+      const { container } = render(<UkraineScoreBadge score={score(0.5, 2, 2, true)} />);
       const value = container.querySelector('.viw-score-value') as HTMLElement;
-      // 0.2 + 0.8 * 0.125 = 0.3
-      expect(value.style.filter).toMatch(/saturate\(0\.3\b/);
+      expect(value.style.filter).toMatch(/saturate\(0\.4\b/);
     });
 
     it('AC-43.3: N/A rendering does NOT apply a saturation filter (no color to modulate)', () => {

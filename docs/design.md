@@ -776,6 +776,369 @@ See FR-40 + FR-41 for the spec. This section describes the runtime topology.
 
 ---
 
+### 4.16 D1 Editable Source of Truth (v2.7.0 — FR-49 / ADR-017)
+
+V4 introduces a writable, audited backing store for the curated content that previously lived in `src/data/ukraineBills.json`. **Cloudflare D1** is the source of truth; **KV** is a denormalized read-snapshot. Researchers write to D1 via `/api/admin/*`; the curator publish script (§4.17) projects D1 state into the FR-32 KV record shapes.
+
+**Why D1 and not "more KV prefixes":**
+
+- Audit-log queries (last 50 actions by researcher X, all weight changes in the last week) are SQL-shaped. KV's only query primitive is prefix scan, which makes audit traversal `O(N)` over the whole namespace.
+- The relational integrity between `bills`, `votes`, `comments`, `social_posts`, `quotes`, and `score_adjustments` is real. Comments attach to a bill (and optionally a roll call within it); quotes and posts attach to a member; weight overrides attach to a vote. Foreign keys with CASCADE eliminate a class of orphan-row bugs.
+- Future stats (FR-56) want aggregates: per-bill cast distribution, per-rep histograms, top-N anti-Ukraine. SQL aggregates are one `GROUP BY`; the KV-only equivalent is a curator-time precomputation that has to be redone on every tweak.
+
+**Why not "skip KV, read D1 directly from the embed":**
+
+- D1 is regional, not edge-replicated. A widget loaded from Sydney would round-trip to a North-American D1 region per request. KV is replicated to every POP and serves in single-digit ms.
+- KV records are immutable from the embed's perspective — the existing tiered-cache pipeline (§4.15) caches them at the edge for 5 minutes. D1 reads cannot be safely cached at the edge across POPs without inventing an invalidation story.
+- The FR-32 read-path contract (atomic per-member / per-bill records, served from KV) is hard-won and well-tested. V4 should not regress it.
+
+**Schema (D1, `viw_researcher`):**
+
+```sql
+CREATE TABLE researchers (
+  email TEXT PRIMARY KEY,           -- lowercased
+  display_name TEXT,
+  created_at TEXT NOT NULL          -- ISO-8601
+);
+
+CREATE TABLE bills (
+  id TEXT PRIMARY KEY,              -- ULID
+  bill_id TEXT UNIQUE NOT NULL,     -- e.g. "117-HR-2471" — the FR-12 bill key
+  congress INTEGER NOT NULL,
+  type TEXT NOT NULL,               -- "HR", "S", "HJRES", etc.
+  number TEXT NOT NULL,
+  featured INTEGER NOT NULL DEFAULT 0,
+  label TEXT,
+  title TEXT NOT NULL,
+  latest_action TEXT,
+  latest_action_date TEXT,
+  became_law INTEGER NOT NULL DEFAULT 0,
+  congress_gov_url TEXT,
+  direction TEXT NOT NULL,          -- "pro-ukraine" | "anti-ukraine" | "ambiguous"
+  direction_reason TEXT,
+  summary_json TEXT,                -- full summary blob, JSON-encoded
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE votes (
+  id TEXT PRIMARY KEY,              -- ULID
+  bill_id TEXT NOT NULL,            -- FK → bills.bill_id
+  chamber TEXT NOT NULL,            -- "House" | "Senate"
+  congress INTEGER NOT NULL,
+  session INTEGER NOT NULL,
+  roll_call INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  url TEXT,
+  action TEXT,
+  action_date TEXT,
+  weight REAL NOT NULL,             -- FR-54: researcher-tunable
+  direction_multiplier REAL NOT NULL DEFAULT 1,
+  kind TEXT NOT NULL,               -- "final-passage", "concur", "amendment", "cloture", "motion-to-proceed", etc.
+  weight_reason TEXT,               -- FR-54 AC-54.6: standing rationale for the current weight + direction_multiplier; nullable
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (chamber, congress, session, roll_call),
+  FOREIGN KEY (bill_id) REFERENCES bills (bill_id) ON DELETE CASCADE
+);
+
+CREATE TABLE comments (
+  id TEXT PRIMARY KEY,              -- ULID
+  bill_id TEXT NOT NULL,            -- FK → bills.bill_id
+  attached_to_roll_call_id TEXT,    -- nullable; when set, scoped to a specific vote (chamber:congress:session:rollCall)
+  body_markdown TEXT NOT NULL,
+  score_adjustment REAL NOT NULL DEFAULT 0,
+  author_email TEXT NOT NULL,       -- FK → researchers.email
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (bill_id) REFERENCES bills (bill_id) ON DELETE CASCADE,
+  FOREIGN KEY (author_email) REFERENCES researchers (email)
+);
+
+CREATE TABLE social_posts (
+  id TEXT PRIMARY KEY,
+  bioguide_id TEXT NOT NULL,
+  platform TEXT NOT NULL,           -- "x" | "facebook" | "youtube" | "instagram" | "other"
+  url TEXT NOT NULL,
+  posted_at TEXT,
+  body_text TEXT NOT NULL,
+  score_adjustment REAL NOT NULL DEFAULT 0,
+  comment TEXT,
+  author_email TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (author_email) REFERENCES researchers (email)
+);
+
+CREATE TABLE quotes (
+  id TEXT PRIMARY KEY,
+  bioguide_id TEXT NOT NULL,
+  media_kind TEXT NOT NULL,         -- "video" | "audio" | "text" | "image"
+  source_url TEXT NOT NULL,
+  source_label TEXT,
+  quoted_at TEXT,
+  body_text TEXT NOT NULL,
+  score_adjustment REAL NOT NULL DEFAULT 0,
+  comment TEXT,
+  author_email TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (author_email) REFERENCES researchers (email)
+);
+
+CREATE TABLE score_adjustments (
+  -- Reserved for future per-rep manual adjustments. Empty in v2.7.0.
+  id TEXT PRIMARY KEY,
+  bioguide_id TEXT NOT NULL,
+  delta REAL NOT NULL,
+  reason TEXT NOT NULL,
+  author_email TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE audit_log (
+  id TEXT PRIMARY KEY,              -- ULID
+  actor_email TEXT NOT NULL,
+  action TEXT NOT NULL,             -- "create" | "update" | "delete"
+  target_table TEXT NOT NULL,
+  row_id TEXT NOT NULL,
+  row_title TEXT,                   -- denormalized — bill title, social post body excerpt, etc.
+  before_json TEXT,                 -- nullable on create
+  after_json TEXT,                  -- nullable on delete
+  reason TEXT,
+  trace_id TEXT NOT NULL,           -- FR-50 AC-50.7 — request trace ID for log correlation
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX idx_votes_bill ON votes (bill_id);
+CREATE INDEX idx_comments_bill ON comments (bill_id);
+CREATE INDEX idx_social_posts_bioguide ON social_posts (bioguide_id);
+CREATE INDEX idx_quotes_bioguide ON quotes (bioguide_id);
+CREATE INDEX idx_audit_created ON audit_log (created_at DESC);
+CREATE INDEX idx_audit_actor ON audit_log (actor_email, created_at DESC);
+CREATE INDEX idx_audit_trace ON audit_log (trace_id);
+```
+
+**ULIDs over autoincrement.** ULID strings are 26 chars, sortable, and globally unique without a coordination round-trip. Autoincrement IDs in D1 are per-database and would collide if we ever fan out to multiple D1s. ULIDs survive that scenario unchanged.
+
+**Foreign-key cascades.** `votes`, `comments`, `social_posts`, `quotes` cascade on parent delete (deleting a bill cleans up its votes and comments). `audit_log` does NOT cascade — audit records must outlive their target. Tests SHALL assert both directions.
+
+### 4.17 D1→KV Publish Pipeline (v2.7.0 — FR-51)
+
+The publish script `scripts/publish-d1-to-kv.ts` is a curator-side Node program that connects to D1 and KV via wrangler bindings (or via direct API in CI). It performs a full read of the editable tables and writes the projected records into KV. The transformation is deterministic — the same D1 state produces byte-identical KV bytes across runs.
+
+**Pseudocode (single env, `--dry-run` shown last):**
+
+```
+const bills = SELECT * FROM bills
+const votes = SELECT * FROM votes ORDER BY bill_id, chamber, congress, session, roll_call
+const comments = SELECT * FROM comments ORDER BY created_at
+const posts   = SELECT * FROM social_posts ORDER BY bioguide_id, posted_at
+const quotes  = SELECT * FROM quotes ORDER BY bioguide_id, created_at
+
+for each bill:
+  group votes by bill_id
+  write KV `bill:v1:{bill.bill_id}` = projectBill(bill, billVotes)   // matches AC-32.2
+
+for each bill with comments:
+  group comments by bill_id
+  write KV `comment:v1:{bill.bill_id}` = projectComments(billComments)  // AC-51.4
+
+for each bioguide with posts:
+  write KV `social-post:v1:{bioguide_id}` = projectPosts(byBioguide[bg])  // AC-51.5
+
+for each bioguide with quotes:
+  write KV `quote:v1:{bioguide_id}` = projectQuotes(byBioguide[bg])  // AC-51.6
+
+compute partyPriors from member:v1:* full-confidence reps + recompute member:v1:*.partyPrior
+compute stats:v1:summary from D1 aggregates  // FR-56 AC-56.1
+compute audit-feed:v1:full + audit-feed:v1:public from audit_log  // FR-58 AC-58.3
+```
+
+**Diff-skip.** Before each `KV.put`, the script reads the current KV value and compares JSON-canonicalized bytes. Identical → skip. Different or missing → write. The skipped count is reported in the run summary so noisy runs (mass writes) are visible.
+
+**Determinism.** Every projector function is pure: it takes only the D1 rows it needs and returns the JSON shape. Field ordering is alphabetical via `JSON.stringify(value, sortedKeys)`. Tests assert byte-identical output across two consecutive runs against an unchanged seed (AC-56.5 covers the stats path; analogous tests cover bill / comment / post / quote projection).
+
+**Cron and triggers.** `.github/workflows/publish-d1.yml` runs the script every 15 minutes against dev and uat. Stg and prod runs are manual triggers via `workflow_dispatch` to keep deploy-ladder discipline (see project_branch_model memory; ladder is `main → develop → uat → stg → prod`).
+
+### 4.18 Admin API + Auth Flow (v2.7.0 — FR-50, REVISED 2026-05-02)
+
+The researcher API lives under `/api/admin/*` with these endpoints (all behind Cloudflare Access):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/admin/whoami` | Echo the validated email (`{ email }`); used by SPA for header badge |
+| GET | `/api/admin/bills` | List bills, paginated (`?limit&offset&q`) |
+| POST | `/api/admin/bills` | Create a bill |
+| PATCH | `/api/admin/bills/{id}` | Update a bill (partial; specify fields) |
+| DELETE | `/api/admin/bills/{id}` | Delete a bill (cascades to votes / comments) |
+| GET | `/api/admin/votes?billId=…` | List votes (filter by bill) |
+| POST/PATCH/DELETE | `/api/admin/votes/{id}` | Manage votes |
+| GET | `/api/admin/comments?billId=…` | List comments |
+| POST/PATCH/DELETE | `/api/admin/comments/{id}` | Manage comments |
+| GET | `/api/admin/social-posts?bioguideId=…` | List posts |
+| POST/PATCH/DELETE | `/api/admin/social-posts/{id}` | Manage posts |
+| GET | `/api/admin/quotes?bioguideId=…` | List quotes |
+| POST/PATCH/DELETE | `/api/admin/quotes/{id}` | Manage quotes |
+| GET | `/api/admin/audit?limit&since` | Authenticated audit feed (full data) |
+
+Public endpoints (no auth, for embed consumption):
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/audit/public` | Redacted audit feed |
+| GET | `/api/comments/{billId}` | Researcher comments for a bill (used by VoteList expand) |
+| GET | `/api/social-posts/{bioguideId}` | Researcher-curated social posts for a rep |
+| GET | `/api/quotes/{bioguideId}` | Researcher-curated quotes for a rep |
+| GET | `/api/stats/v1/summary` | Stats blob (FR-56) |
+
+**Auth flow (revised — JWT verify, no Worker-side allowlist):**
+
+```
+Browser → /admin
+   ↓
+Cloudflare Access challenges (IdP per Access app — email PIN, Google, Discord, …)
+On success, sets `CF_Authorization` cookie + signs JWT with team key
+   ↓
+Browser → /admin (with cookie) → CF Edge → Worker (sees `Cf-Access-Jwt-Assertion`
+                                                    + `Cf-Access-Authenticated-User-Email`)
+   ↓
+Worker serves the SPA from ASSETS (assets path is also gated by CF Access)
+   ↓
+SPA → /api/admin/whoami → Worker
+   ↓
+Worker `extractAdminActor(request, env)` (proxy/security/admin-actor.ts):
+  - require `CF_ACCESS_TEAM` and `CF_ACCESS_AUD` env config (or 500 admin_misconfigured)
+  - extract `Cf-Access-Jwt-Assertion` (or 401 admin_jwt_required)
+  - verify signature via `verifyCfAccessJwt` against the team JWKS
+    (cached in module-scope memo + KV key `cache:v1:cf-access-jwks`, 1h TTL)
+  - check `aud` claim equals `CF_ACCESS_AUD`
+  - check `iss` claim equals `https://<team>.cloudflareaccess.com`
+  - check `exp` is in the future (60s skew); `iat`/`nbf` not in the future
+  - any failure → 401 admin_jwt_invalid (with stable `detail` reason code)
+                  or 503 admin_jwks_unavailable
+  - read `email` claim from VERIFIED JWT (not from the loose plain header)
+  - if missing → 500 admin_actor_missing (CF Access shape changed; fail loud)
+  - return { email: <lowercased> }
+   ↓
+Worker route handler executes mutation under D1 batch (atomic):
+  D1.batch([
+    UPDATE / INSERT row,
+    INSERT audit_log (actor_email, action, table, row_id, before, after, reason, trace_id),
+  ])
+   ↓
+Any batch statement fails → all rollback → 500 with FR-37 envelope
+On success → 200 with { row, audit }
+```
+
+**Change-notes (`audit_log.reason`) flow (FR-50 AC-50.8 / AC-50.9).** The admin SPA editor renders a "Change notes" textarea on every drawer. On `update` and `delete` flows the field is required; on `create` it is optional. The SPA sends the value in the body's `_reason` field (leading-underscore namespace so it can never collide with a resource column). The Worker's `readBody` helper strips `_reason` off the body before passing the payload to the D1 store, and stamps it onto the per-request `AdminCtx.reason`, which the store reads when assembling the `audit_log` row inside the same `D1.batch([mutation, audit])` call. For `DELETE` (which conventionally has no body), the SPA sends `?reason=…` as a query param; the Worker's delete handler reads it from the URL the same way. Whitespace-only reasons are treated as missing and produce a `400 reason_required` envelope on update / delete.
+
+**Why JWT verify in addition to CF Access at the edge.** Defense in depth against direct-origin bypass — an attacker who finds a path that skips the Access app (e.g. a `*.workers.dev` URL, a misconfigured DNS rule, or an upcoming Cloudflare account-resource-binding leak) can trivially set the loose `Cf-Access-Authenticated-User-Email` header. Without the JWT verify, that gets them admin write access. With it, they additionally need a private key Cloudflare holds. The verify is one round of RS256 (~1ms with a warm JWKS cache) and uses module-scope + KV caching so JWKS fetches are rare. `workers_dev = false` + `preview_urls = false` in `wrangler.toml` are the matching infrastructure-side hardening (FR-50 AC-50.1).
+
+**Rate-limit budget.** Admin routes use the existing `applyRateLimit` (FR-27 AC-27.21) under the same per-IP budget as other routes. Cloudflare Access already throttles authenticated traffic, and the JWT verify itself bounds the cost of a runaway client. A separate per-email budget is not introduced.
+
+### 4.19 Score Update — Researcher-Tunable Weights + Bayesian Shrink (v2.7.0 — FR-54, FR-55)
+
+**FR-54 — Per-vote weight from D1.** No code change in `computeUkraineScore`. The data path changes: `weight` and `directionMultiplier` come from D1 `votes` rows (via the publish script, into KV `bill:v1:*`, into the embed via `useVotingRecord`). The score formula remains `Σ(sign × amp × weight) / Σ(amp × weight)`. Researchers raise weight on votes that deserve outsized influence; combined with the existing `direction` tag, raising weight on an anti-Ukraine vote pulls the score lower more strongly. This delivers the user's "negative signals more pronounced" without inventing a separate global amplifier knob.
+
+**FR-55 — Bayesian shrink toward party prior.** Two changes to `computeUkraineScore`:
+
+1. New parameter `priors?: { partyPrior: number | null }`.
+2. New tier `'insufficient'` extending `ConfidenceTier`. `deriveConfidenceTier(0)` and `deriveConfidenceTier(1)` return `'insufficient'`.
+
+Algorithm:
+
+```
+contributing = (count of valid contributing actions, as before)
+rawScore = Σ(sign × amp × weight) / Σ(amp × weight)        // unchanged
+
+if contributing < NEW_REP_THRESHOLD (= 2):
+  return { score: null, rawScore, contributing, confidenceTier: 'insufficient', confidence: 0, ... }
+
+if priors?.partyPrior == null:
+  return { score: rawScore, rawScore, contributing, ... }   // cold-start; no shrink
+
+if confidenceTier == 'full':
+  return { score: rawScore, rawScore, ... }                  // saturated; no shrink
+
+w = 1 / (1 + contributing / 4)
+return { score: (1 - w) * rawScore + w * priors.partyPrior, rawScore, ... }
+```
+
+The party prior is computed at publish time. The publish script (§4.17):
+
+1. Reads every existing `member:v1:*` record's pre-V4 score field (or recomputes from D1-driven votes if needed).
+2. Filters to members with `confidenceTier === 'full'`.
+3. Groups by party (D / R / I / L / …).
+4. Computes the mean score per party.
+5. Writes `partyPrior: number | null` into each member's record under the same `member:v1:*` key.
+
+The embed reads `partyPrior` from the member record and passes it to `computeUkraineScore` as `priors.partyPrior`. Cold-start (no full-confidence reps in a party yet) yields `partyPrior: null`, the algorithm degenerates to current behavior, and tests cover this branch explicitly so we don't NaN.
+
+**Visualization.** When `score === null` and `confidenceTier === 'insufficient'`, `UkraineScoreBadge` renders the neutral gray (`hsl(220, 10%, 55%)`) with copy "Insufficient record". The continuous `confidence` field is 0 in this case, so the saturation gradient (FR-43) reads as desaturated.
+
+### 4.20 Admin SPA Layout (v2.7.0 — FR-52)
+
+The SPA is intentionally austere — six tabs, list-detail per tab, plain HTML controls.
+
+```
++----------------------------------------------------+
+| [trackukraine]  V4 Researcher       alice@…  [out] |
++----------------------------------------------------+
+| [Bills] [Votes] [Comments] [Social] [Quotes] [Log] |
++----------------------------------------------------+
+| Search/filter bar                                  |
++--------------------+-------------------------------+
+| List               |  Detail / editor              |
+|  ─ row             |   field 1 [____________]      |
+|  ─ row (selected)  |   field 2 [____________]      |
+|  ─ row             |   ...                         |
+|  ...               |                               |
+|                    |   [save]  [revert]  [delete]  |
++--------------------+-------------------------------+
+```
+
+**Tabs and their CRUD shape:**
+
+| Tab | List columns | Editor fields |
+|-----|--------------|---------------|
+| Bills | `bill_id`, `title`, `direction`, `featured` | id, title, direction, direction_reason, featured, label, congress_gov_url, summary_json (textarea) |
+| Votes | `bill_id`, `chamber`, `roll_call`, `kind`, `weight` | bill_id (readonly), chamber, congress/session/roll_call, kind, weight (slider 0–5), direction_multiplier (-1/0/+1) |
+| Comments | `bill_id`, body excerpt, `score_adjustment`, `author_email` | bill_id, attached_to_roll_call_id (optional), body_markdown, score_adjustment |
+| Social | `bioguide_id`, platform, body excerpt, `score_adjustment` | bioguide_id, platform, url, posted_at, body_text, score_adjustment, comment |
+| Quotes | `bioguide_id`, media_kind, body excerpt, `score_adjustment` | bioguide_id, media_kind, source_url, source_label, body_text, score_adjustment, comment |
+| Recent Activity | actor, action, target, when | (read-only) |
+
+**Optimistic update pattern.** On save, the editor PATCHes the server, optimistically updates the list and detail, and on non-2xx response reverts and surfaces a toast with `{ error, traceId }` from the FR-37 envelope. The toast lets the researcher copy the trace ID for debugging.
+
+**No router.** Tab state is `useState<Tab>` in the root; in-tab selection is `useState<RowId | null>`. Deep linking is not v2.7.0 scope — researchers visit `/admin`, click into the tab they want.
+
+### 4.21 Embed Tab Restructure (v2.7.0 — FR-53)
+
+`RepDetail` previously rendered the score badge, member website link, the `VoteList`, and the `BillList` stacked vertically. V4 introduces a tab strip:
+
+```
++-------------------------------------------------+
+| Score badge | name | website | socials          |
++-------------------------------------------------+
+| [Record]  [Statements]  [Quotes]                |
++-------------------------------------------------+
+| (Record)                                        |
+| Ukraine voting record                           |
+|   <VoteList />                                  |
+| Ukraine legislation                             |
+|   <BillList />                                  |
++-------------------------------------------------+
+```
+
+The Statements tab renders `<SocialPostsList />`; the Quotes tab renders `<QuotesList />`. Each list is fed by a new hook (`useRepStatements`, `useRepQuotes`) that calls the corresponding read endpoint and tolerates 404 / empty per AC-53.5.
+
+The `VoteList` row gains an inline expand affordance only on rows with comments. Expanded state shows the comment text + score-adjustment chip. The procedural-cluster collapse pattern (FR-17) is unchanged.
+
+**Mobile (≤ 640px).** The tab strip is `overflow-x: auto; flex-wrap: nowrap` — three tabs fit in 375px without overflow today, but the rule guards against future tabs. List contents inside each tab inherit the FR-34 stacked-card treatment.
+
+---
+
 ## 5. Design Decisions
 
 | Decision | Choice | Rationale | ADR |
@@ -788,6 +1151,10 @@ See FR-40 + FR-41 for the spec. This section describes the runtime topology.
 | Test Framework | Vitest | Native Vite integration, Jest-compatible API | ADR-001 |
 | State Management | React hooks (useState/useReducer) | Simple enough — no Redux/Zustand needed for this scope | — |
 | Concurrency Control | Custom request queue | Respect Congress.gov 5K/hr rate limit without external deps | — |
+| Editable Source of Truth | Cloudflare D1 (SQL) | Audit + relations + aggregates; KV stays as edge-cached read-snapshot | ADR-017 |
+| Researcher Auth | Cloudflare Access + email allowlist | Reuses non-prod gating pattern; no custom OAuth on the Sunday clock; Discord deferred (FR-57) | ADR-017 |
+| Newer-Rep Score | Bayesian shrink toward party prior, k=4, NEW_REP_THRESHOLD=2 | Single-vote new reps no longer read as "Strong supporter" | ADR-018 |
+| Negative-Signal Amplification | Per-vote researcher-tunable weight (FR-54), no global amplifier | One knob, preserves [-1,+1] range, transparent to readers via score-adjustment chips | ADR-017 |
 
 ---
 
