@@ -137,8 +137,8 @@ PREVIEW_MODE = "true"
 ENV_NAME = "dev"
 CF_ACCESS_TEAM = "coopgames"
 CF_ACCESS_AUD = "ed8776c235a184c9548d99ca685f0fc40f4599f3fc46971426dd96cdc24700ed"
-# Dev: conservative fan-out so testing doesn't burn through YouTube/Twitter
-# daily quotas. Frontend additionally paces requests at ~250ms each, so total
+# Dev: conservative fan-out so testing doesn't burn through YouTube
+# daily quota. Frontend additionally paces requests at ~250ms each, so total
 # rate stays well under every provider's per-second limit.
 POLL_CONCURRENCY = "2"
 SOCIAL_POLL_CRON = "0 6 * * *"
@@ -185,14 +185,13 @@ binding = "ANALYTICS"
 dataset = "voter_info_widget_dev"
 
 # AC-52.49 — social-feed freshness cron. Daily at 06:00 UTC; YouTube quota
-# and Twitter monthly cap are budget-bound so pulling more often burns caps
-# for marginal new posts. Manual re-poll per person is always available from
-# the profile page.
+# is budget-bound so pulling more often burns quota for marginal new posts.
+# Manual re-poll per person is always available from the profile page.
 [env.dev.triggers]
 # Daily at 06:00 UTC. Social feeds don't change fast enough to justify hourly,
-# and YouTube quota / Twitter monthly cap are budget-bound — pulling N times a
-# day burns through caps for marginal new posts. Manual re-poll on a specific
-# person is always available from the profile.
+# and YouTube quota is budget-bound — pulling N times a day burns through
+# quota for marginal new posts. Manual re-poll on a specific person is always
+# available from the profile.
 crons = ["0 6 * * *"]
 
 # ─── UAT (branch: uat) ───────────────────────────────────────────────────────

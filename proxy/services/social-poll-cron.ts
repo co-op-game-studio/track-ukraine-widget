@@ -18,10 +18,9 @@ import type { KeywordWatch } from '../../src/ingest/keyword-matcher';
 import type { PlatformSlug } from '../../src/ingest/types';
 // Ensure adapters are registered at import time.
 import '../../src/ingest/register';
-import { registerYouTube, registerTwitter } from '../../src/ingest/register';
+import { registerYouTube } from '../../src/ingest/register';
 
 let youtubeRegistered = false;
-let twitterRegistered = false;
 
 export interface SocialPollCronResult {
   platforms: PollResult[];
@@ -48,11 +47,6 @@ export async function runSocialPollCron(env: ProxyEnv): Promise<SocialPollCronRe
     registerYouTube(env.YOUTUBE_API_KEY);
     youtubeRegistered = true;
   }
-  if (!twitterRegistered && env.TWITTER_BEARER_TOKEN) {
-    registerTwitter(env.TWITTER_BEARER_TOKEN);
-    twitterRegistered = true;
-  }
-
   const platforms = listPlatforms();
   const keywords = await ingestStore.listKeywordWatches(d1, true);
   const kwList: KeywordWatch[] = keywords.map((k) => ({
@@ -76,13 +70,8 @@ export async function runSocialPollCron(env: ProxyEnv): Promise<SocialPollCronRe
 
   for (const platform of platforms) {
     // YouTube is excluded from bulk polls — the default daily quota (10k units)
-    // is too small to cover the full roster, and researchers can always re-poll
-    // a single person from the profile "Re-poll" button. Twitter stays in bulk
-    // (Basic tier monthly cap is large enough; per-handle `sinceId` cursoring
-    // keeps fetches tiny once warmed up).
-    //
-    // TODO: turn this into a per-platform `bulk_eligible` setting in D1 so
-    // operators can tune without a code change.
+    // is too small to cover the full roster. Researchers re-poll individuals
+    // via the profile "Re-poll" button instead.
     if (platform === 'youtube') continue;
 
     try {

@@ -95,9 +95,6 @@ export interface ProxyEnv {
   /** YouTube Data API v3 key (FR-59). Set as a Worker secret. Optional —
    *  YouTube adapter is only registered when this is present. */
   YOUTUBE_API_KEY?: string;
-  /** Twitter / X API v2 Bearer token (FR-59). Set as a Worker secret. Optional —
-   *  Twitter adapter is only registered when this is present. */
-  TWITTER_BEARER_TOKEN?: string;
   /**
    * Per-env social poll concurrency budget (FR-59). Caps how many handles
    * the admin client may fan-out in parallel against /api/admin/ingest/poll-handle.

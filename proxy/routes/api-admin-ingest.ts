@@ -27,15 +27,14 @@ import { KV_PREFIXES } from '../kv/prefixes';
 import type { NameIndexEntry } from '../kv/name-index';
 // Ensure adapters are registered.
 import '../../src/ingest/register';
-import { registerYouTube, registerTwitter } from '../../src/ingest/register';
+import { registerYouTube } from '../../src/ingest/register';
 
 let youtubeRegistered = false;
-let twitterRegistered = false;
 
 /** Platforms that are safe to bulk-poll (cron + Inbox "Poll all"). YouTube
  *  is excluded because the daily quota is small; researchers re-poll YouTube
  *  per-person from the profile. Source of truth for both backend and UI. */
-const BULK_ELIGIBLE: ReadonlySet<string> = new Set(['bluesky', 'mastodon', 'twitter']);
+const BULK_ELIGIBLE: ReadonlySet<string> = new Set(['bluesky', 'mastodon']);
 
 interface PlatformLiveness {
   slug: string;
@@ -147,11 +146,6 @@ export async function handleIngest(
   if (!youtubeRegistered && env.YOUTUBE_API_KEY) {
     registerYouTube(env.YOUTUBE_API_KEY);
     youtubeRegistered = true;
-  }
-  // Same conditional registration for Twitter/X.
-  if (!twitterRegistered && env.TWITTER_BEARER_TOKEN) {
-    registerTwitter(env.TWITTER_BEARER_TOKEN);
-    twitterRegistered = true;
   }
 
   // Wire structured logging into all adapters with per-request trace context.

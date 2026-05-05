@@ -123,7 +123,6 @@ export async function handleFetch(
   const redactList = [
     env.CONGRESS_API_KEY,
     env.YOUTUBE_API_KEY,
-    env.TWITTER_BEARER_TOKEN,
   ].filter((s): s is string => Boolean(s));
 
   let response: Response;

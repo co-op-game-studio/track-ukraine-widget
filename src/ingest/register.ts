@@ -9,7 +9,6 @@ import { registerAdapter } from './factory';
 import { BlueskyAdapter } from './adapters/bluesky';
 import { YouTubeAdapter } from './adapters/youtube';
 import { MastodonAdapter } from './adapters/mastodon';
-import { TwitterAdapter } from './adapters/twitter';
 
 // Free / no-auth adapters: always registered.
 registerAdapter(new BlueskyAdapter());
@@ -20,14 +19,10 @@ registerAdapter(new MastodonAdapter());
 // endpoint runs the adapter's healthCheck() to confirm the credentials
 // actually work — only "available" platforms are exposed to the UI.
 //
-// Facebook + Instagram intentionally NOT here. Meta's policy landscape as of
-// 2026-05 makes timeline polling for accounts you don't own essentially
-// impossible without academic Content Library access (which sandboxes data).
-// Direct-add by URL via oEmbed is the only feasible read path; we'll add
-// that back through a different surface when there's demand.
+// Twitter/X: API Basic tier is ~$100/month minimum — not warranted for this
+// use case. Researchers add X posts manually by URL.
+// Facebook + Instagram: Meta's policy makes timeline polling for accounts
+// you don't own essentially impossible without academic Content Library access.
 export function registerYouTube(apiKey: string): void {
   registerAdapter(new YouTubeAdapter(apiKey));
-}
-export function registerTwitter(bearerToken: string): void {
-  registerAdapter(new TwitterAdapter(bearerToken));
 }
