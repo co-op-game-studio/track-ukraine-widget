@@ -20,7 +20,9 @@ const schema: FieldSchema<SocialPostRow>[] = [
     required: true,
     options: [
       { value: 'x', label: 'X / Twitter' },
+      { value: 'facebook', label: 'Facebook' },
       { value: 'youtube', label: 'YouTube' },
+      { value: 'instagram', label: 'Instagram' },
       { value: 'other', label: 'Other' },
     ],
   },
