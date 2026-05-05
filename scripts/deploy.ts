@@ -65,19 +65,25 @@ function run(label: string, cmd: string) {
 // 1. Typecheck
 run('Typecheck', 'npx tsc --noEmit');
 
-// 2. Build embed widget
-run('Build embed widget', 'npx vite build');
+// 2. Build SPA preview (clears dist/)
+run('Build SPA preview', 'npx vite build');
 
-// 3. Build admin SPA
+// 3. Build lib (IIFE widget bundle — emptyOutDir:false so SPA assets survive)
+run('Build lib (IIFE)', 'npx vite build --mode lib');
+
+// 4. Build admin SPA
 run('Build admin SPA', 'npx vite build --config vite.admin.config.ts');
+
+// 5. Generate SRI manifest for the IIFE bundle
+run('Build SRI manifest', 'node scripts/build-sri.mjs');
 
 const envFlag = `--env ${env}`;
 const dbName = `viw_researcher_${env}`;
 
-// 4. D1 migrations — schema must be current before the new Worker goes live.
+// 6. D1 migrations — schema must be current before the new Worker goes live.
 run('D1 migrations', `npx wrangler d1 migrations apply ${dbName} ${envFlag} --remote --config wrangler.toml`);
 
-// 5. Deploy Worker
+// 7. Deploy Worker
 run('Deploy Worker', `npx wrangler deploy --config wrangler.toml ${envFlag}`);
 
 // 6. Seed — POST to the admin seed endpoint with CF Access service token.

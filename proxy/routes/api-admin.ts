@@ -363,7 +363,7 @@ async function handleTags(
           color: String(body['color'] ?? '').trim(),
           description: typeof body['description'] === 'string' ? body['description'] : null,
         },
-        ctx.email,
+        mctx(ctx),
       );
       logEvent(
         { env: ctx.envName, traceId: ctx.traceId },
@@ -379,6 +379,8 @@ async function handleTags(
   if (request.method === 'PATCH' && id) {
     const body = await readBody(request, ctx);
     if (isDispatchResult(body)) return body;
+    // AC-50.8 — reason required on PATCH.
+    if (!ctx.reason) return reasonRequiredError(ctx);
     try {
       const tag = await tagsStore.updateTag(
         d1,
@@ -389,7 +391,7 @@ async function handleTags(
           color: typeof body['color'] === 'string' ? body['color'] : undefined,
           description: body['description'] !== undefined ? (body['description'] as string | null) : undefined,
         },
-        ctx.email,
+        mctx(ctx),
       );
       if (!tag) return notFound(ctx, `tag not found: ${id}`);
       logEvent(
@@ -404,7 +406,12 @@ async function handleTags(
   }
 
   if (request.method === 'DELETE' && id) {
-    const removed = await tagsStore.deleteTag(d1, id);
+    // AC-50.8 — reason via ?reason=… query param.
+    const url = new URL(request.url);
+    const queryReason = url.searchParams.get('reason')?.trim();
+    if (queryReason && queryReason.length > 0) ctx.reason = queryReason;
+    if (!ctx.reason) return reasonRequiredError(ctx);
+    const removed = await tagsStore.deleteTag(d1, id, mctx(ctx));
     if (!removed) return notFound(ctx, `tag not found: ${id}`);
     logEvent(
       { env: ctx.envName, traceId: ctx.traceId },

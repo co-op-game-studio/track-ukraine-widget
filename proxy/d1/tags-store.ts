@@ -12,7 +12,8 @@
  * Traces to the curation pipeline overhaul (FR-59 successor work).
  */
 import type { D1Like } from '../env';
-import type { TagRow } from './admin-store';
+import type { TagRow, MutationContext } from './admin-store';
+import { runMutationWithAudit } from './admin-store';
 import { newUlid } from '../../src/utils/ulid';
 
 export interface TagCreateInput {
@@ -58,7 +59,7 @@ export async function getTag(d1: D1Like, id: string): Promise<TagRow | null> {
 export async function createTag(
   d1: D1Like,
   input: TagCreateInput,
-  actorEmail: string,
+  ctx: MutationContext,
 ): Promise<TagRow> {
   validateSlug(input.slug);
   validateColor(input.color);
@@ -72,17 +73,24 @@ export async function createTag(
     color: input.color,
     description: input.description?.trim() || null,
     created_at: now,
-    created_by: actorEmail,
+    created_by: ctx.actorEmail,
     updated_at: now,
-    updated_by: actorEmail,
+    updated_by: ctx.actorEmail,
   };
-  await d1
+  const stmt = d1
     .prepare(
       `INSERT INTO tags (id, slug, label, color, description, created_at, created_by, updated_at, updated_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(row.id, row.slug, row.label, row.color, row.description, row.created_at, row.created_by, row.updated_at, row.updated_by)
-    .run();
+    .bind(row.id, row.slug, row.label, row.color, row.description, row.created_at, row.created_by, row.updated_at, row.updated_by);
+  await runMutationWithAudit(d1, ctx, stmt, {
+    action: 'create',
+    targetTable: 'tags',
+    rowId: row.id,
+    rowTitle: row.label,
+    before: null,
+    after: row,
+  });
   return row;
 }
 
@@ -90,36 +98,54 @@ export async function updateTag(
   d1: D1Like,
   id: string,
   patch: TagUpdateInput,
-  actorEmail: string,
+  ctx: MutationContext,
 ): Promise<TagRow | null> {
-  const existing = await getTag(d1, id);
-  if (!existing) return null;
+  const before = await getTag(d1, id);
+  if (!before) return null;
 
   const next = {
-    slug: patch.slug ?? existing.slug,
-    label: patch.label ?? existing.label,
-    color: patch.color ?? existing.color,
-    description: patch.description !== undefined ? patch.description : existing.description,
+    slug: patch.slug ?? before.slug,
+    label: patch.label ?? before.label,
+    color: patch.color ?? before.color,
+    description: patch.description !== undefined ? patch.description : before.description,
   };
   validateSlug(next.slug);
   validateColor(next.color);
   if (!next.label.trim()) throw new Error('invalid_label: label is required');
 
   const now = new Date().toISOString();
-  await d1
+  const after: TagRow = { ...before, ...next, label: next.label.trim(), description: next.description?.trim() || null, updated_at: now, updated_by: ctx.actorEmail };
+  const stmt = d1
     .prepare(
       `UPDATE tags SET slug = ?, label = ?, color = ?, description = ?, updated_at = ?, updated_by = ?
        WHERE id = ?`,
     )
-    .bind(next.slug, next.label.trim(), next.color, next.description?.trim() || null, now, actorEmail, id)
-    .run();
-  return getTag(d1, id);
+    .bind(after.slug, after.label, after.color, after.description, after.updated_at, after.updated_by, id);
+  await runMutationWithAudit(d1, ctx, stmt, {
+    action: 'update',
+    targetTable: 'tags',
+    rowId: id,
+    rowTitle: after.label,
+    before,
+    after,
+  });
+  return after;
 }
 
-export async function deleteTag(d1: D1Like, id: string): Promise<boolean> {
-  const result = await d1.prepare('DELETE FROM tags WHERE id = ?').bind(id).run();
+export async function deleteTag(d1: D1Like, id: string, ctx: MutationContext): Promise<boolean> {
+  const before = await getTag(d1, id);
+  if (!before) return false;
+  const stmt = d1.prepare('DELETE FROM tags WHERE id = ?').bind(id);
   // FK ON DELETE CASCADE wipes quote_tags.
-  return Boolean((result as { meta?: { changes?: number } }).meta?.changes);
+  await runMutationWithAudit(d1, ctx, stmt, {
+    action: 'delete',
+    targetTable: 'tags',
+    rowId: id,
+    rowTitle: before.label,
+    before,
+    after: null,
+  });
+  return true;
 }
 
 /** All tags applied to a given quote, joined for display. */

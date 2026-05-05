@@ -167,8 +167,9 @@ export function projectStats(
     .sort((a, b) => a.billId.localeCompare(b.billId));
 
   // Comments over the last 90 days, bucketed by ISO date.
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const dayBuckets = new Map<string, number>();
-  for (const c of comments) {
+  for (const c of comments.filter(c => c.created_at.slice(0, 10) >= cutoff)) {
     const day = c.created_at.slice(0, 10);
     dayBuckets.set(day, (dayBuckets.get(day) ?? 0) + 1);
   }

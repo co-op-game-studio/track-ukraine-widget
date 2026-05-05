@@ -121,6 +121,9 @@ enabled = true
 binding = "ANALYTICS"
 dataset = "voter_info_widget_prod"
 
+[triggers]
+crons = ["0 6 * * *"]
+
 # ─── DEV (branch: develop) ───────────────────────────────────────────────────
 [env.dev]
 name = "voter-info-widget-proxy-dev"
@@ -181,10 +184,10 @@ enabled = true
 binding = "ANALYTICS"
 dataset = "voter_info_widget_dev"
 
-# AC-52.49 — scaling-backoff freshness cron. Hourly tick; the cron picks
-# bills due per the per-row backoff schedule (1h / 3h / 12h / 24h depending
-# on recency). Capped at 25 refreshes per tick to stay under Congress.gov's
-# rate limit budget.
+# AC-52.49 — social-feed freshness cron. Daily at 06:00 UTC; YouTube quota
+# and Twitter monthly cap are budget-bound so pulling more often burns caps
+# for marginal new posts. Manual re-poll per person is always available from
+# the profile page.
 [env.dev.triggers]
 # Daily at 06:00 UTC. Social feeds don't change fast enough to justify hourly,
 # and YouTube quota / Twitter monthly cap are budget-bound — pulling N times a
@@ -247,6 +250,9 @@ enabled = true
 binding = "ANALYTICS"
 dataset = "voter_info_widget_uat"
 
+[env.uat.triggers]
+crons = ["0 6 * * *"]
+
 # ─── STG (branch: stg) ───────────────────────────────────────────────────────
 [env.stg]
 name = "voter-info-widget-proxy-stg"
@@ -301,6 +307,9 @@ enabled = true
 [[env.stg.analytics_engine_datasets]]
 binding = "ANALYTICS"
 dataset = "voter_info_widget_stg"
+
+[env.stg.triggers]
+crons = ["0 6 * * *"]
 
 # ─── Preview template (FR-47) — per-branch isolated deploys ────────────────
 # Branch-based preview envs are declared as overrides at `wrangler deploy`

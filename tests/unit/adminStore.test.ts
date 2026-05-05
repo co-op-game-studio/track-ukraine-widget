@@ -391,7 +391,7 @@ describe('admin-store: votes CRUD (FR-54 AC-54.1)', () => {
         direction_multiplier: 0.5,
         kind: 'concur',
       }),
-    ).rejects.toThrow(/direction_multiplier/);
+    ).rejects.toThrow(/direction must be/i);
   });
 
   it('rejects an unknown bill_id (FK validation)', async () => {

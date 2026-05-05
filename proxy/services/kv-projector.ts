@@ -28,6 +28,7 @@ export interface D1Bill {
   title: string;
   latest_action: string | null;
   latest_action_date: string | null;
+  introduced_date?: string | null;
   became_law: number;
   congress_gov_url: string | null;
   direction: string;
@@ -209,7 +210,7 @@ export function projectBill(
     congress: bill.congress,
     title: bill.title,
     shortTitle: bill.label ?? null,
-    introducedDate: bill.latest_action_date ?? null,
+    introducedDate: bill.introduced_date ?? null,
     latestAction: bill.latest_action,
     latestActionDate: bill.latest_action_date,
     summary: bill.summary_json ? JSON.parse(bill.summary_json) : null,

@@ -277,8 +277,8 @@ export async function importBillFromCongress(
       opts,
       `v3/bill/${billSlug}/actions?limit=250`,
       req.traceId,
-    ).catch(() => null),
-    fetchCosponsorsAllPages(opts, billSlug, req.traceId).catch(() => []),
+    ),
+    fetchCosponsorsAllPages(opts, billSlug, req.traceId),
   ]);
 
   // 5. Walk actions, collect every recordedVote reference.

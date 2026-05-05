@@ -17,6 +17,7 @@
 import type { D1Like, D1PreparedStatementLike, KVLike } from '../env';
 import { KV_KEY } from '../services/kv-projector';
 import { newUlid, isUlid } from '../../src/utils/ulid';
+import { sanitizeHttpUrl } from '../security/url-validator';
 
 /* -------------------------------------------------------------------------- */
 /*                              Domain row shapes                             */
@@ -223,7 +224,7 @@ export interface MutationContext {
   kv?: KVLike;
 }
 
-interface AuditPayload {
+export interface AuditPayload {
   action: 'create' | 'update' | 'delete';
   targetTable: string;
   rowId: string;
@@ -275,7 +276,7 @@ function buildAuditStmt(
  * scaling-backoff cron (AC-52.49) and the manual republish script will
  * heal any stragglers eventually.
  */
-async function runMutationWithAudit(
+export async function runMutationWithAudit(
   d1: D1Like,
   ctx: MutationContext,
   mutation: D1PreparedStatementLike,
@@ -593,7 +594,7 @@ function validateVoteWeight(weight: number): number {
 function validateDirectionMultiplier(dm: number | undefined): number {
   if (dm === undefined) return 1;
   if (dm !== -1 && dm !== 0 && dm !== 1) {
-    throw new ValidationError('invalid_direction_multiplier', 'direction_multiplier must be -1, 0, or 1');
+    throw new ValidationError('invalid_direction', 'direction must be -1, 0, or 1');
   }
   return dm;
 }
@@ -897,14 +898,15 @@ export async function createSocialPost(
   if (!VALID_PLATFORMS.has(input.platform)) {
     throw new ValidationError('invalid_platform', `platform must be one of ${[...VALID_PLATFORMS].join(', ')}`);
   }
-  if (!input.url) throw new ValidationError('invalid_url', 'url is required');
+  const safeUrl = sanitizeHttpUrl(input.url);
+  if (!safeUrl) throw new ValidationError('invalid_url', 'url must be a valid http(s) URL');
   if (!input.body_text) throw new ValidationError('invalid_body', 'body_text is required');
   const now = isoNow();
   const row: SocialPostRow = {
     id: newUlid(),
     bioguide_id: input.bioguide_id,
     platform: input.platform,
-    url: input.url,
+    url: safeUrl,
     posted_at: input.posted_at ?? null,
     body_text: input.body_text,
     weight: validateVoteWeight(input.weight ?? 0),
