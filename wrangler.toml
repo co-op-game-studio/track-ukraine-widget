@@ -92,17 +92,18 @@ migrations_dir = "migrations/d1"
 binding = "R2_STATIC"
 bucket_name = "voter-info-widget-archive-prod"
 
-# AC-27.21 (RE-TIGHTENED v2.5.3) — in-Worker per-IP rate limit. After
-# ADR-012 moved roll-call rosters and state-members into KV, per-visit
-# fan-out dropped from ~70 req (v2.5.2 interim) to ~49 req worst case
-# (all KV reads). 60/60s covers one visitor opening all three reps with
-# headroom for re-navigation; anything above is hostile or a stuck
-# client. Zone rule in AC-28.3 is the 2x outer gate.
+# AC-27.21 — in-Worker per-IP rate limit. Loosened 2026-05-05 from
+# 60/60s → 600/60s after the V4 admin SPA (Cloudflare Access-gated)
+# started sharing the IP budget with the public widget on co-located
+# operators. The widget's worst-case fan-out is ~49 req per visitor;
+# 600/60s leaves room for an admin user + active embedding + re-navigation
+# from the same NAT'd egress IP without falling off a cliff. Zone rule
+# in AC-28.3 remains the outer gate against true scraping.
 [[unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1001"
-simple = { limit = 60, period = 60 }
+simple = { limit = 600, period = 60 }
 
 [observability]
 enabled = true
@@ -285,13 +286,12 @@ migrations_dir = "migrations/d1"
 binding = "R2_STATIC"
 bucket_name = "voter-info-widget-archive-stg"
 
-# Stg: 60 req / 60 s / IP — mirrors prod per FR-30 AC-30.1.
-# RE-TIGHTENED v2.5.3 alongside prod.
+# Stg: 600 req / 60 s / IP — mirrors prod (loosened 2026-05-05).
 [[env.stg.unsafe.bindings]]
 name = "RATE_LIMITER"
 type = "ratelimit"
 namespace_id = "1004"
-simple = { limit = 60, period = 60 }
+simple = { limit = 600, period = 60 }
 
 [env.stg.observability]
 enabled = true
