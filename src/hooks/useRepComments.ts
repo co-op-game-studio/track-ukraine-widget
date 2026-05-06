@@ -9,6 +9,7 @@
  * Traces to FR-51 AC-51.4, FR-53 AC-53.1, AC-53.5.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { fetchRepBundle } from '../services/repBundle';
 
 export interface ResearcherComment {
   id: string;
@@ -52,52 +53,38 @@ export function rollCallKey(
 }
 
 /**
- * Fan out one fetch per billId. 404 → empty list (no comments). Anything
- * else (network error, 5xx) is logged and treated as empty so the embed
- * never bricks on a missing publish-pipeline run.
+ * Pulls per-bill researcher comments from the shared rep-bundle (single
+ * KV read for the whole rep). The bundle's `comments` map is keyed by
+ * billId, so we slice it down to the requested billIds.
  */
 export function useRepComments(
   billIds: readonly string[],
   apiBase: string,
+  bioguideId?: string | null,
 ): UseRepCommentsResult {
   const [commentsByBill, setComments] = useState<CommentsByBill>(new Map());
   const [ready, setReady] = useState(false);
   const reqIdRef = useRef(0);
 
   const load = useCallback(async () => {
-    if (billIds.length === 0) {
+    if (billIds.length === 0 || !bioguideId) {
       setComments(new Map());
       setReady(true);
       return;
     }
     const thisReq = ++reqIdRef.current;
     setReady(false);
-    const base = apiBase.replace(/\/+$/, '');
-    const next = new Map<string, ResearcherComment[]>();
-    await Promise.all(
-      billIds.map(async (billId) => {
-        try {
-          const res = await fetch(`${base}/api/comments/${encodeURIComponent(billId)}`);
-          if (res.status === 404) {
-            next.set(billId, []);
-            return;
-          }
-          if (!res.ok) {
-            // 4xx/5xx other than 404 — treat as empty per AC-53.5.
-            next.set(billId, []);
-            return;
-          }
-          const json = (await res.json()) as CommentRecord;
-          next.set(billId, json.comments ?? []);
-        } catch {
-          next.set(billId, []);
-        }
-      }),
-    );
+    const bundle = await fetchRepBundle(apiBase, bioguideId);
     if (thisReq !== reqIdRef.current) return;
+    const next = new Map<string, ResearcherComment[]>();
+    const bundleComments = (bundle?.comments ?? {}) as Record<string, CommentRecord | null>;
+    for (const billId of billIds) {
+      const rec = bundleComments[billId];
+      next.set(billId, rec?.comments ?? []);
+    }
     setComments(next);
     setReady(true);
-  }, [billIds, apiBase]);
+  }, [billIds, apiBase, bioguideId]);
 
   // Re-load when the bill set changes. We compare via a stable string so
   // a parent passing a new array reference each render doesn't churn.
@@ -105,7 +92,7 @@ export function useRepComments(
   useEffect(() => {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [billIdsKey, apiBase]);
+  }, [billIdsKey, apiBase, bioguideId]);
 
   return { commentsByBill, ready };
 }
