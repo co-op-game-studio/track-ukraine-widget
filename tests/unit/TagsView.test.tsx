@@ -230,12 +230,18 @@ describe('TagsView — create flow', () => {
     // After successful create, the load() refresh kicks in; expose the row.
     stub.setTags([makeTag({ id: 'new', slug: 'my-tag', label: 'My Tag', color: '#22c55e' })]);
     fireEvent.click(screen.getByRole('button', { name: /Create tag/ }));
-    await waitFor(() => expect(screen.getByText('My Tag')).toBeInTheDocument());
+    // Wait for the form to close + refetch to render the new row. The
+    // "+ New tag" button hides while the form is open and reappears after
+    // a successful create — that's a more reliable signal than the label
+    // text, which appears in both the form input and the rendered row.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /\+ New tag/ })).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(screen.getByText('My Tag')).toBeInTheDocument();
     const posts = stub.calls.filter((c) => c.method === 'POST');
     expect(posts.length).toBe(1);
     expect(posts[0]!.url).toMatch(/\/api\/admin\/tags$/);
-    // Form is closed and "+ New tag" is back.
-    expect(screen.getByRole('button', { name: /\+ New tag/ })).toBeInTheDocument();
   });
 
   it('passes description through to the POST body when supplied', async () => {
