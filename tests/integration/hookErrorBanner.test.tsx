@@ -27,6 +27,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { VoterInfoWidget } from '../../src/VoterInfoWidget';
+import { _resetRepBundleCache } from '../../src/services/repBundle';
 
 // ─── FR-37 envelope fixtures ─────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ function jsonResponse(body: unknown, status: number): Response {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => { vi.restoreAllMocks(); _resetRepBundleCache(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('VoterInfoWidget + useAddressLookup on 429: full envelope in ErrorBanner', async () => {
@@ -204,10 +205,23 @@ function setupVoterFlow(opts: FlowOptions): { fetchMock: MockInstance } {
       if (url.includes('/api/state-members/')) {
         return jsonResponse(stateMembersFixture(), 200);
       }
-      if (url.includes('/api/members/')) {
+      if (url.includes('/api/rep-bundle/')) {
         if (opts.billsError) {
           return jsonResponse(opts.billsError, opts.billsStatus ?? 500);
         }
+        const bundle = {
+          bioguideId: 'D000563',
+          member: memberProfileFixture(),
+          bills: {},
+          rollCalls: {},
+          comments: {},
+          socialPosts: null,
+          quotes: null,
+          bundledAt: '2026-01-01T00:00:00Z',
+        };
+        return jsonResponse(bundle, 200);
+      }
+      if (url.includes('/api/members/')) {
         return jsonResponse(memberProfileFixture(), 200);
       }
       if (url.includes('/api/roll-call-rosters/')) {

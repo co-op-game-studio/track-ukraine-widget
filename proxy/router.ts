@@ -44,6 +44,7 @@ import { handleAdmin } from './routes/api-admin';
 import { handleComments } from './routes/api-comments';
 import { handleSocialPosts } from './routes/api-social-posts';
 import { handleQuotes } from './routes/api-quotes';
+import { handleRepBundle } from './routes/api-rep-bundle';
 import { handleAuditPublic } from './routes/api-audit-public';
 import { handleStatsSummary } from './routes/api-stats';
 import { buildEmbedHtml, buildPreviewHtml } from './routes/preview';
@@ -241,7 +242,7 @@ export async function dispatch(
 
   // 1. KV-backed read routes (ADR-011 / FR-32 + V4 FR-51 / FR-56 / FR-58).
   const kvRouteMatch = url.pathname.match(
-    /^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search|comments|social-posts|quotes|audit|stats)(?:\/(.+))?$/,
+    /^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search|comments|social-posts|quotes|audit|stats|rep-bundle)(?:\/(.+))?$/,
   );
   if (kvRouteMatch) {
     if (request.method === 'OPTIONS') {
@@ -323,6 +324,10 @@ export async function dispatch(
     if (kind === 'quotes') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
       return handleQuotes(rest, request, env, origin!, kvTraceId);
+    }
+    if (kind === 'rep-bundle') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleRepBundle(rest, request, env, ctx, origin!);
     }
     if (kind === 'audit') {
       // Only the public sub-route is served from the public KV-route block.
