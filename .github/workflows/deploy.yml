@@ -149,7 +149,11 @@ jobs:
           # already-applied upserts persist. Next deploy picks up where this
           # one left off (idempotent ON CONFLICT). Fail loudly on a non-2xx
           # response so an empty roster never silently ships again.
+          # Origin must be in the env's ALLOWED_ORIGINS allowlist or the Worker
+          # rejects with 403. trackukraine.com is the canonical embedder for
+          # every env's allowlist.
           RESPONSE=$(curl -sS -X POST "$HOST/api/admin/ingest/seed" "${AUTH[@]}" \
+            -H "Origin: https://trackukraine.com" \
             -H "Content-Type: application/json" -d "{}" --max-time 90 \
             -w "\n---HTTP_STATUS:%{http_code}---\n")
           STATUS=$(echo "$RESPONSE" | grep -oE 'HTTP_STATUS:[0-9]+' | cut -d: -f2)
