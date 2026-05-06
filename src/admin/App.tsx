@@ -9,7 +9,7 @@
  * CF Workers serves /admin/index.html and the SPA owns everything after #).
  */
 import { useEffect, useRef, useState } from 'react';
-import { Routes, Route, NavLink, useNavigate, Navigate } from 'react-router-dom';
+import { Routes, Route, NavLink, useNavigate, useParams, Navigate } from 'react-router-dom';
 import { get, post } from './fetcher';
 import { BillsTab } from './components/BillsTab';
 import { PeopleTab } from './components/PeopleTab';
@@ -222,14 +222,8 @@ export function App() {
 }
 
 function PeopleTabRoute() {
-  const { bioguide } = useParams();
+  const { bioguide } = useParams<{ bioguide: string }>();
   return <PeopleTab initialBioguide={bioguide ?? null} />;
-}
-
-function useParams() {
-  // Re-export from react-router so PeopleTabRoute stays co-located.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('react-router-dom').useParams() as Record<string, string | undefined>;
 }
 
 /* -------------------------------------------------------------------------- */
