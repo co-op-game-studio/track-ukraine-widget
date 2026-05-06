@@ -557,6 +557,15 @@ function PersonProfileView({
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(true);
 
+  // Which platforms have a registered + healthy adapter? Drives whether we
+  // render the Re-poll button on each handle row — there's no point offering
+  // it for facebook/instagram/x/threads since we have no adapter to call.
+  const livePlatforms = useAvailablePlatforms();
+  const pollablePlatforms = useMemo(
+    () => new Set(livePlatforms.filter((p) => p.available).map((p) => p.slug)),
+    [livePlatforms],
+  );
+
   const mocFetchedRef = useRef(false);
   useEffect(() => {
     if (mocFetchedRef.current) return;
@@ -833,7 +842,12 @@ function PersonProfileView({
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {handles.map((h) => (
-              <HandleStatusRow key={h.id} handle={h} onRepoll={() => setReloadHandles((n) => n + 1)} />
+              <HandleStatusRow
+                key={h.id}
+                handle={h}
+                pollable={pollablePlatforms.has(h.platform)}
+                onRepoll={() => setReloadHandles((n) => n + 1)}
+              />
             ))}
           </div>
         )}
@@ -1349,7 +1363,7 @@ function HandleEditModal({
 
 /** Single handle row with poll status + trace ID + re-poll. Trace IDs are
  *  user-visible per CLAUDE.md "Workflow conventions". */
-function HandleStatusRow({ handle, onRepoll }: { handle: HandleRow; onRepoll: () => void }) {
+function HandleStatusRow({ handle, pollable, onRepoll }: { handle: HandleRow; pollable: boolean; onRepoll: () => void }) {
   const [polling, setPolling] = useState(false);
   const [pollResult, setPollResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -1373,7 +1387,7 @@ function HandleStatusRow({ handle, onRepoll }: { handle: HandleRow; onRepoll: ()
       }
       onRepoll();
     } catch (e) {
-      setPollResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
+      setPollResult({ ok: false, msg: errorMsg(e) });
     } finally {
       setPolling(false);
     }
@@ -1389,34 +1403,57 @@ function HandleStatusRow({ handle, onRepoll }: { handle: HandleRow; onRepoll: ()
       gap: 4,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{
-          fontSize: 'var(--tk-fs-xs)',
-          fontWeight: 700,
-          padding: '1px 6px',
-          background: accent,
-          color: '#fff',
-          textTransform: 'uppercase',
-          letterSpacing: '0.04em',
-        }}>
-          {status ?? 'never tried'}
-        </span>
+        {pollable && (
+          <span style={{
+            fontSize: 'var(--tk-fs-xs)',
+            fontWeight: 700,
+            padding: '1px 6px',
+            background: accent,
+            color: '#fff',
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+          }}>
+            {status ?? 'never tried'}
+          </span>
+        )}
         <span style={{ fontWeight: 700 }}>{PLATFORM_LABELS[handle.platform] ?? handle.platform}</span>
         <span style={{ fontFamily: 'var(--tk-font-mono)' }}>@{handle.handle}</span>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)' }}>
-          last attempted: {relTime(handle.last_poll_attempted_at ?? null)}
-        </span>
-        <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)' }}>
-          last success: {handle.last_polled_at ? relTime(handle.last_polled_at) : 'never'}
-        </span>
-        <button
-          type="button"
-          onClick={repoll}
-          disabled={polling}
-          style={rosterStyles.editBtn}
-        >
-          {polling ? 'Polling…' : 'Re-poll'}
-        </button>
+        {pollable && (
+          <>
+            <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)' }}>
+              last attempted: {relTime(handle.last_poll_attempted_at ?? null)}
+            </span>
+            <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)' }}>
+              last success: {handle.last_polled_at ? relTime(handle.last_polled_at) : 'never'}
+            </span>
+          </>
+        )}
+        {pollable ? (
+          <button
+            type="button"
+            onClick={repoll}
+            disabled={polling}
+            style={rosterStyles.editBtn}
+          >
+            {polling ? 'Polling…' : 'Re-poll'}
+          </button>
+        ) : (
+          <span
+            title="No automated poller for this platform — display only."
+            style={{
+              fontSize: 'var(--tk-fs-xs)',
+              fontWeight: 700,
+              padding: '1px 6px',
+              border: '1px solid var(--tk-border-soft)',
+              color: 'var(--tk-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}
+          >
+            display only
+          </span>
+        )}
       </div>
       {isError && handle.last_poll_error && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '6px 8px', background: 'var(--tk-bg)', border: '1px solid rgba(239,68,68,0.3)' }}>
