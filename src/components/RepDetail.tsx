@@ -218,7 +218,7 @@ export function RepDetail({ representative, apiBase, onClose }: RepDetailProps) 
     }
     return [...set];
   }, [votingRecord.data, bills.data]);
-  const repComments = useRepComments(billIds, apiBase);
+  const repComments = useRepComments(billIds, apiBase, enriched.bioguideId);
   const statements = useRepStatements(enriched.bioguideId, apiBase);
   const quotes = useRepQuotes(enriched.bioguideId, apiBase);
 

@@ -18,7 +18,7 @@ import {
   lookupCuratedBill,
   type CuratedBill,
 } from '../services/ukraineFilter';
-import { throwFromResponse } from '../services/errorEnvelope';
+import { fetchRepBundle } from '../services/repBundle';
 import { computeValence, type Valence } from '../services/valence';
 import type { CongressLegislationRawEntry } from '../types/api';
 
@@ -115,15 +115,15 @@ export function useSponsoredBills(
     setError(null);
 
     try {
-      const base = apiBase.replace(/\/+$/, '');
-      const res = await fetch(`${base}/api/members/${encodeURIComponent(bioguideId)}`);
-      if (!res.ok) await throwFromResponse(res, `member profile ${bioguideId}`);
-      const profile = (await res.json()) as {
+      const bundle = await fetchRepBundle(apiBase, bioguideId);
+      if (thisReq !== reqIdRef.current) return;
+      if (!bundle) {
+        throw new Error(`rep bundle missing for ${bioguideId}`);
+      }
+      const profile = bundle.member as {
         sponsored?: CongressLegislationRawEntry[];
         cosponsored?: CongressLegislationRawEntry[];
       };
-      if (thisReq !== reqIdRef.current) return;
-
       const sponsored = mapAndSort(profile.sponsored ?? [], 'sponsored');
       const cosponsored = mapAndSort(profile.cosponsored ?? [], 'cosponsored');
       setData({ sponsored, cosponsored });
