@@ -197,9 +197,18 @@ async function seedRosterFromSources(
     logEvent(logCtx, { event: 'ingest_seed_congress_fetch_error', level: 'warn', error: (err as Error).message });
   }
 
-  // Upsert handles.
+  // Upsert handles. Display-only platforms (twitter/x, facebook, instagram,
+  // threads) get rows too — researchers see them on profile cards even
+  // though there's no API adapter to poll them automatically.
   let upserted = 0;
-  const platformMap: Record<string, string> = { youtube: 'youtube', mastodon: 'mastodon' };
+  const platformMap: Record<string, string> = {
+    youtube: 'youtube',
+    mastodon: 'mastodon',
+    twitter: 'twitter',
+    facebook: 'facebook',
+    instagram: 'instagram',
+    threads: 'threads',
+  };
 
   for (const m of allMembers) {
     const upstream = upstreamSocials.get(m.bioguideId) ?? {};
