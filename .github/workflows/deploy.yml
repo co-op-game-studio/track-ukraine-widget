@@ -135,20 +135,35 @@ jobs:
         shell: bash
         run: |
           case "$ENV_NAME" in
-            prod) HOST="https://vote.cogs.it.com";     AUTH=() ;;
-            stg)  HOST="https://stg.vote.cogs.it.com"; AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
-            uat)  HOST="https://uat.vote.cogs.it.com"; AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
-            dev)  HOST="https://dev.vote.cogs.it.com"; AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET") ;;
+            prod) HOST="https://vote.cogs.it.com" ;;
+            stg)  HOST="https://stg.vote.cogs.it.com" ;;
+            uat)  HOST="https://uat.vote.cogs.it.com" ;;
+            dev)  HOST="https://dev.vote.cogs.it.com" ;;
           esac
+          # /api/admin/* is gated by CF Access on EVERY env including prod —
+          # always send the service-token headers. Without them prod returned
+          # a 302 to the SSO login page and the seed never ran.
+          AUTH=(-H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET")
           # The Worker has a 30s CPU budget; if the seed has more upserts to do
           # than fit in one tick, it'll time out the HTTP response but the
           # already-applied upserts persist. Next deploy picks up where this
-          # one left off (idempotent ON CONFLICT). Don't fail the deploy.
-          set +e
-          curl -sS -X POST "$HOST/api/admin/ingest/seed" "${AUTH[@]}" \
-            -H "Content-Type: application/json" -d "{}" --max-time 60
-          echo "Seed step exit: $? (non-fatal — idempotent retry on next deploy)"
-          exit 0
+          # one left off (idempotent ON CONFLICT). Fail loudly on a non-2xx
+          # response so an empty roster never silently ships again.
+          # Origin must be in the env's ALLOWED_ORIGINS allowlist or the Worker
+          # rejects with 403. trackukraine.com is the canonical embedder for
+          # every env's allowlist.
+          RESPONSE=$(curl -sS -X POST "$HOST/api/admin/ingest/seed" "${AUTH[@]}" \
+            -H "Origin: https://trackukraine.com" \
+            -H "Content-Type: application/json" -d "{}" --max-time 90 \
+            -w "\n---HTTP_STATUS:%{http_code}---\n")
+          STATUS=$(echo "$RESPONSE" | grep -oE 'HTTP_STATUS:[0-9]+' | cut -d: -f2)
+          BODY=$(echo "$RESPONSE" | sed '/^---HTTP_STATUS:/,$d')
+          echo "Seed status: $STATUS"
+          echo "Seed body: $BODY"
+          if [[ "$STATUS" != "200" && "$STATUS" != "201" ]]; then
+            echo "::error::Seed returned $STATUS (expected 200) — roster bootstrap FAILED"
+            exit 1
+          fi
 
       - name: Post-deploy smoke
         env:
