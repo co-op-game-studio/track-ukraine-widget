@@ -479,12 +479,15 @@ async function seedKeywords(
   let created = 0;
   for (const kw of UKRAINE_KEYWORDS) {
     try {
-      await ingestStore.createKeywordWatch(d1, {
-        watchName: kw.watchName,
-        pattern: kw.pattern,
-        isRegex: kw.isRegex,
-        createdBy: SEED_ACTOR,
-      });
+      await ingestStore.createKeywordWatch(
+        d1,
+        { actorEmail: SEED_ACTOR, traceId: logCtx.traceId },
+        {
+          watchName: kw.watchName,
+          pattern: kw.pattern,
+          isRegex: kw.isRegex,
+        },
+      );
       created++;
     } catch { /* dupe or other — skip */ }
   }

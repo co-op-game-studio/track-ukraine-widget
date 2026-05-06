@@ -7,6 +7,7 @@
  */
 import type { D1Like } from '../env';
 import { newUlid } from '../../src/utils/ulid';
+import { runMutationWithAudit, type MutationContext } from './admin-store';
 
 /* -------------------------------------------------------------------------- */
 /*                           Row shapes (read side)                           */
@@ -427,12 +428,12 @@ export async function listKeywordWatches(
 
 export async function createKeywordWatch(
   d1: D1Like,
+  ctx: MutationContext,
   input: {
     watchName: string;
     pattern: string;
     isRegex?: boolean;
     notify?: boolean;
-    createdBy: string;
   },
 ): Promise<KeywordWatchRow> {
   const now = new Date().toISOString();
@@ -444,27 +445,46 @@ export async function createKeywordWatch(
     is_regex: input.isRegex ? 1 : 0,
     active: 1,
     notify: input.notify !== false ? 1 : 0,
-    created_by: input.createdBy,
+    created_by: ctx.actorEmail,
     created_at: now,
   };
-  await d1
+  const stmt = d1
     .prepare(
       `INSERT INTO social_keyword_watches
         (id, watch_name, pattern, is_regex, active, notify, created_by, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(row.id, row.watch_name, row.pattern, row.is_regex, row.active, row.notify, row.created_by, row.created_at)
-    .run();
+    .bind(row.id, row.watch_name, row.pattern, row.is_regex, row.active, row.notify, row.created_by, row.created_at);
+  await runMutationWithAudit(d1, ctx, stmt, {
+    action: 'create',
+    targetTable: 'social_keyword_watches',
+    rowId: row.id,
+    rowTitle: row.watch_name,
+    before: null,
+    after: row,
+  });
   return row;
 }
 
 export async function toggleKeywordWatch(
   d1: D1Like,
+  ctx: MutationContext,
   id: string,
   active: boolean,
 ): Promise<void> {
-  await d1
+  const before = await d1
+    .prepare('SELECT * FROM social_keyword_watches WHERE id = ?')
+    .bind(id)
+    .first<KeywordWatchRow>();
+  const stmt = d1
     .prepare('UPDATE social_keyword_watches SET active = ? WHERE id = ?')
-    .bind(active ? 1 : 0, id)
-    .run();
+    .bind(active ? 1 : 0, id);
+  await runMutationWithAudit(d1, ctx, stmt, {
+    action: 'update',
+    targetTable: 'social_keyword_watches',
+    rowId: id,
+    rowTitle: before?.watch_name ?? id,
+    before,
+    after: before ? { ...before, active: active ? 1 : 0 } : null,
+  });
 }
