@@ -200,7 +200,6 @@ async function seedRosterFromSources(
   // Upsert handles. Display-only platforms (twitter/x, facebook, instagram,
   // threads) get rows too — researchers see them on profile cards even
   // though there's no API adapter to poll them automatically.
-  let upserted = 0;
   const platformMap: Record<string, string> = {
     youtube: 'youtube',
     mastodon: 'mastodon',
@@ -210,65 +209,113 @@ async function seedRosterFromSources(
     threads: 'threads',
   };
 
+  // Batch path. Previous version did ~6 sequential D1 calls per member
+  // (one SELECT + one UPDATE/INSERT × 6 platforms × 535 members ≈ 3.2k
+  // round trips), which blew through the Worker's 30s CPU budget. Now:
+  //   1. One SELECT to load every active congress handle into memory.
+  //   2. Build all decisions (insert vs update vs noop) in memory.
+  //   3. Flush as D1 batches of ≤50 statements per round trip.
+  type ExistingKey = string; // `${bioguideId}|${platform}|${handle}`
+  const existingMap = new Map<ExistingKey, { id: string; platformId: string }>();
+  try {
+    const existingRes = await d1
+      .prepare(
+        `SELECT id, bioguide_id, platform, handle, platform_id
+         FROM mocs_social_handles
+         WHERE active_to IS NULL AND account_category = 'congress'`,
+      )
+      .all<{ id: string; bioguide_id: string; platform: string; handle: string; platform_id: string }>();
+    for (const row of existingRes.results ?? []) {
+      existingMap.set(`${row.bioguide_id}|${row.platform}|${row.handle}`, {
+        id: row.id,
+        platformId: row.platform_id,
+      });
+    }
+  } catch (err) {
+    logEvent(logCtx, { event: 'ingest_seed_handles_load_error', level: 'warn', error: (err as Error).message });
+  }
+
+  const now = new Date().toISOString();
+  const updateStmt = d1.prepare(
+    `UPDATE mocs_social_handles
+     SET platform_id = ?, display_name = ?, entity_name = ?, updated_at = ?
+     WHERE id = ?`,
+  );
+  const insertBatch: ReturnType<typeof d1.prepare>[] = [];
+  const updateBatch: ReturnType<typeof d1.prepare>[] = [];
+
   for (const m of allMembers) {
     const upstream = upstreamSocials.get(m.bioguideId) ?? {};
     const kvSocials = m.socials ?? {};
     const merged: Record<string, string> = { ...kvSocials, ...upstream };
-
     for (const [key, handle] of Object.entries(merged)) {
       if (!handle) continue;
       const platform = platformMap[key];
       if (!platform) continue;
-
-      // For YouTube: use the real channel ID (UC...) as platformId when available,
-      // so the YouTube search API works without an extra resolve call.
       let platformId = handle;
       if (platform === 'youtube') {
         const ytId = youtubeChannelIds.get(m.bioguideId);
         if (ytId) platformId = ytId;
       }
-
-      // Check if an active row already exists for this member + platform + handle.
-      // The UNIQUE constraint is (platform, platform_id, active_from) which changes
-      // daily, so a blind upsert creates duplicates on each re-sync.  Instead: if
-      // the row exists, update it in place; otherwise insert.
-      try {
-        const existing = await d1
-          .prepare(
-            `SELECT id, platform_id FROM mocs_social_handles
-             WHERE bioguide_id = ? AND platform = ? AND handle = ? AND active_to IS NULL
-             LIMIT 1`,
-          )
-          .bind(m.bioguideId, platform, handle)
-          .first<{ id: string; platform_id: string }>();
-
-        if (existing) {
-          // Update metadata + platform_id if it changed (e.g. youtube_id now available).
-          await d1
-            .prepare(
-              `UPDATE mocs_social_handles
-               SET platform_id = ?, display_name = ?, entity_name = ?, updated_at = ?
-               WHERE id = ?`,
-            )
-            .bind(platformId, m.displayName, m.displayName, new Date().toISOString(), existing.id)
-            .run();
-        } else {
-          await ingestStore.upsertHandle(d1, {
-            bioguideId: m.bioguideId,
-            entityName: m.displayName,
-            accountCategory: 'congress',
-            platform,
-            accountKind: 'official',
-            handle,
-            platformId,
-            displayName: m.displayName,
-            source: 'congress-legislators',
-          });
+      const existing = existingMap.get(`${m.bioguideId}|${platform}|${handle}`);
+      if (existing) {
+        if (existing.platformId !== platformId) {
+          updateBatch.push(updateStmt.bind(platformId, m.displayName, m.displayName, now, existing.id));
         }
-        upserted++;
-      } catch { /* constraint or other — skip */ }
+        continue;
+      }
+      // Build the same row shape ingestStore.upsertHandle() would write
+      // but as a batchable statement. Keep aligned with the migrations:
+      //   id, bioguide_id, entity_name, account_category, platform,
+      //   account_kind, handle, platform_id, display_name, source,
+      //   active_from, created_at, updated_at
+      const id = `h_${crypto.randomUUID()}`;
+      insertBatch.push(
+        d1.prepare(
+          `INSERT INTO mocs_social_handles
+           (id, bioguide_id, entity_name, account_category, platform, account_kind,
+            handle, platform_id, display_name, source, active_from, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT (platform, platform_id, active_from) DO NOTHING`,
+        ).bind(
+          id,
+          m.bioguideId,
+          m.displayName,
+          'congress',
+          platform,
+          'official',
+          handle,
+          platformId,
+          m.displayName,
+          'congress-legislators',
+          now,
+          now,
+          now,
+        ),
+      );
     }
   }
+
+  // Flush in chunks of 50. CF D1 batch caps at ~100 statements; 50 keeps
+  // headroom and gives finer progress logging if anything throws.
+  const flushChunked = async (stmts: ReturnType<typeof d1.prepare>[]): Promise<number> => {
+    let written = 0;
+    for (let i = 0; i < stmts.length; i += 50) {
+      const slice = stmts.slice(i, i + 50);
+      try {
+        await d1.batch(slice);
+        written += slice.length;
+      } catch (err) {
+        logEvent(logCtx, { event: 'ingest_seed_handles_batch_error', level: 'warn', chunk: i, error: (err as Error).message });
+      }
+    }
+    return written;
+  };
+
+  const inserted = await flushChunked(insertBatch);
+  const updated = await flushChunked(updateBatch);
+  const upserted = inserted + updated;
+  logEvent(logCtx, { event: 'ingest_seed_handles_done', level: 'info', inserted, updated, members: allMembers.length });
 
   return { membersScanned: allMembers.length, upserted, mastodon: mastodonCount };
 }
@@ -323,8 +370,38 @@ async function seedBlueskyHandles(
       }
     }
 
-    // Match and upsert.
+    // Bulk-load existing bluesky handles upfront, then build all writes in
+    // memory, then flush as D1 batches. Same pattern as the roster seed.
+    const existingMap = new Map<string, string>(); // `${bioguide}|${handle}` → id
+    try {
+      const res = await d1
+        .prepare(
+          `SELECT id, bioguide_id, handle FROM mocs_social_handles
+           WHERE platform = 'bluesky' AND active_to IS NULL`,
+        )
+        .all<{ id: string; bioguide_id: string; handle: string }>();
+      for (const r of res.results ?? []) existingMap.set(`${r.bioguide_id}|${r.handle}`, r.id);
+    } catch (err) {
+      logEvent(logCtx, { event: 'ingest_seed_bluesky_load_error', level: 'warn', error: (err as Error).message });
+    }
+
+    const now = new Date().toISOString();
+    const updateStmt = d1.prepare(
+      `UPDATE mocs_social_handles
+       SET display_name = ?, avatar_url = ?, entity_name = ?, updated_at = ?
+       WHERE id = ?`,
+    );
+    const insertStmt = d1.prepare(
+      `INSERT INTO mocs_social_handles
+       (id, bioguide_id, entity_name, account_category, platform, account_kind,
+        handle, platform_id, display_name, avatar_url, source, active_from, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (platform, platform_id, active_from) DO NOTHING`,
+    );
+    const updateBatch: ReturnType<typeof d1.prepare>[] = [];
+    const insertBatch: ReturnType<typeof d1.prepare>[] = [];
     let matched = 0;
+
     for (const item of allHandles) {
       const h = item.subject;
       const cleaned = (h.displayName ?? '')
@@ -334,8 +411,6 @@ async function seedBlueskyHandles(
         .trim();
 
       let entry = nameMap.get(cleaned.toLowerCase());
-
-      // Try last name only if unambiguous.
       if (!entry) {
         const parts = cleaned.split(/\s+/);
         const lastName = parts[parts.length - 1]?.toLowerCase() ?? '';
@@ -348,46 +423,41 @@ async function seedBlueskyHandles(
         }
         if (!ambiguous) entry = candidate;
       }
-
       if (!entry) continue;
 
-      try {
-        // Check for existing active row to avoid duplicates across re-syncs.
-        const existing = await d1
-          .prepare(
-            `SELECT id FROM mocs_social_handles
-             WHERE bioguide_id = ? AND platform = 'bluesky' AND handle = ? AND active_to IS NULL
-             LIMIT 1`,
-          )
-          .bind(entry.bioguideId, h.handle)
-          .first<{ id: string }>();
-
-        if (existing) {
-          await d1
-            .prepare(
-              `UPDATE mocs_social_handles
-               SET display_name = ?, avatar_url = ?, entity_name = ?, updated_at = ?
-               WHERE id = ?`,
-            )
-            .bind(entry.displayName, h.avatar ?? null, entry.displayName, new Date().toISOString(), existing.id)
-            .run();
-        } else {
-          await ingestStore.upsertHandle(d1, {
-            bioguideId: entry.bioguideId,
-            entityName: entry.displayName,
-            accountCategory: 'congress',
-            platform: 'bluesky',
-            accountKind: 'official',
-            handle: h.handle,
-            platformId: h.did,
-            displayName: entry.displayName,
-            avatarUrl: h.avatar,
-            source: 'bluesky-starter-pack',
-          });
-        }
-        matched++;
-      } catch { /* constraint — skip */ }
+      const existingId = existingMap.get(`${entry.bioguideId}|${h.handle}`);
+      if (existingId) {
+        updateBatch.push(updateStmt.bind(entry.displayName, h.avatar ?? null, entry.displayName, now, existingId));
+      } else {
+        const id = `h_${crypto.randomUUID()}`;
+        insertBatch.push(insertStmt.bind(
+          id,
+          entry.bioguideId,
+          entry.displayName,
+          'congress',
+          'bluesky',
+          'official',
+          h.handle,
+          h.did,
+          entry.displayName,
+          h.avatar ?? null,
+          'bluesky-starter-pack',
+          now,
+          now,
+          now,
+        ));
+      }
+      matched++;
     }
+
+    const flushChunked = async (stmts: ReturnType<typeof d1.prepare>[]) => {
+      for (let i = 0; i < stmts.length; i += 50) {
+        try { await d1.batch(stmts.slice(i, i + 50)); }
+        catch (err) { logEvent(logCtx, { event: 'ingest_seed_bluesky_batch_error', level: 'warn', chunk: i, error: (err as Error).message }); }
+      }
+    };
+    await flushChunked(insertBatch);
+    await flushChunked(updateBatch);
 
     return { totalInPack: allHandles.length, matched };
   } catch (err) {
@@ -452,54 +522,68 @@ async function seedUkraineBillStubs(
   logCtx: { env: string; traceId: string },
 ): Promise<{ stubsInserted: number; alreadyPresent: number }> {
   const list = ukraineBills as unknown as UkraineBillEntry[];
-  let inserted = 0;
-  let already = 0;
   const now = new Date().toISOString();
+
+  // Bulk-load existing bill_ids in one query, then build all inserts in
+  // memory, then flush as D1 batches. Same pattern as handle seeding.
+  const existing = new Set<string>();
+  try {
+    const res = await d1
+      .prepare('SELECT bill_id FROM bills')
+      .all<{ bill_id: string }>();
+    for (const r of res.results ?? []) existing.add(r.bill_id);
+  } catch (err) {
+    logEvent(logCtx, { event: 'ingest_seed_bills_load_error', level: 'warn', error: (err as Error).message });
+  }
+
+  const insertStmt = d1.prepare(
+    `INSERT INTO bills (
+      id, bill_id, congress, type, number, featured, label, title,
+      latest_action, latest_action_date, became_law, congress_gov_url,
+      direction, direction_reason, summary_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT (bill_id) DO NOTHING`,
+  );
+  const inserts: ReturnType<typeof d1.prepare>[] = [];
+  let already = 0;
   for (const b of list) {
     const billId = `${b.congress}-${b.type.toUpperCase()}-${b.number}`;
-    const existing = await d1
-      .prepare('SELECT id FROM bills WHERE bill_id = ?')
-      .bind(billId)
-      .first<{ id: string }>();
-    if (existing) {
-      already++;
-      continue;
-    }
+    if (existing.has(billId)) { already++; continue; }
     const id = `bill_${billId.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
+    inserts.push(
+      insertStmt.bind(
+        id,
+        billId,
+        b.congress,
+        b.type.toUpperCase(),
+        String(b.number),
+        b.featured ? 1 : 0,
+        b.label ?? null,
+        b.title ?? `${b.type.toUpperCase()} ${b.number} (${b.congress}th)`,
+        b.latestAction ?? null,
+        b.latestActionDate ?? null,
+        b.becameLaw ? 1 : 0,
+        b.congressGovUrl ?? null,
+        b.direction,
+        b.directionReason ?? 'manual override',
+        b.summary ? JSON.stringify(b.summary) : null,
+        now,
+        now,
+      ),
+    );
+  }
+
+  let inserted = 0;
+  for (let i = 0; i < inserts.length; i += 50) {
+    const slice = inserts.slice(i, i + 50);
     try {
-      await d1
-        .prepare(
-          `INSERT INTO bills (
-            id, bill_id, congress, type, number, featured, label, title,
-            latest_action, latest_action_date, became_law, congress_gov_url,
-            direction, direction_reason, summary_json, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(
-          id,
-          billId,
-          b.congress,
-          b.type.toUpperCase(),
-          String(b.number),
-          b.featured ? 1 : 0,
-          b.label ?? null,
-          b.title ?? `${b.type.toUpperCase()} ${b.number} (${b.congress}th)`,
-          b.latestAction ?? null,
-          b.latestActionDate ?? null,
-          b.becameLaw ? 1 : 0,
-          b.congressGovUrl ?? null,
-          b.direction,
-          b.directionReason ?? 'manual override',
-          b.summary ? JSON.stringify(b.summary) : null,
-          now,
-          now,
-        )
-        .run();
-      inserted++;
+      await d1.batch(slice);
+      inserted += slice.length;
     } catch (err) {
-      logEvent(logCtx, { event: 'ingest_seed_bill_stub_error', level: 'warn', billId, error: (err as Error).message });
+      logEvent(logCtx, { event: 'ingest_seed_bill_stub_batch_error', level: 'warn', chunk: i, error: (err as Error).message });
     }
   }
+
   logEvent(logCtx, { event: 'ingest_seed_bill_stubs_done', level: 'info', inserted, already, total: list.length });
   return { stubsInserted: inserted, alreadyPresent: already };
 }
