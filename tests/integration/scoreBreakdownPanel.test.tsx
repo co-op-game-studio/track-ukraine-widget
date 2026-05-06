@@ -18,6 +18,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react';
 import { RepDetail } from '../../src/components/RepDetail';
 import { MemberChip } from '../../src/components/MemberChip';
 import type { Representative } from '../../src/types/domain';
+import { _resetRepBundleCache } from '../../src/services/repBundle';
 
 /** A real curated House roll-call we can key mocks off of. */
 const HR2471_RC65 = { congress: 117, session: 2, rollCall: 65 }; // weight 0.9
@@ -113,6 +114,32 @@ type Route = { match: RegExp | ((u: string) => boolean); body: unknown; status?:
 function installFetch(routes: Route[]) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = typeof input === 'string' ? input : (input as Request).url;
+    // The widget moved from /api/members/{id} to /api/rep-bundle/{id} for
+    // its main per-rep fetch (one call replaces a fan-out of ~30 reads).
+    // Tests still spec routes via /api/members/{id} for readability — translate
+    // the URL transparently and wrap the body in a bundle envelope so existing
+    // assertions keep working.
+    const bundleMatch = url.match(/\/api\/rep-bundle\/([\w-]+)/);
+    if (bundleMatch) {
+      const id = bundleMatch[1]!;
+      const memberUrl = url.replace(/\/api\/rep-bundle\//, '/api/members/');
+      for (const r of routes) {
+        const hit = typeof r.match === 'function' ? r.match(memberUrl) : r.match.test(memberUrl);
+        if (hit) {
+          const bundle = {
+            bioguideId: id,
+            member: r.body,
+            bills: {},
+            rollCalls: {},
+            comments: {},
+            socialPosts: null,
+            quotes: null,
+            bundledAt: '2026-01-01T00:00:00Z',
+          };
+          return new Response(JSON.stringify(bundle), { status: r.status ?? 200 });
+        }
+      }
+    }
     for (const r of routes) {
       const hit = typeof r.match === 'function' ? r.match(url) : r.match.test(url);
       if (hit) return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
@@ -134,8 +161,8 @@ function installFetch(routes: Route[]) {
 }
 
 describe('Score breakdown panel (integration)', () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
-  afterEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => { vi.restoreAllMocks(); _resetRepBundleCache(); });
+  afterEach(() => { vi.restoreAllMocks(); _resetRepBundleCache(); });
 
   it('AC-43.9 — header is a toggle button that expands/collapses the breakdown panel', async () => {
     installFetch([

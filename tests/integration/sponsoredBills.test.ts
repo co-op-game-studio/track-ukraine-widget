@@ -11,6 +11,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { useSponsoredBills } from '../../src/hooks/useSponsoredBills';
+import { _resetRepBundleCache } from '../../src/services/repBundle';
 
 // The KV-backed member profile carries sponsored/cosponsored arrays
 // (same CongressLegislationRawEntry shape the hook consumed before).
@@ -74,6 +75,10 @@ const profile = {
 function mockProfile(body: unknown, status = 200) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = typeof input === 'string' ? input : (input as Request).url;
+    if (url.includes('/api/rep-bundle/')) {
+      const bundle = { bioguideId: 'D000563', member: body, bills: {}, rollCalls: {}, comments: {}, socialPosts: null, quotes: null, bundledAt: '2026-01-01T00:00:00Z' };
+      return new Response(JSON.stringify(bundle), { status });
+    }
     if (url.includes('/api/members/')) {
       return new Response(JSON.stringify(body), { status });
     }
@@ -82,7 +87,10 @@ function mockProfile(body: unknown, status = 200) {
 }
 
 describe('useSponsoredBills (Ukraine-filtered, v3)', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    _resetRepBundleCache();
+  });
 
   it('keeps only curated Ukraine bills and drops everything else', async () => {
     mockProfile(profile);
