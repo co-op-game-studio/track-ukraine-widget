@@ -306,18 +306,26 @@ export async function handleIngest(
       if (patternError) {
         return { response: jsonResponse(400, { error: 'invalid_pattern', detail: patternError, traceId: ctx.traceId }), shape: 'worker-emitted' };
       }
-      const row = await ingestStore.createKeywordWatch(d1, {
-        watchName: body['watch_name'] as string,
-        pattern,
-        isRegex,
-        notify: body['notify'] !== false,
-        createdBy: ctx.email,
-      });
+      const row = await ingestStore.createKeywordWatch(
+        d1,
+        { actorEmail: ctx.email, traceId: ctx.traceId, reason: typeof body['reason'] === 'string' ? body['reason'] as string : undefined, kv: env.KV_VOTER_INFO },
+        {
+          watchName: body['watch_name'] as string,
+          pattern,
+          isRegex,
+          notify: body['notify'] !== false,
+        },
+      );
       return { response: jsonResponse(201, { row }), shape: 'api-proxied' };
     }
     if (request.method === 'PATCH' && id) {
       const body = (await request.json()) as Record<string, unknown>;
-      await ingestStore.toggleKeywordWatch(d1, id, Boolean(body['active']));
+      await ingestStore.toggleKeywordWatch(
+        d1,
+        { actorEmail: ctx.email, traceId: ctx.traceId, reason: typeof body['reason'] === 'string' ? body['reason'] as string : undefined, kv: env.KV_VOTER_INFO },
+        id,
+        Boolean(body['active']),
+      );
       return ok(ctx, { updated: true });
     }
   }
