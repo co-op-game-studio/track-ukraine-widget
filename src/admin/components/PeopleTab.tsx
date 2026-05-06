@@ -13,6 +13,7 @@ import { get, post, patch, del } from '../fetcher';
 import { partyStyle } from './MocPicker';
 import type { MocEntry } from './MocPicker';
 import { useAvailablePlatforms } from '../hooks/useAvailablePlatforms';
+import { parseHandleUrl } from '../utils/parseHandleUrl';
 
 /* ========================================================================== */
 /*                                 Types                                      */
@@ -370,8 +371,20 @@ function PeopleListView({ onOpenProfile }: { onOpenProfile: (bioguideId: string)
                 <input
                   type="text"
                   value={addHandles[plat]}
-                  onChange={(e) => setAddHandles((prev) => ({ ...prev, [plat]: e.target.value }))}
-                  placeholder={plat === 'bluesky' ? '@user.bsky.social' : plat === 'mastodon' ? '@user@instance' : `@handle`}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    // Pasting a profile URL? Move it to the matching platform
+                    // box and store the bare handle, leaving this box empty.
+                    const parsed = parseHandleUrl(v);
+                    if (parsed && parsed.platform !== plat) {
+                      setAddHandles((prev) => ({ ...prev, [plat]: '', [parsed.platform]: parsed.handle }));
+                    } else if (parsed) {
+                      setAddHandles((prev) => ({ ...prev, [plat]: parsed.handle }));
+                    } else {
+                      setAddHandles((prev) => ({ ...prev, [plat]: v }));
+                    }
+                  }}
+                  placeholder={plat === 'bluesky' ? '@user.bsky.social or paste profile URL' : plat === 'mastodon' ? '@user@instance or URL' : 'handle or paste URL'}
                   style={{ ...styles.input, flex: 1 }}
                 />
               </div>
@@ -1120,6 +1133,17 @@ function HandleEditModal({
   const photoUrl = moc?.photoUrl ?? card.avatarUrl;
 
   function updateField(id: string, field: keyof HandleRow, value: string) {
+    // When the researcher pastes a profile URL into the handle field, parse
+    // it and auto-fill both the platform and the bare handle. This means
+    // they can paste any social URL without having to extract the @handle
+    // by hand or pick the right platform first.
+    if (field === 'handle') {
+      const parsed = parseHandleUrl(value);
+      if (parsed) {
+        setHandles((prev) => prev.map((h) => h.id === id ? { ...h, platform: parsed.platform, handle: parsed.handle } : h));
+        return;
+      }
+    }
     setHandles((prev) => prev.map((h) => h.id === id ? { ...h, [field]: value } : h));
   }
 

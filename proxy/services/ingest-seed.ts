@@ -130,7 +130,15 @@ export async function ensureIngestSeeded(
 /* ---------- Roster seeding ---------- */
 
 interface NameEntryWithSocials extends NameIndexEntry {
-  socials?: { twitter?: string; youtube?: string; mastodon?: string };
+  socials?: {
+    twitter?: string;
+    youtube?: string;
+    mastodon?: string;
+    facebook?: string;
+    instagram?: string;
+    threads?: string;
+    bluesky?: string;
+  };
 }
 
 interface CongressLegSocial {
@@ -172,9 +180,16 @@ async function seedRosterFromSources(
         const bid = entry.id?.bioguide;
         if (!bid || !entry.social) continue;
         const s: Record<string, string> = {};
+        // Pollable platforms — we automate (mastodon) or special-case (youtube).
         if (typeof entry.social.youtube === 'string') s.youtube = entry.social.youtube;
         if (typeof entry.social.youtube_id === 'string') youtubeChannelIds.set(bid, entry.social.youtube_id);
         if (typeof entry.social.mastodon === 'string') { s.mastodon = entry.social.mastodon; mastodonCount++; }
+        // Display-only platforms — researchers use the link to open the
+        // member's profile; we don't poll the API but voters need the link.
+        if (typeof entry.social.twitter === 'string') s.twitter = entry.social.twitter;
+        if (typeof entry.social.facebook === 'string') s.facebook = entry.social.facebook;
+        if (typeof entry.social.instagram === 'string') s.instagram = entry.social.instagram;
+        if (typeof entry.social.threads === 'string') s.threads = entry.social.threads;
         upstreamSocials.set(bid, s);
       }
     }

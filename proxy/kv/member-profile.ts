@@ -31,6 +31,11 @@ export interface MemberProfile {
   socials?: {
     twitter?: string;
     youtube?: string;
+    facebook?: string;
+    instagram?: string;
+    threads?: string;
+    bluesky?: string;
+    mastodon?: string;
   };
   /**
    * FR-55 / ADR-018 §6 — party-mean Ukraine score, used by the embed as the

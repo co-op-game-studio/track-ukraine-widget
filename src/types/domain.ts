@@ -7,6 +7,11 @@
 export interface MemberSocials {
   twitter?: string;
   youtube?: string;
+  facebook?: string;
+  instagram?: string;
+  threads?: string;
+  bluesky?: string;
+  mastodon?: string;
 }
 
 export interface Representative {
