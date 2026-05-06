@@ -87,21 +87,22 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Build widget bundle
-        run: npm run build:lib
-
-      - name: Compute SRI hash (AC-26.9)
-        run: npm run build:sri
+      # build:all wraps SPA preview + IIFE + admin SPA in the right order
+      # (SPA build clears dist/, lib build has emptyOutDir:false so its
+      # output survives, admin SPA writes to dist/admin/). All three are
+      # required for the worker to serve.
+      - name: Build all bundles (SPA + IIFE + admin)
+        run: npm run build:all
 
       - name: Check build outputs
         run: |
-          # Per ADR-011, ukraineBills.json is a build-time import (bundled
-          # into the IIFE by Vite, NOT a separately-fetched asset), and
-          # ukraineVotes.json was removed entirely — vote data lives in KV
-          # via publish-to-kv.ts. So Worker Sites only ships the bundle and
-          # its SRI sidecar; both must exist.
+          # Per ADR-011, ukraineBills.json is a build-time import bundled
+          # into the IIFE by Vite, NOT a separately-fetched asset. Worker
+          # Sites ships: the public IIFE widget + its SRI sidecar + the
+          # admin SPA index/assets. All three are mandatory.
           test -f dist/voter-info-widget.iife.js     || (echo "widget bundle missing" && exit 1)
           test -f dist/voter-info-widget.iife.js.sri || (echo "SRI sidecar missing" && exit 1)
+          test -f dist/admin/index.html              || (echo "admin SPA missing" && exit 1)
 
       - name: Publish atomic records to KV
         env:
@@ -110,10 +111,7 @@ jobs:
 
       # D1 migrations are idempotent — wrangler tracks applied migrations in
       # the d1_migrations table and only runs new ones. Safe to run every deploy.
-      # continue-on-error until CLOUDFLARE_API_TOKEN gets D1 Edit permission
-      # added — the token currently has Worker scope only and 7403s on D1 calls.
       - name: Apply D1 migrations
-        continue-on-error: true
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -129,10 +127,7 @@ jobs:
 
       # Seed is idempotent (upsert with ON CONFLICT, short-circuits when roster
       # exists). Auto-runs every deploy so a fresh env never lands empty.
-      # continue-on-error so a misconfigured CF Access service token doesn't
-      # block deploys — admin UI Re-sync button is the manual fallback.
       - name: Seed ingest roster
-        continue-on-error: true
         env:
           ENV_NAME: ${{ needs.resolve.outputs.env_name }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
