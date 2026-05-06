@@ -1,3 +1,5 @@
+import { throwFromResponse } from './errorEnvelope';
+
 /**
  * Shared rep-bundle fetcher with in-flight deduplication.
  *
