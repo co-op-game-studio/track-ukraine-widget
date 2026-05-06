@@ -37,8 +37,11 @@ describe('Admin App megamenu (FR-52 AC-52.16 + AC-52.65, v4 nav)', () => {
     expect(within(menu).getByRole('link', { name: /^People$/ })).toBeInTheDocument();
     expect(within(menu).getByRole('link', { name: /^Activity$/ })).toBeInTheDocument();
     // Curation funnel — replaces standalone "Social Feed" + "Quotes" tabs.
-    expect(within(menu).getByRole('link', { name: /^Inbox$/ })).toBeInTheDocument();
+    // Inbox is temporarily unlinked from the menu (workflow not ready) but
+    // the route still resolves; assert against Add quote + All quotes instead.
+    expect(within(menu).getByRole('link', { name: /^Add quote$/ })).toBeInTheDocument();
     expect(within(menu).getByRole('link', { name: /^All quotes$/ })).toBeInTheDocument();
+    expect(within(menu).queryByRole('link', { name: /^Inbox$/ })).toBeNull();
     // Admin column — replaces v3 Settings.
     expect(within(menu).getByRole('link', { name: /^Tags$/ })).toBeInTheDocument();
     expect(within(menu).getByRole('link', { name: /^Keywords$/ })).toBeInTheDocument();

@@ -11,15 +11,16 @@ import type { QuotePrefill } from '../../App';
 
 export type CurationView = 'inbox' | 'add' | 'quotes' | 'research' | 'direct';
 
+// Inbox temporarily hidden from sub-nav — workflow not ready. The view
+// renderer below still handles it so deep-links resolve, but it's unlisted.
 const VIEWS: Array<{ id: CurationView; label: string; help: string }> = [
-  { id: 'inbox',    label: 'Inbox',      help: 'Pending posts to triage' },
   { id: 'add',      label: 'Add quote',  help: 'Score a quote from any source' },
   { id: 'quotes',   label: 'All quotes', help: 'Browse + edit existing quotes' },
   { id: 'research', label: 'Research',   help: 'Search a person\'s social feeds' },
   { id: 'direct',   label: 'Add by URL', help: 'Paste a social URL to ingest' },
 ];
 
-const VALID: Set<string> = new Set(VIEWS.map((v) => v.id));
+const VALID: Set<string> = new Set<string>([...VIEWS.map((v) => v.id), 'inbox']);
 
 export function CurationTab({
   onNavigateToPerson,
@@ -32,8 +33,8 @@ export function CurationTab({
   prefill: QuotePrefill | null;
   onPrefillConsumed: () => void;
 }) {
-  const { view = 'inbox' } = useParams<{ view: string }>();
-  if (!VALID.has(view)) return <Navigate to="/curation/inbox" replace />;
+  const { view = 'add' } = useParams<{ view: string }>();
+  if (!VALID.has(view)) return <Navigate to="/curation/add" replace />;
 
   return (
     <div style={styles.root}>

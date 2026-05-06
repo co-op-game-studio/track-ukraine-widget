@@ -64,7 +64,8 @@ const COLUMNS: MenuColumn[] = [
   {
     heading: 'Curation',
     links: [
-      { label: 'Inbox',      to: '/curation/inbox' },
+      // Inbox temporarily hidden — feed not ready for triage workflow.
+      // Route still resolves so deep-links don't 404, but it's unlinked.
       { label: 'Add quote',  to: '/curation/add' },
       { label: 'All quotes', to: '/curation/quotes' },
       { label: 'Research',   to: '/curation/research' },
@@ -207,7 +208,7 @@ export function App() {
           <Route path="/people/:bioguide"  element={<PeopleTabRoute />} />
           <Route path="/bills"             element={<BillsTab />} />
           <Route path="/curation/:view"    element={<CurationTab onNavigateToPerson={(id) => navigate(`/people/${id}`)} onCurateAsQuote={curateAsQuote} prefill={quotePrefill} onPrefillConsumed={() => setQuotePrefill(null)} />} />
-          <Route path="/curation"          element={<Navigate to="/curation/inbox" replace />} />
+          <Route path="/curation"          element={<Navigate to="/curation/add" replace />} />
           <Route path="/settings/:view"    element={<SettingsTab />} />
           <Route path="/settings"          element={<Navigate to="/settings/keywords" replace />} />
           <Route path="/activity"          element={<AuditTab />} />
