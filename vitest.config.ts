@@ -71,10 +71,10 @@ export default defineConfig({
         //
         // Floors set at achieved-minus-1 so we don't regress and so the gate
         // forces a deliberate update each time we move the floor up.
-        lines: 73,
-        statements: 73,
-        functions: 77,
-        branches: 83,
+        lines: 78,
+        statements: 78,
+        functions: 82,
+        branches: 84,
       },
     },
   },
