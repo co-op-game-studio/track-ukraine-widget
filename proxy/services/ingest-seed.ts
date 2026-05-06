@@ -19,12 +19,15 @@ import { KV_PREFIXES } from '../kv/prefixes';
 import type { NameIndexEntry } from '../kv/name-index';
 import * as ingestStore from '../d1/ingest-store';
 import { logEvent } from '../observability/log';
+// Static curated bill list — D1 truth; KV is the cache.
+import ukraineBills from '../../src/data/ukraineBills.json';
 
 /* ---------- Result type ---------- */
 
 export interface SeedResult {
   roster: { membersScanned: number; handlesUpserted: number; mastodon: number; bluesky: number };
   keywords: { seeded: number };
+  bills: { stubsInserted: number; alreadyPresent: number };
   youtubeResolved?: number;
   skipped: boolean;
 }
@@ -71,7 +74,7 @@ export async function ensureIngestSeeded(
 
   if (!d1 || !kv) {
     logEvent(logCtx, { event: 'ingest_seed_skipped', level: 'warn', reason: !d1 ? 'no_d1' : 'no_kv' });
-    return { roster: { membersScanned: 0, handlesUpserted: 0, mastodon: 0, bluesky: 0 }, keywords: { seeded: 0 }, skipped: true };
+    return { roster: { membersScanned: 0, handlesUpserted: 0, mastodon: 0, bluesky: 0 }, keywords: { seeded: 0 }, bills: { stubsInserted: 0, alreadyPresent: 0 }, skipped: true };
   }
 
   // The seed always runs — it uses check-then-update-or-insert, so it's
@@ -89,6 +92,11 @@ export async function ensureIngestSeeded(
 
   // 3. Seed keywords
   const kwResult = await seedKeywords(d1, logCtx);
+
+  // 3b. Seed Ukraine bill stubs (D1 = source of truth). Stubs are minimal
+  //     rows from src/data/ukraineBills.json; full Congress.gov enrichment
+  //     happens via the backfill loop on the admin SPA's first auth.
+  const billResult = await seedUkraineBillStubs(d1, logCtx);
 
   // 4. Resolve unresolved YouTube platform_ids via YouTube Data API.
   //    Runs inline but is capped at 50 handles per tick. Errors are
@@ -110,6 +118,7 @@ export async function ensureIngestSeeded(
       bluesky: bskyResult.matched,
     },
     keywords: { seeded: kwResult },
+    bills: billResult,
     youtubeResolved: ytResolved,
     skipped: false,
   };
@@ -388,6 +397,87 @@ async function seedKeywords(
 
   logEvent(logCtx, { event: 'ingest_seed_keywords_created', level: 'info', created, total: UKRAINE_KEYWORDS.length });
   return created;
+}
+
+/* ---------- Ukraine bill stubs (D1 = source of truth) ---------- */
+
+interface UkraineBillEntry {
+  congress: number;
+  type: string;
+  number: string | number;
+  featured?: boolean;
+  label?: string;
+  title?: string;
+  latestAction?: string;
+  latestActionDate?: string;
+  becameLaw?: boolean;
+  congressGovUrl?: string;
+  direction: string;
+  directionReason?: string;
+  summary?: unknown;
+}
+
+/**
+ * Insert a stub row in `bills` for every entry in src/data/ukraineBills.json.
+ * Idempotent — rows already present are left untouched (researcher edits
+ * preserved). Full Congress.gov enrichment (votes, cosponsors, actions)
+ * happens via the backfill loop kicked off by useAutoBackfill on the SPA.
+ */
+async function seedUkraineBillStubs(
+  d1: D1Like,
+  logCtx: { env: string; traceId: string },
+): Promise<{ stubsInserted: number; alreadyPresent: number }> {
+  const list = ukraineBills as unknown as UkraineBillEntry[];
+  let inserted = 0;
+  let already = 0;
+  const now = new Date().toISOString();
+  for (const b of list) {
+    const billId = `${b.congress}-${b.type.toUpperCase()}-${b.number}`;
+    const existing = await d1
+      .prepare('SELECT id FROM bills WHERE bill_id = ?')
+      .bind(billId)
+      .first<{ id: string }>();
+    if (existing) {
+      already++;
+      continue;
+    }
+    const id = `bill_${billId.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
+    try {
+      await d1
+        .prepare(
+          `INSERT INTO bills (
+            id, bill_id, congress, type, number, featured, label, title,
+            latest_action, latest_action_date, became_law, congress_gov_url,
+            direction, direction_reason, summary_json, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          id,
+          billId,
+          b.congress,
+          b.type.toUpperCase(),
+          String(b.number),
+          b.featured ? 1 : 0,
+          b.label ?? null,
+          b.title ?? `${b.type.toUpperCase()} ${b.number} (${b.congress}th)`,
+          b.latestAction ?? null,
+          b.latestActionDate ?? null,
+          b.becameLaw ? 1 : 0,
+          b.congressGovUrl ?? null,
+          b.direction,
+          b.directionReason ?? 'manual override',
+          b.summary ? JSON.stringify(b.summary) : null,
+          now,
+          now,
+        )
+        .run();
+      inserted++;
+    } catch (err) {
+      logEvent(logCtx, { event: 'ingest_seed_bill_stub_error', level: 'warn', billId, error: (err as Error).message });
+    }
+  }
+  logEvent(logCtx, { event: 'ingest_seed_bill_stubs_done', level: 'info', inserted, already, total: list.length });
+  return { stubsInserted: inserted, alreadyPresent: already };
 }
 
 /* ---------- YouTube channel ID resolution ---------- */
