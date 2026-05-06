@@ -27,5 +27,11 @@ export const KV_PREFIXES = {
   // `scores:v1:party-priors`. Read by api-members read-through to stamp
   // `partyPrior` onto each MemberProfile.
   scores: 'scores:v1:',
+  // Per-rep render bundle — everything the embed needs to render one rep
+  // in a single KV read. Composed from the smaller per-resource records
+  // (member, bills, roll-calls, comments, quotes, social-posts) by the
+  // read-through fill in api-rep-bundle.ts. Invalidated by admin writes
+  // that touch the rep's data.
+  repBundle: 'rep-bundle:v1:',
 } as const;
 

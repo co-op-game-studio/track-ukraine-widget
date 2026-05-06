@@ -7,6 +7,7 @@
  * Traces to FR-51 AC-51.6, FR-53 AC-53.2.
  */
 import { useEffect, useState } from 'react';
+import { fetchRepBundle } from '../services/repBundle';
 
 export interface RepQuote {
   id: string;
@@ -50,23 +51,13 @@ export function useRepQuotes(
     }
     let cancelled = false;
     setStatus('loading');
-    const base = apiBase.replace(/\/+$/, '');
-    fetch(`${base}/api/quotes/${encodeURIComponent(bioguideId)}`)
-      .then(async (res) => {
+    fetchRepBundle(apiBase, bioguideId)
+      .then((bundle) => {
         if (cancelled) return;
-        if (res.status === 404) {
-          setQuotes([]);
-          setStatus('empty');
-          return;
-        }
-        if (!res.ok) {
-          setQuotes([]);
-          setStatus('empty');
-          return;
-        }
-        const json = (await res.json()) as QuotesRecord;
-        setQuotes(json.quotes ?? []);
-        setStatus(json.quotes && json.quotes.length > 0 ? 'success' : 'empty');
+        const record = bundle?.quotes as QuotesRecord | null;
+        const list = record?.quotes ?? [];
+        setQuotes(list);
+        setStatus(list.length > 0 ? 'success' : 'empty');
       })
       .catch(() => {
         if (cancelled) return;
