@@ -30,6 +30,10 @@ import ukraineBills from '../data/ukraineBills.json';
 import type { CuratedBill, CuratedBillVote } from '../services/ukraineFilter';
 import { computeValence, type MemberAction } from '../services/valence';
 import { sanitizeUrl } from '../utils/sanitizeUrl';
+import {
+  useResearcherAuditPublic,
+  type AuditPublicItem,
+} from '../hooks/useResearcherAuditPublic';
 
 const ALL_BILLS: CuratedBill[] = ukraineBills as CuratedBill[];
 
@@ -277,9 +281,79 @@ function BillsBrowser() {
   );
 }
 
-export function AboutSystemPanel() {
+export interface AboutSystemPanelProps {
+  /** API base for the embed Worker — used to fetch the public audit feed
+   *  (FR-53 AC-53.4). Defaults to "" (same origin). */
+  apiBase?: string;
+}
+
+/** FR-53 AC-53.4 — redacted public feed of recent researcher updates. */
+function ResearcherUpdatesFeed({ items }: { items: AuditPublicItem[] }) {
+  return (
+    <section
+      className="viw-about-updates"
+      aria-label="Recent researcher updates"
+    >
+      <h3 className="viw-about-subheading">Recent researcher updates</h3>
+      <p>
+        The latest changes researchers have made to bill curation, vote
+        weights, comments, statements, and quotes.
+      </p>
+      <ul className="viw-about-updates-list" role="list">
+        {items.map((it) => (
+          <li key={it.id} className="viw-about-updates-item">
+            <span className="viw-about-updates-actor">{it.actorLocalPart}</span>
+            <span className="viw-about-updates-action">{actionVerb(it.action, it.table)}</span>
+            {it.rowTitle && (
+              <span className="viw-about-updates-target">{truncate(it.rowTitle, 80)}</span>
+            )}
+            <span className="viw-about-updates-when">{relTime(it.createdAt)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function actionVerb(action: string, table: string): string {
+  const target = table.replace('_', ' ');
+  if (action === 'create') return `added ${singular(target)}`;
+  if (action === 'update') return `updated ${singular(target)}`;
+  if (action === 'delete') return `removed ${singular(target)}`;
+  return `${action} ${singular(target)}`;
+}
+
+function singular(noun: string): string {
+  if (noun.endsWith('ies')) return noun.slice(0, -3) + 'y';
+  if (noun.endsWith('es')) return noun.slice(0, -2);
+  if (noun.endsWith('s')) return noun.slice(0, -1);
+  return noun;
+}
+
+function truncate(s: string, n: number): string {
+  return s.length <= n ? s : s.slice(0, n - 1).trimEnd() + '…';
+}
+
+function relTime(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(ms)) return iso;
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return iso.slice(0, 10);
+}
+
+export function AboutSystemPanel({ apiBase = '' }: AboutSystemPanelProps = {}) {
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // FR-53 AC-53.4 — public researcher-updates feed (Tier B). Fetched only
+  // when the panel is open; the hook tolerates missing endpoint as empty.
+  const auditFeed = useResearcherAuditPublic(apiBase, 20);
 
   // AC-46.4: Escape closes the panel when focus is inside.
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -314,6 +388,10 @@ export function AboutSystemPanel() {
             computed only from their public record on curated Ukraine-related
             bills.
           </p>
+
+          {auditFeed.items.length > 0 && (
+            <ResearcherUpdatesFeed items={auditFeed.items} />
+          )}
 
           <h3 className="viw-about-subheading">Formula</h3>
           <p className="viw-about-formula">

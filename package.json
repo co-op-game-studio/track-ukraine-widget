@@ -1,14 +1,16 @@
 {
   "name": "voter-info-widget",
   "private": true,
-  "version": "3.0.0",
+  "version": "4.0.0-rc.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:admin": "vite --config vite.admin.config.ts",
     "build": "tsc && vite build",
     "build:lib": "tsc && vite build --mode lib",
+    "build:admin": "vite build --config vite.admin.config.ts",
     "build:sri": "node scripts/build-sri.mjs",
-    "build:all": "npm run build && npm run build:lib && npm run build:sri",
+    "build:all": "npm run build && npm run build:lib && npm run build:admin && npm run build:sri",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -22,12 +24,17 @@
     "curate": "tsx scripts/build-curated-bills.ts && tsx scripts/build-vote-rosters.ts",
     "curate:bills": "tsx scripts/build-curated-bills.ts",
     "curate:rosters": "tsx scripts/build-vote-rosters.ts",
+    "deploy:dev": "tsx scripts/deploy.ts --env dev",
+    "deploy:uat": "tsx scripts/deploy.ts --env uat",
+    "deploy:stg": "tsx scripts/deploy.ts --env stg",
+    "deploy:prod": "tsx scripts/deploy.ts --env prod",
     "publish:kv": "tsx scripts/publish-to-kv.ts",
     "stg:sync-data": "tsx scripts/sync-stg-data.ts"
   },
   "dependencies": {
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.15.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260417.1",

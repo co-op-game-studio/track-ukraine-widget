@@ -63,7 +63,7 @@ describe('useUkraineScore', () => {
   it('returns a score from voting rows only (bills null)', () => {
     const voting: VotingRecordData = {
       clusters: [], flat: [voteRow('voted-pro', 1), voteRow('voted-pro', 1), voteRow('voted-pro', 1)],
-      voteScore: { score: 1, contributing: 3, total: 3, lowConfidence: false, confidence: 0.375, confidenceTier: 'moderate' },
+      voteScore: { score: 1, rawScore: 1, contributing: 3, total: 3, lowConfidence: false, confidence: 0.375, confidenceTier: 'moderate' },
       obstructionCount: 0, primaryAbstentionCount: 0,
     };
     const { result } = renderHook(() => useUkraineScore(voting, null));
@@ -86,7 +86,7 @@ describe('useUkraineScore', () => {
   it('composes voting + sponsored + cosponsored into a single action list', () => {
     const voting: VotingRecordData = {
       clusters: [], flat: [voteRow('voted-pro', 1)],
-      voteScore: { score: 1, contributing: 1, total: 1, lowConfidence: true, confidence: 0.125, confidenceTier: 'low' },
+      voteScore: { score: 1, rawScore: 1, contributing: 1, total: 1, lowConfidence: true, confidence: 0.125, confidenceTier: 'low' },
       obstructionCount: 0, primaryAbstentionCount: 0,
     };
     const bills: SponsoredBillsData = {
@@ -106,7 +106,7 @@ describe('useUkraineScore', () => {
         voteRow('voted-anti', 1),
         voteRow('voted-anti', 1),
       ],
-      voteScore: { score: -1, contributing: 3, total: 3, lowConfidence: false, confidence: 0.375, confidenceTier: 'moderate' },
+      voteScore: { score: -1, rawScore: -1, contributing: 3, total: 3, lowConfidence: false, confidence: 0.375, confidenceTier: 'moderate' },
       obstructionCount: 0, primaryAbstentionCount: 0,
     };
     const { result } = renderHook(() => useUkraineScore(voting, null));

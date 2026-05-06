@@ -63,12 +63,14 @@ describe('computeUkraineScore', () => {
 
   it('weight-0 votes (ambiguous procedurals like motion-to-table) are EXCLUDED', () => {
     // 1 passage (w=1.0) + 10 weight-0 "motion to table" votes = pure +1
-    // since the ambiguous ones are excluded.
+    // raw score, since the ambiguous ones are excluded. (Display score is
+    // null because contributing=1 < NEW_REP_THRESHOLD; assert on rawScore
+    // to test the weighting formula independent of FR-55 shrink.)
     const r = computeUkraineScore([
       { valence: 'voted-pro', weight: 1.0 },
       ...Array.from({ length: 10 }, () => ({ valence: 'voted-pro' as const, weight: 0 })),
     ]);
-    expect(r.score).toBe(1);
+    expect(r.rawScore).toBe(1);
     expect(r.contributing).toBe(1);
 
     // Only ambiguous procedurals → no signal at all
@@ -76,7 +78,7 @@ describe('computeUkraineScore', () => {
       { valence: 'voted-pro', weight: 0 },
       { valence: 'voted-anti', weight: 0 },
     ]);
-    expect(r2.score).toBeNull();
+    expect(r2.rawScore).toBeNull();
     expect(r2.contributing).toBe(0);
   });
 
@@ -108,18 +110,21 @@ describe('computeUkraineScore', () => {
       { valence: 'unstated', weight: 1.0 },
       { valence: 'unstated', weight: 1.0 },
     ]);
-    expect(r.score).toBe(1);
+    // Display score is null (contributing=1 < NEW_REP_THRESHOLD); rawScore
+    // captures the weighting math.
+    expect(r.rawScore).toBe(1);
     expect(r.contributing).toBe(1);
     expect(r.total).toBe(3);
   });
 
   it('flags low-confidence when contributing actions are below threshold', () => {
-    // 1 contributing action — low confidence
+    // 2 contributing actions — at NEW_REP_THRESHOLD, tier=low (FR-55).
     const r = computeUkraineScore([
+      { valence: 'voted-pro', weight: 1.0 },
       { valence: 'voted-pro', weight: 1.0 },
     ]);
     expect(r.lowConfidence).toBe(true);
-    expect(r.contributing).toBe(1);
+    expect(r.contributing).toBe(2);
 
     // 3+ contributing actions — not low confidence (binary legacy alias)
     const r2 = computeUkraineScore([
@@ -130,17 +135,21 @@ describe('computeUkraineScore', () => {
     expect(r2.lowConfidence).toBe(false);
   });
 
-  // FR-43 AC-43.1, AC-43.2: tri-state confidence tier.
-  describe('confidenceTier (FR-43 AC-43.1)', () => {
-    function tierFor(n: number): 'low' | 'moderate' | 'full' {
+  // FR-55 AC-55.1 — `'insufficient'` tier added below NEW_REP_THRESHOLD=2.
+  // FR-43 AC-43.1, AC-43.2 — tri-state low/moderate/full above.
+  describe('confidenceTier (FR-43 AC-43.1, FR-55 AC-55.1)', () => {
+    function tierFor(n: number): 'insufficient' | 'low' | 'moderate' | 'full' {
       const actions = Array.from({ length: n }, () => ({ valence: 'voted-pro' as const, weight: 1.0 }));
       return computeUkraineScore(actions).confidenceTier;
     }
 
-    it('tier=low for 1 action', () => {
-      expect(tierFor(1)).toBe('low');
+    it('tier=insufficient for 0 actions', () => {
+      expect(tierFor(0)).toBe('insufficient');
     });
-    it('tier=low for 2 actions', () => {
+    it('tier=insufficient for 1 action', () => {
+      expect(tierFor(1)).toBe('insufficient');
+    });
+    it('tier=low for 2 actions (NEW_REP_THRESHOLD)', () => {
       expect(tierFor(2)).toBe('low');
     });
     it('tier=moderate for exactly LOW_CONFIDENCE_THRESHOLD (3)', () => {
@@ -155,10 +164,10 @@ describe('computeUkraineScore', () => {
     it('tier=full for 9 actions', () => {
       expect(tierFor(9)).toBe('full');
     });
-    it('tier=low when zero contributing actions and score is null', () => {
+    it('tier=insufficient when zero contributing actions and score is null', () => {
       const r = computeUkraineScore([]);
       expect(r.score).toBeNull();
-      expect(r.confidenceTier).toBe('low');
+      expect(r.confidenceTier).toBe('insufficient');
     });
     it('lowConfidence alias mirrors (tier==="low" && contributing>0), AC-43.2', () => {
       for (const n of [0, 1, 2, 3, 7, 8, 9]) {
@@ -179,8 +188,11 @@ describe('computeUkraineScore', () => {
     it('zero contributing → confidence 0', () => {
       expect(confidenceFor(0)).toBe(0);
     });
-    it('1 action → confidence 0.125', () => {
-      expect(confidenceFor(1)).toBeCloseTo(0.125, 4);
+    it('1 action → confidence 0 (FR-55: insufficient tier zero-saturates)', () => {
+      expect(confidenceFor(1)).toBe(0);
+    });
+    it('2 actions → confidence 0.25 (NEW_REP_THRESHOLD reached)', () => {
+      expect(confidenceFor(2)).toBeCloseTo(0.25, 4);
     });
     it('4 actions → confidence 0.5', () => {
       expect(confidenceFor(4)).toBe(0.5);
@@ -202,6 +214,100 @@ describe('computeUkraineScore', () => {
         expect(c).toBeGreaterThanOrEqual(prev);
         prev = c;
       }
+    });
+  });
+
+  // FR-55 AC-55.1..AC-55.7, ADR-018 — Bayesian shrink toward party prior.
+  describe('Bayesian shrink (FR-55, ADR-018)', () => {
+    it('AC-55.2: rep with 0 contributing → score=null, tier=insufficient', () => {
+      const r = computeUkraineScore([]);
+      expect(r.score).toBeNull();
+      expect(r.rawScore).toBeNull();
+      expect(r.confidenceTier).toBe('insufficient');
+      expect(r.confidence).toBe(0);
+    });
+
+    it('AC-55.2: rep with 1 contributing → score=null even though raw score exists', () => {
+      const r = computeUkraineScore(
+        [{ valence: 'voted-pro', weight: 1.0 }],
+        { partyPrior: -0.4 },
+      );
+      expect(r.score).toBeNull();
+      expect(r.rawScore).toBe(1);
+      expect(r.confidenceTier).toBe('insufficient');
+    });
+
+    it('AC-55.3: GOP-flavored rep with 2 pro votes + partyPrior=-0.4 shrinks toward prior', () => {
+      // contributing=2, k=4 → w = 1/(1+2/4) = 0.667
+      // raw = +1, prior = -0.4 → final = (1-0.667)*1 + 0.667*-0.4 ≈ 0.067
+      const r = computeUkraineScore(
+        [
+          { valence: 'voted-pro', weight: 1.0 },
+          { valence: 'voted-pro', weight: 1.0 },
+        ],
+        { partyPrior: -0.4 },
+      );
+      expect(r.rawScore).toBe(1);
+      expect(r.score).toBeCloseTo(0.067, 2);
+      expect(r.confidenceTier).toBe('low');
+    });
+
+    it('AC-55.3: shrink at 4 actions ≈ 50/50 prior + raw', () => {
+      // w = 1/(1+4/4) = 0.5
+      const actions = Array.from({ length: 4 }, () => ({
+        valence: 'voted-pro' as const,
+        weight: 1.0,
+      }));
+      const r = computeUkraineScore(actions, { partyPrior: -0.4 });
+      expect(r.score).toBeCloseTo(0.5 * 1 + 0.5 * -0.4, 4); // 0.3
+    });
+
+    it('AC-55.3 / AC-55.4: full confidence (8+) → no shrink, raw score wins', () => {
+      const actions = Array.from({ length: 20 }, () => ({
+        valence: 'voted-pro' as const,
+        weight: 1.0,
+      }));
+      const r = computeUkraineScore(actions, { partyPrior: -0.4 });
+      expect(r.score).toBe(1);
+      expect(r.rawScore).toBe(1);
+      expect(r.confidenceTier).toBe('full');
+    });
+
+    it('AC-55.4: partyPrior=null → no shrink, raw wins (cold-start safe, no NaN)', () => {
+      const r = computeUkraineScore(
+        [
+          { valence: 'voted-pro', weight: 1.0 },
+          { valence: 'voted-pro', weight: 1.0 },
+        ],
+        { partyPrior: null },
+      );
+      expect(r.score).toBe(1);
+      expect(r.rawScore).toBe(1);
+      expect(Number.isFinite(r.score!)).toBe(true);
+    });
+
+    it('AC-55.4: priors omitted → no shrink (back-compat with pre-V4 callers)', () => {
+      const r = computeUkraineScore([
+        { valence: 'voted-pro', weight: 1.0 },
+        { valence: 'voted-pro', weight: 1.0 },
+      ]);
+      expect(r.score).toBe(1);
+      expect(r.rawScore).toBe(1);
+    });
+
+    it('rawScore is exposed independently of the displayed score', () => {
+      const r = computeUkraineScore(
+        [
+          { valence: 'voted-anti', weight: 1.0 },
+          { valence: 'voted-pro', weight: 1.0 },
+          { valence: 'voted-pro', weight: 1.0 },
+        ],
+        { partyPrior: -0.5 },
+      );
+      // raw = (-1+1+1)/3 = 1/3; w = 1/(1+3/4) = 4/7 ≈ 0.571
+      // shrunk = (3/7)*(1/3) + (4/7)*(-0.5) ≈ 0.143 - 0.286 = -0.143
+      expect(r.rawScore).toBeCloseTo(1 / 3, 4);
+      expect(r.score).toBeCloseTo(-0.143, 2);
     });
   });
 

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Track Ukraine — Admin</title>
+    <!-- AC-52.29 — pre-mount theme resolution to prevent FOUC. -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem('tk-admin-theme');
+          var mode = stored === 'light' || stored === 'dark' || stored === 'system'
+            ? stored
+            : 'system';
+          var resolved = mode === 'system'
+            ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+            : mode;
+          document.documentElement.dataset.theme = resolved;
+        } catch (e) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body, #root { height: 100%; margin: 0; }
+      body {
+        background: var(--tk-bg);
+        color: var(--tk-fg);
+        font-family: var(--tk-font);
+        font-size: var(--tk-fs-base);
+      }
+      a { color: var(--tk-accent); }
+      :focus-visible { outline: 2px solid var(--tk-focus); outline-offset: 2px; }
+      /* AC-52.68 — flash for required-but-empty change-notes inputs. */
+      @keyframes tk-flash {
+        0%   { background: rgba(185, 28, 28, 0.45); }
+        100% { background: rgba(185, 28, 28, 0.06); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./main.tsx"></script>
+  </body>
+</html>

@@ -26,9 +26,12 @@ export interface StateMemberSummary {
   /** Social-media handles (FR-48). Optional — older KV records predate. */
   socials?: {
     twitter?: string;
-    facebook?: string;
     youtube?: string;
+    facebook?: string;
     instagram?: string;
+    threads?: string;
+    bluesky?: string;
+    mastodon?: string;
   };
 }
 

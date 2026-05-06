@@ -13,43 +13,9 @@
  * Traces to: US-7/8/9, spec AC-9.*
  */
 
-/* Hanken Grotesk from Google Fonts (Fourthwall loads it locally; we mirror). */
-@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,500;0,700;0,900;1,700;1,900&display=swap');
-
-:host,
-.viw-root {
-  /* ── Palette ── */
-  --viw-yellow: #fff100;
-  --viw-yellow-dark: #e6d600;
-  --viw-black: #000000;
-  --viw-white: #ffffff;
-  --viw-off: #f5f5f5;
-  --viw-border: #000000;
-  --viw-border-soft: #d4d4d4;
-  --viw-muted: #555555;
-  --viw-subtle: #777777;
-
-  /* Party colors — kept functional but flattened (square, no gradient) */
-  --viw-dem: #1d4ed8;
-  --viw-rep: #b91c1c;
-  --viw-ind: #555555;
-
-  /* Obstruction / valence */
-  --viw-valence-sponsor-pro:  #146c2e;
-  --viw-valence-voted-pro:    #1e8a3c;
-  --viw-valence-unstated:     #777777;
-  --viw-valence-voted-anti:   #b91c1c;
-  --viw-valence-sponsor-anti: #7f1d1d;
-  --viw-valence-sponsor-pro-bg:  #dcfce7;
-  --viw-valence-voted-pro-bg:    #ecfdf5;
-  --viw-valence-unstated-bg:     transparent;
-  --viw-valence-voted-anti-bg:   #fff1f2;
-  --viw-valence-sponsor-anti-bg: #fee2e2;
-
-  /* Type */
-  --viw-font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  --viw-hero-shadow: 1px 1px 0 var(--viw-black), 2px 2px 0 var(--viw-black);
-}
+/* Shared design tokens — palette / type / valence / aliases.
+ * AC-52.28 — single source of truth for both the embed and the admin SPA. */
+@import url('./tokens.css');
 
 .viw-root {
   font-family: var(--viw-font);
@@ -2463,4 +2429,178 @@
     margin-left: 0;
     margin-top: 0.2rem;
   }
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/*  Statements / Quotes feed (StatementsList.tsx)                             */
+/*  FR-53 AC-53.2..AC-53.6 — visual treatment for the merged feed of curated  */
+/*  social posts + scored quotes. Card layout mirrors the Record (votes) tab  */
+/*  so both sub-views feel like the same surface.                             */
+/* ────────────────────────────────────────────────────────────────────────── */
+
+.viw-statements-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--tk-space-3);
+}
+
+.viw-statement-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tk-space-2);
+  padding: var(--tk-space-3) var(--tk-space-4);
+  background: var(--tk-bg);
+  border: var(--tk-border-w) solid var(--tk-border-soft);
+  border-left-width: 4px;
+  border-left-color: var(--tk-valence-unstated);
+  position: relative;
+}
+
+/* Direction-colored left accent — matches the Record tab's vote-row styling.
+   ScoreAdjustmentChip emits viw-score-adj-pos / viw-score-adj-neg; absent
+   when contribution is zero (so unstated grey is the natural default). */
+.viw-statement-item:has(.viw-score-adj-pos) { border-left-color: var(--tk-valence-voted-pro); }
+.viw-statement-item:has(.viw-score-adj-neg) { border-left-color: var(--tk-valence-voted-anti); }
+
+/* Score-adjustment chip used by both this list and the bill comments view. */
+.viw-score-adj {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  font-family: var(--tk-font-mono);
+  font-weight: var(--tk-fw-bold);
+  font-size: var(--tk-fs-xs);
+  letter-spacing: 0.02em;
+  color: #fff;
+  border: 1px solid transparent;
+}
+.viw-score-adj-pos { background: var(--tk-valence-voted-pro); border-color: var(--tk-valence-sponsor-pro); }
+.viw-score-adj-neg { background: var(--tk-valence-voted-anti); border-color: var(--tk-valence-sponsor-anti); }
+
+/* Header row: source badge + date + score chip */
+.viw-statement-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--tk-space-2);
+  font-size: var(--tk-fs-xs);
+}
+
+.viw-statement-source {
+  display: inline-block;
+  padding: 2px 8px;
+  font-weight: var(--tk-fw-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--tk-fs-xs);
+  background: var(--tk-surface);
+  color: var(--tk-fg);
+  border: 1px solid var(--tk-border-soft);
+}
+
+/* Per-platform color accents (subtle — the brand colors are recognizable
+   without overwhelming the card). Keep monochrome for unknown sources. */
+.viw-statement-source.viw-statement-x,
+.viw-statement-source.viw-statement-twitter {
+  background: #000; color: #fff; border-color: #000;
+}
+.viw-statement-source.viw-statement-bluesky {
+  background: #1185fe; color: #fff; border-color: #1185fe;
+}
+.viw-statement-source.viw-statement-youtube {
+  background: #ff0000; color: #fff; border-color: #ff0000;
+}
+.viw-statement-source.viw-statement-mastodon {
+  background: #6364ff; color: #fff; border-color: #6364ff;
+}
+
+/* Quote-only source kinds (text/video/audio/etc.) keep the monochrome look */
+.viw-statement-source.viw-statement-video,
+.viw-statement-source.viw-statement-audio,
+.viw-statement-source.viw-statement-text,
+.viw-statement-source.viw-statement-image,
+.viw-statement-source.viw-statement-news,
+.viw-statement-source.viw-statement-press,
+.viw-statement-source.viw-statement-speech,
+.viw-statement-source.viw-statement-interview,
+.viw-statement-source.viw-statement-letter,
+.viw-statement-source.viw-statement-social {
+  background: var(--tk-fg);
+  color: var(--tk-bg);
+  border-color: var(--tk-fg);
+}
+
+.viw-statement-date {
+  color: var(--tk-muted);
+  font-family: var(--tk-font-mono);
+  font-size: var(--tk-fs-xs);
+}
+
+/* Body text — quote vs post differ visually so the user can tell at a glance */
+.viw-statement-body {
+  margin: 0;
+  font-size: var(--tk-fs-base);
+  line-height: 1.5;
+  color: var(--tk-fg);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+blockquote.viw-statement-body {
+  border-left: 3px solid var(--tk-border-soft);
+  padding-left: var(--tk-space-3);
+  font-style: italic;
+}
+
+/* Researcher commentary — highlighted as editorial, not part of the quote */
+.viw-statement-curator-comment {
+  font-size: var(--tk-fs-sm);
+  color: var(--tk-fg);
+  background: var(--tk-surface);
+  border-left: 3px solid var(--tk-accent);
+  padding: var(--tk-space-2) var(--tk-space-3);
+  line-height: 1.4;
+}
+
+.viw-statement-curator-label {
+  font-weight: var(--tk-fw-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: var(--tk-fs-xs);
+  color: var(--tk-muted);
+  margin-right: 4px;
+}
+
+/* Footer link — mirrors how View original is rendered on the admin curation
+   cards. Subtle but discoverable. */
+.viw-statement-source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  font-size: var(--tk-fs-xs);
+  color: var(--tk-fg);
+  text-decoration: underline;
+  font-weight: var(--tk-fw-medium);
+  text-underline-offset: 2px;
+}
+
+.viw-statement-source-link:hover {
+  color: var(--tk-accent-fg);
+  background: var(--tk-accent);
+  text-decoration: none;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+
+.viw-statements-empty {
+  color: var(--tk-muted);
+  font-style: italic;
+  padding: var(--tk-space-4);
+  text-align: center;
+  border: 1px dashed var(--tk-border-soft);
+  background: var(--tk-surface);
 }
