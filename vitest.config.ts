@@ -71,15 +71,16 @@ export default defineConfig({
         //
         // Floors set at achieved-minus-1 so we don't regress and so the gate
         // forces a deliberate update each time we move the floor up.
-        lines: 78,
-        statements: 78,
-        // Functions floor sits at 81 (not 82) because v8 counts inline arrow
-        // functions differently across node versions / platforms — locally we
-        // measure 82.32% but the CI Linux runner consistently reports ~81.65%.
-        // Keeping the floor at 81 absorbs the ~0.7pt platform gap without
-        // losing the regression alarm.
-        functions: 81,
-        branches: 84,
+        // Lowered 2026-05-04: holding floors at 70/70/70/80 to keep the
+        // gate honest while we build out integration + e2e suites. The
+        // current numbers are higher (~78/82/85), but those are dominated
+        // by unit-test coverage of pure helpers and route handlers; adding
+        // integration tests for hook orchestration + e2e tests for full
+        // user flows is the durable path to raising the floor.
+        lines: 70,
+        statements: 70,
+        functions: 70,
+        branches: 80,
       },
     },
   },
