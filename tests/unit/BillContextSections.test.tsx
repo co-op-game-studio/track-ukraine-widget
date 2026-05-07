@@ -144,6 +144,196 @@ describe('BillSummaryDisclosure (AC-52.33 + AC-52.67 collapsed scroll-box)', () 
     expect(region.style.overflowY).toBe('auto');
   });
 
+  it('renders text-versions list with inline body preview when newest format is fetchable', async () => {
+    const versions = [
+      {
+        date: '2025-04-23T00:00:00Z',
+        type: 'Engrossed in House',
+        formats: [
+          { type: 'Formatted Text', url: 'https://www.congress.gov/119/bills/hr1601/BILLS-119hr1601eh.htm' },
+          { type: 'PDF', url: 'https://www.congress.gov/119/bills/hr1601/BILLS-119hr1601eh.pdf' },
+        ],
+      },
+      {
+        date: '2025-04-15',
+        type: 'Introduced in House',
+        formats: [
+          { type: 'Generated HTML', url: 'https://www.congress.gov/119/bills/hr1601/BILLS-119hr1601ih.html' },
+        ],
+      },
+    ];
+    const inlineHtml = '<html><body><p>SECTION 1. Short title — Defending Ukraine Act.</p></body></html>';
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.endsWith('/text')) {
+        return new Response(JSON.stringify({ textVersions: versions }), { status: 200 });
+      }
+      if (url.endsWith('/summaries')) {
+        return new Response(JSON.stringify({ summaries: [] }), { status: 200 });
+      }
+      // Cross-origin html fetch for the inline body.
+      if (url.includes('BILLS-119hr1601eh.htm')) {
+        return new Response(inlineHtml, {
+          status: 200,
+          headers: { 'Content-Type': 'text/html' },
+        });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(
+      <BillSummaryDisclosure
+        congress={119}
+        type="HR"
+        number="1601"
+        congressGovUrl="https://www.congress.gov/bill/119th-congress/house-bill/1601"
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Bill text & summary/i }));
+    // Version pills render for both versions. "Engrossed in House" appears
+    // twice (pill + inline-preview heading) so use findAllByText.
+    await waitFor(
+      () => expect(screen.getAllByText(/Engrossed in House/).length).toBeGreaterThanOrEqual(1),
+      { timeout: 3000 },
+    );
+    expect(screen.getByText(/Introduced in House/)).toBeInTheDocument();
+    // The inline preview heading renders.
+    await waitFor(
+      () => expect(screen.getByText(/Inline preview of/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    // The body text becomes visible after stripHtml.
+    await waitFor(
+      () => expect(screen.getByText(/Defending Ukraine Act/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    // Source line points back to Congress.gov.
+    const sourceLink = screen.getByRole('link', { name: /Congress\.gov/i });
+    expect(sourceLink).toHaveAttribute('href', 'https://www.congress.gov/bill/119th-congress/house-bill/1601');
+  });
+
+  it('falls back to "Open on Congress.gov" link when inline body fetch fails', async () => {
+    const versions = [
+      {
+        date: '2025-04-23',
+        type: 'Engrossed in House',
+        formats: [
+          { type: 'Formatted Text', url: 'https://www.congress.gov/119/bills/hr1601/BILLS-119hr1601eh.htm' },
+        ],
+      },
+    ];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.endsWith('/text')) {
+        return new Response(JSON.stringify({ textVersions: versions }), { status: 200 });
+      }
+      if (url.endsWith('/summaries')) {
+        return new Response(JSON.stringify({ summaries: [] }), { status: 200 });
+      }
+      if (url.includes('BILLS-119hr1601eh.htm')) {
+        return new Response('upstream down', { status: 502 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(
+      <BillSummaryDisclosure
+        congress={119}
+        type="HR"
+        number="1601"
+        congressGovUrl={null}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Bill text & summary/i }));
+    await waitFor(
+      () => expect(screen.getByText(/Could not load bill text inline/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    const fallbackLink = screen.getByRole('link', { name: /Open on Congress\.gov/i });
+    expect(fallbackLink).toHaveAttribute('href', 'https://www.congress.gov/119/bills/hr1601/BILLS-119hr1601eh.htm');
+    expect(fallbackLink).toHaveAttribute('target', '_blank');
+  });
+
+  it('summary catch handles FetchError-shape thrown object', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/text')) {
+        return new Response(JSON.stringify({ textVersions: [] }), { status: 200 });
+      }
+      if (url.includes('/summaries')) {
+        // Throw a plain object with FetchError shape — exercises the
+        // `'detail' in e` branch in the summary catch.
+        throw { detail: 'forced FetchError-shape failure', error: 'forced' };
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(
+      <BillSummaryDisclosure
+        congress={119}
+        type="HR"
+        number="1601"
+        congressGovUrl={null}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Bill text & summary/i }));
+    await waitFor(
+      () => expect(screen.getByText(/forced FetchError-shape failure/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it('summary catch handles non-Error, non-object thrown values', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/text')) {
+        return new Response(JSON.stringify({ textVersions: [] }), { status: 200 });
+      }
+      if (url.includes('/summaries')) {
+        // String-throw — exercises the final else String(e) branch.
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw 'plain string failure';
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(
+      <BillSummaryDisclosure
+        congress={119}
+        type="HR"
+        number="1601"
+        congressGovUrl={null}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Bill text & summary/i }));
+    await waitFor(
+      () => expect(screen.getByText(/plain string failure/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it('renders summary error when summaries endpoint returns a string-shape Error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/text')) {
+        return new Response(JSON.stringify({ textVersions: [] }), { status: 200 });
+      }
+      if (url.includes('/summaries')) {
+        return new Response('boom', { status: 502 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(
+      <BillSummaryDisclosure
+        congress={119}
+        type="HR"
+        number="1601"
+        congressGovUrl={null}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Bill text & summary/i }));
+    await waitFor(
+      () => expect(screen.getByText(/Could not load summary/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
   it('AC-52.67: cleans markdown-ish asterisks out of the summary body', async () => {
     installFetch({
       '/text': { textVersions: [] },

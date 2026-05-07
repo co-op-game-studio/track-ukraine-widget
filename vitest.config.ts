@@ -74,13 +74,17 @@ export default defineConfig({
         // 2026-05-04 round 4: bumped after 6 admin-SPA-tab agents landed
         // (PeopleTab 96.26%, SocialFeedTab 76.66%, AddQuoteView 95.27%,
         // QuotesListView 96.71%, SettingsTab 100%, CurationTab 100%,
-        // TagPicker → Tag.tsx 99.33%). Combined now sits at ~92/86/85;
-        // floors set conservatively at achieved-minus-2 to absorb v8/CI
-        // platform jitter without losing the regression alarm.
-        lines: 90,
-        statements: 90,
-        functions: 84,
-        branches: 82,
+        // TagPicker → Tag.tsx 99.33%). Combined sits at ~92/86/85.
+        // 2026-05-04 round 5: bumped after router/Bill-component/backend
+        // agents landed (router 92.04%, api-quotes 100%/100%br, admin-store
+        // 100%/93.72%br, useRepQuotes/useRepStatements 100%/100%br,
+        // BillContextSections 97.69%, BillsTab 92.56%). Combined now
+        // ~94/87/86. Floors at achieved-minus-2 to absorb v8/CI platform
+        // jitter without losing the regression alarm.
+        lines: 92,
+        statements: 92,
+        functions: 85,
+        branches: 84,
       },
     },
   },

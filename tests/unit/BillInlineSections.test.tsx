@@ -118,11 +118,17 @@ describe('BillVotesSection — inline editor (AC-52.23)', () => {
 
     // Edit weight, no change-notes yet — Save is enabled (AC-52.68) but won't PATCH.
     fireEvent.change(weightInput, { target: { value: '1.5' } });
+    // Wait for the controlled input to reflect the change. In the full
+    // suite this state-update can race with parallel test files holding
+    // event-loop time; without this wait the subsequent Save click can
+    // PATCH the original 0.9 value.
+    await waitFor(() => expect((weightInput as HTMLInputElement).value).toBe('1.5'));
     expect(saveBtn).toBeEnabled();
 
     // Fill change-notes → click Save → PATCH fires with _reason.
     const reasonInput = within(row).getByLabelText(/^Change notes$/i);
     fireEvent.change(reasonInput, { target: { value: 'bumping weight per roll-call review' } });
+    await waitFor(() => expect((reasonInput as HTMLInputElement).value).toBe('bumping weight per roll-call review'));
     fireEvent.click(saveBtn);
 
     await waitFor(() => {
@@ -131,7 +137,7 @@ describe('BillVotesSection — inline editor (AC-52.23)', () => {
       const body = patch!.body as Record<string, unknown>;
       expect(body['weight']).toBe(1.5);
       expect(body['_reason']).toBe('bumping weight per roll-call review');
-    });
+    }, { timeout: 3000 });
   });
 
   /* ------------------------------------------------------------------------ */
@@ -483,6 +489,136 @@ describe('BillVotesSection — inline vote context (AC-52.26)', () => {
     await waitFor(() =>
       expect(within(row).getByText(/Could not load vote context/i)).toBeInTheDocument(),
     );
+  });
+
+  // AC-52.64 — Senate inline vote context fetches the canonical XML through
+  // /api/senate/legislative/LIS/... and parses the totals out of <count>.
+  it('AC-52.64: Senate row fetches XML through /api/senate proxy and renders parsed totals', async () => {
+    const senateVote = {
+      ...sampleVote,
+      id: 'sv1',
+      chamber: 'Senate' as const,
+      congress: 118,
+      session: 2,
+      roll_call: 17,
+    };
+    const xml = `<?xml version="1.0"?>
+<roll_call_vote>
+  <vote_question_text>On Passage of the Bill</vote_question_text>
+  <vote_result_text>Agreed to</vote_result_text>
+  <count>
+    <yeas>79</yeas>
+    <nays>18</nays>
+    <present>0</present>
+    <absent>3</absent>
+  </count>
+</roll_call_vote>`;
+    let senateFetchUrl: string | null = null;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/votes')) {
+        return new Response(JSON.stringify({ items: [senateVote] }), { status: 200 });
+      }
+      if (url.includes('/api/admin/comments')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      if (url.includes('/api/senate/legislative/LIS/roll_call_votes/')) {
+        senateFetchUrl = url;
+        return new Response(xml, { status: 200, headers: { 'Content-Type': 'text/xml' } });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillVotesSection billId="118-HR-9999" billDirection="pro-ukraine" />);
+    const weight = await screen.findByDisplayValue('0.9');
+    const row = weight.closest('form, [data-row="vote"]') as HTMLElement;
+    await waitFor(
+      () => expect(within(row).getByText(/On Passage of the Bill/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(within(row).getByText(/Agreed to/)).toBeInTheDocument();
+    expect(within(row).getByText(/Y 79/)).toBeInTheDocument();
+    expect(within(row).getByText(/N 18/)).toBeInTheDocument();
+    // The roll_call padding (5 digits) is part of the canonical Senate XML URL.
+    expect(senateFetchUrl).toMatch(/vote_118_2_00017\.xml$/);
+  });
+
+  // AC-52.63 — VoteRelatedReferences renders matched action + Congressional Record link
+  it('AC-52.63: vote row inline references render matched action_text + CR link', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/votes')) {
+        return new Response(JSON.stringify({ items: [sampleVote] }), { status: 200 });
+      }
+      if (url.includes('/api/admin/comments')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      if (url.includes('/api/admin/actions')) {
+        // Action matches the sample vote's chamber=House + roll_call=65.
+        return new Response(JSON.stringify({
+          items: [{
+            id: 'a-match',
+            action_text: 'On agreeing to the conference report',
+            congressional_record_url: 'https://www.congress.gov/congressional-record/volume-168/issue-42/house-section/article/H2593-1',
+            congressional_record_citation: 'H2593',
+            recorded_chamber: 'House',
+            recorded_roll_call: 65,
+          }],
+        }), { status: 200 });
+      }
+      if (url.includes('/api/congress/v3/house-vote/')) {
+        return new Response(JSON.stringify({ houseRollCallVote: { voteQuestion: 'Q', result: 'Passed', votePartyTotal: [] } }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillVotesSection billId="117-HR-2471" billDirection="pro-ukraine" />);
+    const weight = await screen.findByDisplayValue('0.9');
+    const row = weight.closest('form, [data-row="vote"]') as HTMLElement;
+    await waitFor(
+      () => expect(within(row).getByText(/On agreeing to the conference report/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    // Congressional Record link includes the citation in parens.
+    const crLinks = within(row).getAllByRole('link', { name: /↗ Congressional Record/i });
+    expect(crLinks.length).toBeGreaterThan(0);
+    expect(crLinks[0]!.textContent).toMatch(/H2593/);
+  });
+
+  // AC-52.64 — on Senate XML fetch failure, show the canonical senate.gov
+  // human-readable URL as a fallback "open source ↗" link.
+  it('AC-52.64: Senate row on fetch failure renders inline error + open-source fallback link', async () => {
+    const senateVote = {
+      ...sampleVote,
+      id: 'sv2',
+      chamber: 'Senate' as const,
+      congress: 118,
+      session: 2,
+      roll_call: 17,
+      url: null,
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/votes')) {
+        return new Response(JSON.stringify({ items: [senateVote] }), { status: 200 });
+      }
+      if (url.includes('/api/admin/comments')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      if (url.includes('/api/senate/legislative/LIS/roll_call_votes/')) {
+        return new Response('upstream down', { status: 502 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillVotesSection billId="118-HR-9999" billDirection="pro-ukraine" />);
+    const weight = await screen.findByDisplayValue('0.9');
+    const row = weight.closest('form, [data-row="vote"]') as HTMLElement;
+    await waitFor(
+      () => expect(within(row).getByText(/Could not load vote context/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    // The fallback link points at senate.gov human URL (computed from
+    // congress/session/rollCall when no row-level fallback URL is set).
+    const openSource = within(row).getByRole('link', { name: /open source ↗/i });
+    expect(openSource.getAttribute('href')).toMatch(/senate\.gov/);
   });
 });
 

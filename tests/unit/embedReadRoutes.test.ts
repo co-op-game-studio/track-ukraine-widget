@@ -234,6 +234,159 @@ describe('handleQuotes (FR-51 AC-51.6, FR-53 AC-53.5)', () => {
       'quotes_not_found',
     );
   });
+
+  it('rejects malformed bioguide ids (400 invalid_bioguide_id)', async () => {
+    // Lowercase prefix violates `/^[A-Z]\d{6}$/`. Covers lines 24-28.
+    const result = await handleQuotes(
+      'd000563',
+      makeRequest(),
+      makeEnv(new FakeKv()),
+      ORIGIN,
+    );
+    expect(result.response.status).toBe(400);
+    const body = (await result.response.json()) as { error: string };
+    expect(body.error).toBe('invalid_bioguide_id');
+  });
+
+  it('rejects bioguide ids with too few digits (400 invalid_bioguide_id)', async () => {
+    const result = await handleQuotes(
+      'D00056',
+      makeRequest(),
+      makeEnv(new FakeKv()),
+      ORIGIN,
+    );
+    expect(result.response.status).toBe(400);
+  });
+
+  it('HEAD request returns headers without body', async () => {
+    const kv = new FakeKv();
+    await kv.put('quote:v1:D000563', JSON.stringify({ quotes: [] }));
+    const result = await handleQuotes(
+      'D000563',
+      makeRequest('HEAD'),
+      makeEnv(kv),
+      ORIGIN,
+    );
+    expect(result.response.status).toBe(200);
+    expect(await result.response.text()).toBe('');
+  });
+
+  it('AC-52.51 — read-through D1 when KV misses but D1 has rows', async () => {
+    // FakeD1 returns one quote row from a SELECT against `quotes`.
+    const fakeD1 = {
+      prepare(query: string) {
+        const stmt = {
+          bindings: [] as unknown[],
+          bind(...vs: unknown[]) {
+            stmt.bindings = [...stmt.bindings, ...vs];
+            return stmt;
+          },
+          async first<T = unknown>(): Promise<T | null> {
+            return null;
+          },
+          async run() {
+            return { success: true } as const;
+          },
+          async all<T = unknown>(): Promise<{
+            success: boolean;
+            results?: T[];
+          }> {
+            if (/SELECT \* FROM quotes WHERE bioguide_id/i.test(query)) {
+              return {
+                success: true,
+                results: [
+                  {
+                    id: 'q1',
+                    bioguide_id: 'D000563',
+                    media_kind: 'video',
+                    source_url: 'https://www.c-span.org/video/?123',
+                    source_label: null,
+                    quoted_at: null,
+                    body_text: 'I support Ukraine.',
+                    weight: 0.25,
+                    direction: 1,
+                    comment: null,
+                    links_json: null,
+                    author_email: 'alice@example.com',
+                    created_at: '2026-05-02T00:00:00Z',
+                    updated_at: '2026-05-02T00:00:00Z',
+                  },
+                ] as unknown as T[],
+              };
+            }
+            return { success: true, results: [] };
+          },
+        };
+        return stmt;
+      },
+      async batch() {
+        return [];
+      },
+      async exec() {
+        return { count: 0, duration: 0 };
+      },
+    };
+    const kv = new FakeKv();
+    const env = {
+      KV_VOTER_INFO: kv,
+      D1_VOTER_INFO: fakeD1,
+      ENV_NAME: 'test',
+    } as unknown as ProxyEnv;
+    const result = await handleQuotes('D000563', makeRequest(), env, ORIGIN);
+    expect(result.response.status).toBe(200);
+    const body = (await result.response.json()) as {
+      bioguideId: string;
+      quotes: Array<{ id: string; bodyText: string }>;
+    };
+    expect(body.bioguideId).toBe('D000563');
+    expect(body.quotes[0]!.bodyText).toBe('I support Ukraine.');
+    // KV should now be populated by the read-through write-back.
+    expect(kv.store.has('quote:v1:D000563')).toBe(true);
+  });
+
+  it('AC-52.48 — D1 cold path returns 404 with FR-37 envelope', async () => {
+    const fakeD1 = {
+      prepare() {
+        const stmt = {
+          bind() {
+            return stmt;
+          },
+          async first() {
+            return null;
+          },
+          async run() {
+            return { success: true };
+          },
+          async all() {
+            return { success: true, results: [] };
+          },
+        };
+        return stmt;
+      },
+      async batch() {
+        return [];
+      },
+      async exec() {
+        return { count: 0, duration: 0 };
+      },
+    };
+    const env = {
+      KV_VOTER_INFO: new FakeKv(),
+      D1_VOTER_INFO: fakeD1,
+      ENV_NAME: 'test',
+    } as unknown as ProxyEnv;
+    const result = await handleQuotes(
+      'D000563',
+      makeRequest(),
+      env,
+      ORIGIN,
+      'tr_test',
+    );
+    expect(result.response.status).toBe(404);
+    const body = (await result.response.json()) as { error: string; bioguideId: string };
+    expect(body.error).toBe('quotes_not_found');
+    expect(body.bioguideId).toBe('D000563');
+  });
 });
 
 /* -------------------------------------------------------------------------- */

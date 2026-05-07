@@ -190,4 +190,109 @@ describe('BillActionsSection (AC-52.59)', () => {
     fireEvent.click(screen.getByRole('button', { name: /Action history/i }));
     expect(screen.getByText(/no actions recorded yet/i)).toBeInTheDocument();
   });
+
+  it('renders Congressional Record link without citation when none provided', async () => {
+    const actionNoCitation: BillActionRow = {
+      ...ACTIONS[1]!,
+      id: 'a3',
+      congressional_record_citation: null,
+    };
+    installFetch({ actions: [actionNoCitation] });
+    render(<BillActionsSection billId="119-HR-1601" />);
+    await waitFor(() => screen.getByRole('button', { name: /Action history/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Action history/i }));
+    // Link still renders; "↗ Congressional Record" with no parens suffix.
+    const crLink = screen.getByRole('link', { name: /↗ Congressional Record/i });
+    expect(crLink.textContent?.trim()).toBe('↗ Congressional Record');
+    expect(crLink.textContent).not.toMatch(/\(/);
+  });
+});
+
+describe('BillActionsSection — error + null-field branches', () => {
+  it('shows error banner when /api/admin/actions fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/actions')) {
+        return new Response(JSON.stringify({ error: 'db_down', detail: 'D1 timeout' }), { status: 500 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillActionsSection billId="119-HR-1601" />);
+    // Header still renders even on error.
+    await waitFor(
+      () => screen.getByRole('button', { name: /Action history/i }),
+      { timeout: 3000 },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Action history/i }));
+    await waitFor(
+      () => expect(screen.getByText(/Error loading actions:/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it('handles null action_date / action_text with em-dash + "(no text)" placeholders', async () => {
+    const minimalAction: BillActionRow = {
+      ...ACTIONS[0]!,
+      id: 'a-min',
+      action_date: null,
+      action_text: null,
+      source_system: null,
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/actions')) {
+        return new Response(JSON.stringify({ items: [minimalAction] }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillActionsSection billId="119-HR-1601" />);
+    await waitFor(
+      () => screen.getByRole('button', { name: /Action history \(1\)/i }),
+      { timeout: 3000 },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Action history/i }));
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.getByText(/\(no text\)/)).toBeInTheDocument();
+  });
+});
+
+describe('BillSponsorshipSection — error path', () => {
+  it('captures error from /api/admin/cosponsors and renders banner when expanded', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/cosponsors')) {
+        return new Response(JSON.stringify({ error: 'unauthorized', detail: 'CF Access required' }), { status: 401 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillSponsorshipSection billId="119-HR-1601" bill={SAMPLE_BILL} />);
+    await waitFor(
+      () => screen.getByRole('button', { name: /Sponsorship/i }),
+      { timeout: 3000 },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Sponsorship/i }));
+    await waitFor(
+      () => expect(screen.getByText(/Error loading cosponsors/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+});
+
+describe('BillSponsorshipSection — expanded empty state', () => {
+  it('shows "(no cosponsors recorded)" when expanded with empty cosponsor list', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : (input as Request).url;
+      if (url.includes('/api/admin/cosponsors')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      return new Response('not found', { status: 404 });
+    });
+    render(<BillSponsorshipSection billId="119-HR-1601" bill={SAMPLE_BILL} />);
+    await waitFor(
+      () => screen.getByRole('button', { name: /Sponsorship \(0 cosponsors, 0 original\)/i }),
+      { timeout: 3000 },
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Sponsorship/i }));
+    expect(screen.getByText(/no cosponsors recorded/i)).toBeInTheDocument();
+  });
 });
