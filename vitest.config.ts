@@ -71,16 +71,16 @@ export default defineConfig({
         //
         // Floors set at achieved-minus-1 so we don't regress and so the gate
         // forces a deliberate update each time we move the floor up.
-        // Lowered 2026-05-04: holding floors at 70/70/70/80 to keep the
-        // gate honest while we build out integration + e2e suites. The
-        // current numbers are higher (~78/82/85), but those are dominated
-        // by unit-test coverage of pure helpers and route handlers; adding
-        // integration tests for hook orchestration + e2e tests for full
-        // user flows is the durable path to raising the floor.
-        lines: 70,
-        statements: 70,
-        functions: 70,
-        branches: 80,
+        // 2026-05-04 round 4: bumped after 6 admin-SPA-tab agents landed
+        // (PeopleTab 96.26%, SocialFeedTab 76.66%, AddQuoteView 95.27%,
+        // QuotesListView 96.71%, SettingsTab 100%, CurationTab 100%,
+        // TagPicker → Tag.tsx 99.33%). Combined now sits at ~92/86/85;
+        // floors set conservatively at achieved-minus-2 to absorb v8/CI
+        // platform jitter without losing the regression alarm.
+        lines: 90,
+        statements: 90,
+        functions: 84,
+        branches: 82,
       },
     },
   },
