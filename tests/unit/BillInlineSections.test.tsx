@@ -165,8 +165,11 @@ describe('BillVotesSection — inline editor (AC-52.23)', () => {
     fireEvent.change(weight, { target: { value: '2.5' } });
     fireEvent.click(within(row).getByRole('button', { name: /^Save$/i }));
 
-    // Give any microtasks a chance to flush.
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait past the 800ms flash-reset window (source uses window.setTimeout
+    // on the empty-notes early-return; we must let it fire BEFORE the test
+    // ends or the timer survives jsdom teardown and crashes the worker
+    // with `ReferenceError: window is not defined`).
+    await new Promise((r) => setTimeout(r, 850));
     const patch = calls.find((c) => c.method === 'PATCH' && c.url.includes('/votes/'));
     expect(patch).toBeUndefined();
   });
@@ -184,6 +187,9 @@ describe('BillVotesSection — inline editor (AC-52.23)', () => {
     fireEvent.click(within(row).getByRole('button', { name: /^Save$/i }));
     // Synchronous state update from onSubmit early-return.
     expect(reason.getAttribute('aria-invalid')).toBe('true');
+    // Same as above — wait past the 800ms flash-reset window so the
+    // window.setTimeout fires before jsdom tears down.
+    await new Promise((r) => setTimeout(r, 850));
   });
 });
 
@@ -204,6 +210,10 @@ describe('BillCommentsSection — Save flash (AC-52.68)', () => {
 
     fireEvent.click(saveBtn);
     expect(reason.getAttribute('aria-invalid')).toBe('true');
+    // Wait past the 800ms flash-reset window so the source-side
+    // window.setTimeout fires before jsdom tears down (otherwise
+    // `ReferenceError: window is not defined` on the worker).
+    await new Promise((r) => setTimeout(r, 850));
   });
 
   it('AC-52.68(ii): comment Save with empty change-notes does NOT fire PATCH', async () => {
@@ -216,7 +226,8 @@ describe('BillCommentsSection — Save flash (AC-52.68)', () => {
     const row = body.closest('form, [data-row="comment"]') as HTMLElement;
     fireEvent.click(within(row).getByRole('button', { name: /^Save$/i }));
 
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait past the 800ms flash-reset window (see comment above).
+    await new Promise((r) => setTimeout(r, 850));
     const patch = calls.find((c) => c.method === 'PATCH' && c.url.includes('/comments/'));
     expect(patch).toBeUndefined();
   });
