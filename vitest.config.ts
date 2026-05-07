@@ -71,20 +71,19 @@ export default defineConfig({
         //
         // Floors set at achieved-minus-1 so we don't regress and so the gate
         // forces a deliberate update each time we move the floor up.
-        // 2026-05-04 round 4: bumped after 6 admin-SPA-tab agents landed
-        // (PeopleTab 96.26%, SocialFeedTab 76.66%, AddQuoteView 95.27%,
-        // QuotesListView 96.71%, SettingsTab 100%, CurationTab 100%,
-        // TagPicker → Tag.tsx 99.33%). Combined sits at ~92/86/85.
-        // 2026-05-04 round 5: bumped after router/Bill-component/backend
-        // agents landed (router 92.04%, api-quotes 100%/100%br, admin-store
-        // 100%/93.72%br, useRepQuotes/useRepStatements 100%/100%br,
-        // BillContextSections 97.69%, BillsTab 92.56%). Combined now
-        // ~94/87/86. Floors at achieved-minus-2 to absorb v8/CI platform
-        // jitter without losing the regression alarm.
-        lines: 92,
-        statements: 92,
+        // 2026-05-04 LOCKED at 90/90/85/85 by stakeholder request after the
+        // 6-round coverage push. Achieved was ~96/95.83/90.42/86.9 — these
+        // floors give a ~1pt branches buffer and several pts of headroom on
+        // the rest, so v8/CI platform jitter (typically <1pt) doesn't fail
+        // CI on a no-op rerun. Raising these floors further requires
+        // writing tests for genuinely-defensive fallback code (e.g. error
+        // paths that need contrived fetcher returns) — past the natural
+        // unit-test ceiling. Real next-step is integration + e2e tests for
+        // v4 admin flows, tracked in MEMORY.md.
+        lines: 90,
+        statements: 90,
         functions: 85,
-        branches: 84,
+        branches: 85,
       },
     },
   },

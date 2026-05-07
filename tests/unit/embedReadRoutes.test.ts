@@ -439,4 +439,36 @@ describe('handleAuditPublic (FR-58 AC-58.2 / AC-58.4)', () => {
     expect(body.schemaVersion).toBe(1);
     expect(body.items).toEqual([]);
   });
+
+  it('HEAD on a populated feed returns headers without body', async () => {
+    // Covers the `request.method === 'HEAD' ? null : record` branch on the
+    // hit path. Body must be empty; status + cache-control still carry.
+    const kv = new FakeKv();
+    await kv.put(
+      'audit-feed:v1:public',
+      JSON.stringify({ generatedAt: '2026-05-02T00:00:00Z', schemaVersion: 1, items: [] }),
+    );
+    const result = await handleAuditPublic(
+      makeRequest('HEAD'),
+      makeEnv(kv),
+      ORIGIN,
+    );
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get('Cache-Control')).toMatch(/max-age=60/);
+    expect(await result.response.text()).toBe('');
+  });
+
+  it('HEAD on the empty-list fallback returns headers without body', async () => {
+    // Covers the same HEAD ternary on the cold-deploy / KV-miss path
+    // (`!record` branch). Body must be empty even though the handler would
+    // normally synthesise an empty-list JSON envelope.
+    const result = await handleAuditPublic(
+      makeRequest('HEAD'),
+      makeEnv(new FakeKv()),
+      ORIGIN,
+    );
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get('Content-Type')).toMatch(/application\/json/);
+    expect(await result.response.text()).toBe('');
+  });
 });

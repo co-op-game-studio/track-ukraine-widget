@@ -843,6 +843,510 @@ describe('ResearchView — empty state', () => {
 });
 
 /* ========================================================================== */
+/* ResearchView — picker → fetch feed → curate flow                           */
+/* ========================================================================== */
+
+/**
+ * Drives the MocPicker typeahead end-to-end so the ResearchView's
+ * `selectedMoc` branch is exercised: handle list, platform toggles,
+ * fetchFeed POST, and per-card curatePost handoff.
+ *
+ * The MocPicker uses a real 200ms setTimeout debounce, so these tests
+ * use real timers and waitFor with a longer timeout to span the debounce.
+ */
+
+interface NameSearchEntry {
+  bioguideId: string;
+  displayName: string;
+  first: string;
+  last: string;
+  state: string;
+  chamber: 'House' | 'Senate';
+  district: number | null;
+  party: string;
+  photoUrl: string | null;
+}
+
+function makeNameSearchEntry(overrides: Partial<NameSearchEntry> = {}): NameSearchEntry {
+  return {
+    bioguideId: overrides.bioguideId ?? 'A000001',
+    displayName: overrides.displayName ?? 'Alice Adams',
+    first: overrides.first ?? 'Alice',
+    last: overrides.last ?? 'Adams',
+    state: overrides.state ?? 'CA',
+    chamber: overrides.chamber ?? 'House',
+    district: overrides.district ?? 12,
+    party: overrides.party ?? 'D',
+    photoUrl: overrides.photoUrl ?? null,
+  };
+}
+
+/**
+ * Drive the typeahead: type the query, wait for the debounced fetch
+ * + dropdown render, then click the result. Returns once `selectedMoc`
+ * is set in ResearchView (which we detect by waiting for the handles
+ * effect to settle).
+ */
+async function selectPersonViaPicker(displayName: string): Promise<void> {
+  const input = screen.getByPlaceholderText(/Select person to research/i);
+  fireEvent.change(input, { target: { value: 'al' } });
+  // Wait past the 200ms debounce + fetch resolution + dropdown render.
+  await waitFor(() => expect(screen.getByText(displayName)).toBeInTheDocument(), { timeout: 5000 });
+  fireEvent.click(screen.getByText(displayName));
+}
+
+describe('ResearchView — typeahead-driven flow', () => {
+  it('selecting a person fetches their handles and renders linked-platform toggles', async () => {
+    const stub = installFetch({
+      match: (url) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({
+            platforms: [makePlatform('bluesky', true, true), makePlatform('mastodon', true, true)],
+          });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [
+              { platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' },
+              { platform: 'mastodon', handle: 'alice@m.example', bioguide_id: 'A000001' },
+              // Different person — should not surface.
+              { platform: 'bluesky', handle: 'other.bsky.social', bioguide_id: 'B999999' },
+            ],
+          });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    // Both linked platform toggles render (filtered to availableSet).
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /^Bluesky$/ })).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    expect(screen.getByRole('button', { name: /^Mastodon$/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Fetch feed/i })).toBeInTheDocument();
+    // Handles call was issued.
+    expect(stub.calls.some((c) => c.url.includes('/api/admin/ingest/handles'))).toBe(true);
+  });
+
+  it('shows the no-handle message when the selected person has no linked handles', async () => {
+    installFetch({
+      match: (url) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry({ displayName: 'Alice Adams' })] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({ items: [] });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    await waitFor(
+      () => expect(screen.getByText(/No social handles linked/i)).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // No fetch button when no platforms are linked.
+    expect(screen.queryByRole('button', { name: /Fetch feed/i })).not.toBeInTheDocument();
+  });
+
+  it('toggling a platform changes the activePlatforms set (off then on)', async () => {
+    installFetch({
+      match: (url) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({
+            platforms: [makePlatform('bluesky', true, true), makePlatform('mastodon', true, true)],
+          });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [
+              { platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' },
+              { platform: 'mastodon', handle: 'alice@m.example', bioguide_id: 'A000001' },
+            ],
+          });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    const blueskyBtn = await waitFor(
+      () => screen.getByRole('button', { name: /^Bluesky$/ }),
+      { timeout: 5000 },
+    );
+    // Toggle off then back on — drives both branches of togglePlatform.
+    fireEvent.click(blueskyBtn);
+    fireEvent.click(blueskyBtn);
+    // Fetch feed button is still enabled (other platforms still active).
+    expect((screen.getByRole('button', { name: /Fetch feed/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('clicking Fetch feed POSTs to /api/admin/ingest/search and renders results', async () => {
+    const stub = installFetch({
+      match: (url, method) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [{ platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' }],
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/search') && method === 'POST') {
+          return jsonResponse({
+            bioguideId: 'A000001',
+            results: {
+              bluesky: {
+                handle: 'alice.bsky.social',
+                posts: [
+                  {
+                    platform: 'bluesky',
+                    platformPostId: 'bsky-1',
+                    authorHandle: 'alice.bsky.social',
+                    authorPlatformId: 'did:1',
+                    postedAt: '2026-04-30T10:00:00Z',
+                    url: 'https://bsky.app/profile/alice/post/1',
+                    bodyText: 'Standing with Ukraine — this is the research post.',
+                    mediaRefs: [],
+                  },
+                ],
+              },
+            },
+          });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    const fetchBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Fetch feed/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(fetchBtn);
+    await waitFor(
+      () => expect(screen.getByText(/Standing with Ukraine — this is the research post/i)).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // Total count line renders.
+    expect(screen.getByText(/1 posts across 1 platforms/i)).toBeInTheDocument();
+    // The platforms array in the request body.
+    const searchCall = stub.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/admin/ingest/search'));
+    expect(searchCall).toBeDefined();
+    const body = searchCall!.body as Record<string, unknown>;
+    expect(body.bioguide_id).toBe('A000001');
+    expect((body.platforms as string[]).includes('bluesky')).toBe(true);
+  });
+
+  it('passes filter_terms when the keyword input is set, and submits on Enter', async () => {
+    const stub = installFetch({
+      match: (url, method) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [{ platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' }],
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/search') && method === 'POST') {
+          return jsonResponse({
+            bioguideId: 'A000001',
+            results: {
+              bluesky: {
+                handle: 'alice.bsky.social',
+                posts: [],
+              },
+            },
+          });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    const filterInput = await waitFor(
+      () => screen.getByPlaceholderText(/Filter by keyword/i),
+      { timeout: 5000 },
+    );
+    fireEvent.change(filterInput, { target: { value: 'donbas' } });
+    // Enter triggers fetchFeed via onKeyDown branch.
+    fireEvent.keyDown(filterInput, { key: 'Enter' });
+    await waitFor(
+      () => expect(stub.calls.some(
+        (c) => c.method === 'POST' && c.url.endsWith('/api/admin/ingest/search'),
+      )).toBe(true),
+      { timeout: 5000 },
+    );
+    const searchCall = stub.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/admin/ingest/search'))!;
+    expect((searchCall.body as Record<string, unknown>).filter_terms).toBe('donbas');
+    // Empty-results "No posts found" branch renders.
+    await waitFor(
+      () => expect(screen.getByText(/No posts found/i)).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // The matching summary line includes the filter terms.
+    expect(screen.getByText(/matching "donbas"/i)).toBeInTheDocument();
+  });
+
+  it('renders no_handle and platform-error variants in the per-platform results', async () => {
+    installFetch({
+      match: (url, method) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({
+            platforms: [makePlatform('bluesky', true, true), makePlatform('mastodon', true, true)],
+          });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [
+              { platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' },
+              { platform: 'mastodon', handle: 'alice@m.example', bioguide_id: 'A000001' },
+            ],
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/search') && method === 'POST') {
+          return jsonResponse({
+            bioguideId: 'A000001',
+            results: {
+              bluesky: { handle: null, posts: [], error: 'no_handle' },
+              mastodon: { handle: 'alice@m.example', posts: [], error: 'rate_limited' },
+            },
+          });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    const fetchBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Fetch feed/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(fetchBtn);
+    // no_handle branch.
+    await waitFor(
+      () => expect(screen.getByText(/No Bluesky handle linked/i)).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+    // platform error branch.
+    expect(screen.getByText(/Error: rate_limited/i)).toBeInTheDocument();
+  });
+
+  it('Fetch feed surfaces an error banner when the search POST throws', async () => {
+    installFetch({
+      match: (url, method) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [{ platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' }],
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/search') && method === 'POST') {
+          return jsonResponse({ error: 'search_failed', detail: 'upstream blew up' }, 502);
+        }
+        return null;
+      },
+    });
+    render(<ResearchView />);
+    await selectPersonViaPicker('Alice Adams');
+    const fetchBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Fetch feed/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(fetchBtn);
+    await waitFor(
+      () => expect(screen.getByText(/upstream blew up/i)).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+  });
+
+  it('Curate as Quote enqueues the post and calls onCurateAsQuote with the prefill', async () => {
+    let prefill: import('../../src/admin/App').QuotePrefill | null = null;
+    const stub = installFetch({
+      match: (url, method) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles') && method === 'GET') {
+          return jsonResponse({
+            items: [{ platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' }],
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/search') && method === 'POST') {
+          return jsonResponse({
+            bioguideId: 'A000001',
+            results: {
+              bluesky: {
+                handle: 'alice.bsky.social',
+                posts: [{
+                  platform: 'bluesky',
+                  platformPostId: 'bsky-research-1',
+                  authorHandle: 'alice.bsky.social',
+                  authorPlatformId: 'did:1',
+                  postedAt: '2026-04-30T10:00:00Z',
+                  url: 'https://bsky.app/profile/alice/post/r1',
+                  bodyText: 'Curate-this-research-post body',
+                  mediaRefs: [{ kind: 'image', url: 'https://x/img.jpg' }],
+                }],
+              },
+            },
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/queue') && method === 'POST') {
+          return jsonResponse({ row: { id: 'q-r-1' }, deduped: false }, 201);
+        }
+        return null;
+      },
+    });
+    render(<ResearchView onCurateAsQuote={(p) => { prefill = p; }} />);
+    await selectPersonViaPicker('Alice Adams');
+    const fetchBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Fetch feed/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(fetchBtn);
+    const curateBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Curate as Quote/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(curateBtn);
+    await waitFor(() => expect(prefill).not.toBeNull(), { timeout: 5000 });
+    expect(prefill!.bioguideId).toBe('A000001');
+    expect(prefill!.queueItemId).toBe('q-r-1');
+    expect(prefill!.bodyText).toBe('Curate-this-research-post body');
+    expect(prefill!.mediaKind).toBe('social');
+    // Enqueue body included the JSON-stringified mediaRefs.
+    const enqueueCall = stub.calls.find((c) => c.method === 'POST' && c.url.endsWith('/api/admin/ingest/queue'));
+    expect(enqueueCall).toBeDefined();
+    const body = enqueueCall!.body as Record<string, unknown>;
+    expect(body.platform_post_id).toBe('bsky-research-1');
+    expect(typeof body.media_refs_json).toBe('string');
+    // Button stays disabled (state === 'pending') after success per the
+    // "leave it pending so the button stays visibly disabled" comment.
+    await waitFor(
+      () => expect((screen.getByRole('button', { name: /Sending…/i }) as HTMLButtonElement).disabled).toBe(true),
+      { timeout: 5000 },
+    );
+  });
+
+  it('Curate as Quote shows "Retry curate" when the enqueue POST fails', async () => {
+    installFetch({
+      match: (url, method) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles') && method === 'GET') {
+          return jsonResponse({
+            items: [{ platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' }],
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/search') && method === 'POST') {
+          return jsonResponse({
+            bioguideId: 'A000001',
+            results: {
+              bluesky: {
+                handle: 'alice.bsky.social',
+                posts: [{
+                  platform: 'bluesky',
+                  platformPostId: 'bsky-fail-1',
+                  authorHandle: 'alice.bsky.social',
+                  authorPlatformId: 'did:1',
+                  postedAt: '2026-04-30T10:00:00Z',
+                  url: 'https://bsky.app/profile/alice/post/f1',
+                  bodyText: 'fail-curate body',
+                  mediaRefs: [],
+                }],
+              },
+            },
+          });
+        }
+        if (url.endsWith('/api/admin/ingest/queue') && method === 'POST') {
+          return jsonResponse({ error: 'invalid_post', detail: 'bad post' }, 400);
+        }
+        return null;
+      },
+    });
+    render(<ResearchView onCurateAsQuote={() => {}} />);
+    await selectPersonViaPicker('Alice Adams');
+    const fetchBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Fetch feed/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(fetchBtn);
+    const curateBtn = await waitFor(
+      () => screen.getByRole('button', { name: /Curate as Quote/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(curateBtn);
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: /Retry curate/i })).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
+  });
+
+  it('View profile button calls onNavigateToPerson with the selected bioguide id', async () => {
+    let navigated: string | null = null;
+    installFetch({
+      match: (url) => {
+        if (url.includes('/api/admin/ingest/platforms')) {
+          return jsonResponse({ platforms: [makePlatform('bluesky', true, true)] });
+        }
+        if (url.includes('/api/name-search')) {
+          return jsonResponse({ results: [makeNameSearchEntry()] });
+        }
+        if (url.includes('/api/admin/ingest/handles')) {
+          return jsonResponse({
+            items: [{ platform: 'bluesky', handle: 'alice.bsky.social', bioguide_id: 'A000001' }],
+          });
+        }
+        return null;
+      },
+    });
+    render(<ResearchView onNavigateToPerson={(id) => { navigated = id; }} />);
+    await selectPersonViaPicker('Alice Adams');
+    const profileBtn = await waitFor(
+      () => screen.getByRole('button', { name: /View profile/i }),
+      { timeout: 5000 },
+    );
+    fireEvent.click(profileBtn);
+    expect(navigated).toBe('A000001');
+  });
+});
+
+/* ========================================================================== */
 /* KeywordsView                                                               */
 /* ========================================================================== */
 
