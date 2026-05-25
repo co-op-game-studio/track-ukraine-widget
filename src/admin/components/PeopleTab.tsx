@@ -242,6 +242,24 @@ function PeopleListView({ onOpenProfile }: { onOpenProfile: (bioguideId: string)
         card.moc = mocMap.get(card.bioguideId);
       }
     }
+    // v4.1.0 — AC-59.8 PeopleTab roster-driven enumeration: every sitting
+    // member of Congress gets a card, regardless of whether they have a
+    // handle row yet. Members not yet represented in mocs_social_handles
+    // appear with an empty handles list + "no handles tracked" caption.
+    const seenBioguides = new Set(grouped.map((c) => c.bioguideId).filter(Boolean));
+    for (const moc of mocMap.values()) {
+      if (seenBioguides.has(moc.bioguideId)) continue;
+      grouped.push({
+        key: moc.bioguideId,
+        name: moc.displayName,
+        bioguideId: moc.bioguideId,
+        category: 'congress',
+        avatarUrl: null,
+        handles: [],
+        moc,
+      });
+    }
+    grouped.sort((a, b) => a.name.localeCompare(b.name));
     if (categoryFilter) {
       grouped = grouped.filter((c) => c.category === categoryFilter);
     }
@@ -258,6 +276,12 @@ function PeopleListView({ onOpenProfile }: { onOpenProfile: (bioguideId: string)
   }, [items, mocMap, categoryFilter, search]);
 
   const totalHandles = useMemo(() => cards.reduce((n, c) => n + c.handles.length, 0), [cards]);
+  // v4.1.0 — coverage metric. Counts Congress members with ≥1 handle vs total.
+  const coverage = useMemo(() => {
+    const congressCards = cards.filter((c) => c.category === 'congress');
+    const withHandles = congressCards.filter((c) => c.handles.length > 0).length;
+    return { withHandles, total: congressCards.length };
+  }, [cards]);
 
   async function addPerson() {
     if (!entityName.trim()) return;
@@ -425,7 +449,10 @@ function PeopleListView({ onOpenProfile }: { onOpenProfile: (bioguideId: string)
         >
           {seeding ? 'Syncing…' : 'Re-sync'}
         </button>
-        <span style={styles.muted}>{cards.length} people · {totalHandles} handles</span>
+        <span style={styles.muted}>
+          {cards.length} people · {totalHandles} handles
+          {coverage.total > 0 && ` · ${coverage.withHandles}/${coverage.total} Congress with handles`}
+        </span>
       </div>
 
       {seedResult && <div style={styles.pollResult}>{seedResult}</div>}
@@ -509,13 +536,24 @@ function PeopleListView({ onOpenProfile }: { onOpenProfile: (bioguideId: string)
               </div>
 
               <div style={rosterStyles.platforms}>
-                {card.handles.map((h) => (
-                  <span key={h.id} style={rosterStyles.platformChip}>
-                    <span style={{ fontFamily: 'var(--tk-font-mono)', fontSize: 'var(--tk-fs-xs)' }}>
-                      {PLATFORM_LABELS[h.platform] ?? h.platform}
-                    </span>
+                {card.handles.length === 0 ? (
+                  <span style={{
+                    fontFamily: 'var(--tk-font-mono)',
+                    fontSize: 'var(--tk-fs-xs)',
+                    color: 'var(--tk-muted)',
+                    fontStyle: 'italic',
+                  }}>
+                    no handles tracked
                   </span>
-                ))}
+                ) : (
+                  card.handles.map((h) => (
+                    <span key={h.id} style={rosterStyles.platformChip}>
+                      <span style={{ fontFamily: 'var(--tk-font-mono)', fontSize: 'var(--tk-fs-xs)' }}>
+                        {PLATFORM_LABELS[h.platform] ?? h.platform}
+                      </span>
+                    </span>
+                  ))
+                )}
               </div>
             </button>
           );

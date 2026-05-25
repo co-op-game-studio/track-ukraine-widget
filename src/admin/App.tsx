@@ -10,7 +10,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { Routes, Route, NavLink, useNavigate, useParams, Navigate } from 'react-router-dom';
-import { get, post } from './fetcher';
+import { get } from './fetcher';
 import { BillsTab } from './components/BillsTab';
 import { PeopleTab } from './components/PeopleTab';
 import { CurationTab } from './components/curation/CurationTab';
@@ -169,7 +169,6 @@ export function App() {
   const navigate = useNavigate();
 
   useTheme();
-  useAutoBackfill(whoami);
 
   useEffect(() => {
     get<{ email: string }>('/api/admin/whoami')
@@ -348,67 +347,6 @@ const styles: Record<string, React.CSSProperties> = {
   },
 };
 
-/* -------------------------------------------------------------------------- */
-/*                              Auto-backfill                                 */
-/* -------------------------------------------------------------------------- */
-
-const BACKFILL_VERSION = 'v4-2026-05-03-cr-citations';
-const BACKFILL_DONE_FLAG = 'tk-backfilled';
-const BACKFILL_CURSOR_KEY = 'tk-backfill-cursor';
-function useAutoBackfill(whoami: string | null) {
-  useEffect(() => {
-    if (!whoami) return;
-    let cancelled = false;
-    let after = '';
-    try {
-      const flag = window.localStorage.getItem(BACKFILL_DONE_FLAG);
-      if (flag === BACKFILL_VERSION) return;
-      after = window.localStorage.getItem(BACKFILL_CURSOR_KEY) ?? '';
-    } catch {
-      return;
-    }
-
-    async function loop() {
-      let totalOk = 0;
-      let totalFailed = 0;
-      for (let i = 0; i < 100 && !cancelled; i++) {
-        try {
-          const url = `/api/admin/backfill-bills?limit=3${after ? `&after=${encodeURIComponent(after)}` : ''}`;
-          const r = await post<{
-            processed: number;
-            ok: number;
-            failed: number;
-            next_after: string | null;
-            done: boolean;
-            summary: Array<{ bill_id: string; ok: boolean; error?: string }>;
-          }>(url, {});
-          totalOk += r.ok;
-          totalFailed += r.failed;
-          for (const s of r.summary) {
-            if (!s.ok) {
-              // eslint-disable-next-line no-console
-              console.warn('[backfill] failed:', s.bill_id, s.error);
-            }
-          }
-          if (r.done) {
-            window.localStorage.setItem(BACKFILL_DONE_FLAG, BACKFILL_VERSION);
-            window.localStorage.removeItem(BACKFILL_CURSOR_KEY);
-            // eslint-disable-next-line no-console
-            console.info('[backfill] complete', { ok: totalOk, failed: totalFailed });
-            return;
-          }
-          after = r.next_after ?? '';
-          window.localStorage.setItem(BACKFILL_CURSOR_KEY, after);
-        } catch (e) {
-          // eslint-disable-next-line no-console
-          console.error('[backfill] chunk failed; will retry on next load:', e);
-          return;
-        }
-      }
-    }
-    void loop();
-    return () => {
-      cancelled = true;
-    };
-  }, [whoami]);
-}
+// Backfill removed in v4.1.0: ingest is owned by `lw bills backfill` running
+// in CI. The runtime stack never drives ingest — see memory
+// `feedback_seeding_is_buildops_not_runtime` + docs/spec.md FR-59.

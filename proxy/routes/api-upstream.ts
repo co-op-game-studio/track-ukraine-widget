@@ -31,6 +31,7 @@ import { R2Tier } from '../cache/r2-tier';
 import { serveCached } from '../cache/pipeline';
 import { createUpstreamRegistry } from '../upstreams/registry';
 import type { CacheKey } from '../cache/key';
+import { cacheKeyToDottedString } from '../cache/key';
 import { resolveTraceId } from '../observability/trace';
 
 export async function handleApi(
@@ -135,13 +136,15 @@ export async function handleApi(
       const routeClass = match.cacheKind;
       const tiered = new TieredCache<string>([
         new EdgeTier<string>(cache, (k: CacheKey) => {
-          // Use the upstream URL as the edge cache key so two requests
-          // for the same key land in the same bucket regardless of which
-          // POP served them. The API key never appears here.
+          // AC-40.11 / ADR-019: the edge-tier URL MUST be injective on the
+          // full (kind, params) of the CacheKey, not just on the request
+          // pathname. Census-geocoder carries identity in the query string
+          // (`address`), so a key-derivation that ignores params collapses
+          // every address lookup onto one bucket per POP — the 2026-05-25
+          // prod regression. Encode the canonical dotted form of the key
+          // (same serialization the KV tier uses) as a `__ck` query param.
           const u = new URL(`${route.target}/${upstreamPath}`);
-          // Include kind + params in the pathname so same-URL different-
-          // kind doesn't collide (defense; matchRoute should prevent).
-          u.pathname += `#${k.kind}`;
+          u.searchParams.set('__ck', cacheKeyToDottedString(k));
           return u;
         }),
         new KvTier<string>({

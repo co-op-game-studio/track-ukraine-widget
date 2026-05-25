@@ -116,7 +116,9 @@ export async function handleAdmin(
 
   if (resource === 'audit') return await handleAudit(request, env, adminCtx);
   if (resource === 'import-bill') return await handleImportBill(request, env, adminCtx);
-  if (resource === 'backfill-bills') return await handleBackfillBills(request, env, adminCtx);
+  if (resource === 'data-freshness') return await handleDataFreshness(request, env, adminCtx);
+  // `backfill-bills` route removed in v4.1.0 — ingest is `lw bills backfill`
+  // in CI now. See spec.md FR-59 + ADR n/a (CLI is build/ops, not runtime).
   if (resource === 'ingest') {
     const ingestSubpath = [id, action].filter(Boolean).join('/');
     return await handleIngest(ingestSubpath, request, env, {
@@ -1031,100 +1033,103 @@ async function handleImportBill(
   }
 }
 
+// handleBackfillBills + /api/admin/backfill-bills route removed in v4.1.0.
+// Ingest moved to scripts/bills/backfill.ts (lw CLI) running in CI.
+// See docs/spec.md FR-59 + memory feedback_seeding_is_buildops_not_runtime.
+
 /* -------------------------------------------------------------------------- */
-/*                       Backfill-all (one-shot operator)                     */
+/*                         Data freshness (AC-59.8)                            */
 /* -------------------------------------------------------------------------- */
 
-/** POST /api/admin/backfill-bills?after=<bill_id>&limit=N
+/** GET /api/admin/data-freshness
  *
- *  Chunked re-import. Returns the next-cursor (`next_after`, or null when
- *  done) so the SPA can loop without blowing past Worker CPU limits or
- *  running afoul of Congress.gov rate limits. Default chunk size: 3 bills
- *  per call (each bill triggers ~10–40 upstream calls in turn).
- *
- *  Bills are ordered by `bill_id` ASC for stable cursoring.
- *  Researcher edits are preserved per AC-52.50 even with `force: true`. */
-async function handleBackfillBills(
+ *  Research-facing observation surface. Reads aggregate stats from the
+ *  bills + audit_log tables so the SPA can show "is the data trustworthy
+ *  enough to curate today?" Operator concerns (cron tick N, job stalled)
+ *  belong in CI logs, NOT here.
+ */
+async function handleDataFreshness(
   request: Request,
   env: ProxyEnv,
   ctx: AdminCtx,
 ): Promise<DispatchResult> {
-  if (request.method !== 'POST') {
-    return badRequest(ctx, 'method_not_allowed', 'POST only');
+  if (request.method !== 'GET') {
+    return badRequest(ctx, 'method_not_allowed', 'GET only');
   }
   const d1 = env.D1_VOTER_INFO!;
-  const url = new URL(request.url);
-  const after = url.searchParams.get('after') ?? '';
-  const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') ?? '3', 10) || 3, 1), 25);
-  const result = await d1
-    .prepare(
-      'SELECT congress, type, number, bill_id FROM bills WHERE bill_id > ? ORDER BY bill_id ASC LIMIT ?',
-    )
-    .bind(after, limit)
-    .all<{ congress: number; type: string; number: string; bill_id: string }>();
-  const rows = result.results ?? [];
-  const workerOrigin = `${url.protocol}//${url.host}`;
-  const summary: Array<{ bill_id: string; ok: boolean; error?: string; cosponsors?: number; actions?: number }> = [];
-  let ok = 0;
-  let failed = 0;
-  for (const row of rows) {
-    try {
-      const r = await importBillFromCongress(
-        {
-          congress: row.congress,
-          type: row.type,
-          number: row.number,
-          force: true,
-          actorEmail: ctx.email,
-          traceId: ctx.traceId,
-        },
-        { env, workerOrigin },
-      );
-      summary.push({
-        bill_id: row.bill_id,
-        ok: true,
-        cosponsors: r.cosponsors_imported,
-        actions: r.actions_imported,
-      });
-      ok++;
-    } catch (err) {
-      summary.push({
-        bill_id: row.bill_id,
-        ok: false,
-        error: (err as Error).message,
-      });
-      failed++;
-    }
-  }
-  // If we filled the limit, there may be more; return the last bill_id
-  // processed as the next cursor. Otherwise we're done.
-  const nextAfter = rows.length === limit ? rows[rows.length - 1]!.bill_id : null;
-  logEvent(
-    { env: ctx.envName, traceId: ctx.traceId },
-    {
-      event: 'backfill_bills_chunk',
-      level: 'info',
-      actor: ctx.email,
-      after,
-      processed: rows.length,
-      ok,
-      failed,
-      next_after: nextAfter,
-    },
-  );
-  return ok_(ctx, {
-    processed: rows.length,
-    ok,
-    failed,
-    next_after: nextAfter,
-    done: nextAfter === null,
-    summary,
-  });
-}
 
-// Local re-export with safer name; the existing `ok` helper above also
-// returns DispatchResult, but TypeScript already saw it. Aliasing avoids the
-// "ok already declared" trap if this file gains another inline ok().
-function ok_(ctx: AdminCtx, body: unknown): DispatchResult {
-  return ok(ctx, body);
+  // Total + per-congress + per-direction counts.
+  const byCongress = await d1
+    .prepare('SELECT congress, COUNT(*) as n FROM bills GROUP BY congress ORDER BY congress')
+    .all<{ congress: number; n: number }>();
+  const byDirection = await d1
+    .prepare('SELECT direction, COUNT(*) as n FROM bills GROUP BY direction ORDER BY direction')
+    .all<{ direction: string; n: number }>();
+  const becameLawCount = await d1
+    .prepare('SELECT COUNT(*) as n FROM bills WHERE became_law = 1')
+    .first<{ n: number }>();
+  const totalCount = await d1
+    .prepare('SELECT COUNT(*) as n FROM bills')
+    .first<{ n: number }>();
+
+  // Freshness bucket distribution (last_freshness_check_at).
+  const nowIso = new Date().toISOString();
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const within24h = new Date(now - day).toISOString();
+  const within7d = new Date(now - 7 * day).toISOString();
+  const within30d = new Date(now - 30 * day).toISOString();
+
+  const freshness = await d1
+    .prepare(
+      `SELECT
+        SUM(CASE WHEN last_freshness_check_at >= ? THEN 1 ELSE 0 END) as fresh_24h,
+        SUM(CASE WHEN last_freshness_check_at >= ? AND last_freshness_check_at < ? THEN 1 ELSE 0 END) as fresh_7d,
+        SUM(CASE WHEN last_freshness_check_at >= ? AND last_freshness_check_at < ? THEN 1 ELSE 0 END) as fresh_30d,
+        SUM(CASE WHEN last_freshness_check_at < ? OR last_freshness_check_at IS NULL THEN 1 ELSE 0 END) as stale
+       FROM bills`,
+    )
+    .bind(within24h, within7d, within24h, within30d, within7d, within30d)
+    .first<{ fresh_24h: number; fresh_7d: number; fresh_30d: number; stale: number }>();
+
+  // Stale bills list (capped at 20).
+  const staleBills = await d1
+    .prepare(
+      `SELECT bill_id, title, last_freshness_check_at
+       FROM bills
+       WHERE last_freshness_check_at < ? OR last_freshness_check_at IS NULL
+       ORDER BY last_freshness_check_at ASC NULLS FIRST
+       LIMIT 20`,
+    )
+    .bind(within24h)
+    .all<{ bill_id: string; title: string; last_freshness_check_at: string | null }>();
+
+  // Last successful backfill run from audit_log.
+  const lastRun = await d1
+    .prepare(
+      `SELECT created_at, actor_email, trace_id
+       FROM audit_log
+       WHERE action = 'import_bill' OR action = 'bill_backfill_error'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+    )
+    .first<{ created_at: string; actor_email: string; trace_id: string }>();
+
+  return ok(ctx, {
+    asOf: nowIso,
+    bills: {
+      total: totalCount?.n ?? 0,
+      becameLaw: becameLawCount?.n ?? 0,
+      byCongress: byCongress.results ?? [],
+      byDirection: byDirection.results ?? [],
+    },
+    freshness: {
+      within24h: freshness?.fresh_24h ?? 0,
+      within7d: freshness?.fresh_7d ?? 0,
+      within30d: freshness?.fresh_30d ?? 0,
+      stale: freshness?.stale ?? 0,
+    },
+    staleBills: staleBills.results ?? [],
+    lastRefreshAttempt: lastRun,
+  });
 }

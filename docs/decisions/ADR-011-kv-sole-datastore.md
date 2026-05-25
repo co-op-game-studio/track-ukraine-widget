@@ -259,7 +259,7 @@ Compare today: 1× R2 fetch of 790KB blob (~150ms to start, ~500ms to parse) + 3
 Per user direction: clean cut, no dual-write, no gradual migration.
 
 1. Merge this PR into `develop` → auto-deploys to dev
-2. Run `npm run publish:kv -- --env dev` to populate dev KV
+2. Run `npx lw kv publish --env dev` (or legacy `npm run publish:kv -- --env dev`) to populate dev KV
 3. Smoke test dev (browser): widget loads, address lookup works, name-search works
 4. Merge `develop` → `uat`. Deploy. Run publish. Smoke.
 5. Merge `uat` → `stg`. Deploy. Run publish + T-025d stg-sync rehearsal. Smoke.
