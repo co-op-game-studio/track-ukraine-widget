@@ -3,9 +3,6 @@
   "private": true,
   "version": "4.1.0-rc.1",
   "type": "module",
-  "bin": {
-    "lw": "scripts/cli.ts"
-  },
   "scripts": {
     "lw": "tsx scripts/cli.ts",
     "dev": "vite",

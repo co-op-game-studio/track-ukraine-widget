@@ -54,7 +54,7 @@ Three coherent groups, listed in landing order.
 | Coverage deep-pass (10 commits) | ✅ on branch | `e42c701` → `46ea5bd`. Thresholds at 80/80/80/80 (achieved ~96/96/90/87). |
 | PR #118 sync (prod CI fixes) | ⬜ to consolidate | Will resolve when this branch merges to main — PR #118 rebases onto the new tip and its stale CI passes against the new thresholds. |
 
-### Group 2 — Edge-tier bug fix (uncommitted, ready to commit)
+### Group 2 — Edge-tier bug fix (committed in c7f6f9b)
 
 | Item | State | Files |
 |---|---|---|
@@ -94,11 +94,12 @@ This is the bulk of the new work. Tracked task by task below.
 
 | Item | State | Notes |
 |---|---|---|
-| Full suite green | ⬜ pending | `npm test` end-to-end after all of Group 3 lands |
-| Typecheck clean | ⬜ pending | `npm run typecheck` |
-| Live dev verification | ⬜ pending | `npx lw bills backfill --env dev --limit 5` against real dev D1 |
-| Tag `v4.1.0` on `main` after merge | ⬜ pending | After PR merges, push tag |
-| Update [docs/tasks.md](tasks.md) with T-134..T-141 entries | ⬜ pending | Mirror Group 3 task rows here for AIDD traceability |
+| Full suite green | ✅ 2026-05-25 | 156 files, 2186 tests, 5 skipped, all green |
+| Typecheck clean | ✅ 2026-05-25 | `npm run typecheck` passes both root + proxy configs |
+| Live dev verification | ⬜ pending | `npx lw bills backfill --env dev --limit 5` against real dev D1 — requires CONGRESS_API_KEY + wrangler auth |
+| Commit + push to chore/coverage-deep-pass | ✅ 2026-05-25 | Commit `c7f6f9b` on `chore/coverage-deep-pass` |
+| Open PR → main + tag `v4.1.0` | ⬜ pending | After human reviews + you choose to push |
+| Update [docs/tasks.md](tasks.md) with T-134..T-141 entries | ✅ 2026-05-25 | Mirrored as T-134..T-141 |
 
 ---
 
@@ -201,3 +202,5 @@ These came up during the chat but are **NOT** in v4.1.0. Listed here so a future
 | 2026-05-25 | Investigated 306-vs-535 People tab gap. Root cause is a different code path (KV name-index + ingest-seed roster merge), not bills. Upstream `legislators-social-media.json` caps at 519; remaining gap likely stale KV name-index. Initially proposed defer to v4.2.0; user pushed back ("stop trying to separate issues"). Folded into v4.1.0 as Group 3.12. Reframed in plan from "Related issues" deferred section to active scope. |
 | 2026-05-25 | Group 3.3 complete — extracted importBillCore from proxy/services/import-bill.ts into scripts/lib/bills/import-core.ts as a pure fn over D1Like/CongressClient/AuditLogger. Worker adapter now 90 lines. Added CliLogger + verbose/debug propagation via LW_VERBOSITY env var. CongressClient gained opt-in rate-limit (CLI: 5000/h) + retries (CLI: 3); Worker keeps pre-v4.1.0 zero-default behavior. Full suite 155/2188 green. |
 | 2026-05-25 | Group 3.4 complete — `lw bills backfill` subcommand wired. Concurrency 4. force=false default → warm-run cost ~63 calls/45s. Spec AC-59.10 expanded to make the "save once, don't re-pull unless changed" posture explicit + quantified. Typecheck + full suite green. |
+| 2026-05-25 | Groups 3.6–3.12 complete. Deleted useAutoBackfill hook + /api/admin/backfill-bills route + their tests. Migration 0010 (HR-2445/S-2552 → neutral). Data Freshness panel + endpoint (research-facing, NOT operator-state). PeopleTab enumerates from KV name-index roster — all sitting members visible. GitHub Actions workflow (.github/workflows/backfill-bills.yml). Spec touch-ups (CLAUDE.md, ADR-011). v4.1.0 task rows added (T-134..T-141). |
+| 2026-05-25 | Committed as c7f6f9b on chore/coverage-deep-pass. Branch is ready to PR to main. 156 files / 2186 tests green, typecheck clean. |

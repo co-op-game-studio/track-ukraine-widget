@@ -302,10 +302,12 @@ npm run lw -- bills backfill --env dev --debug    # Verbose + raw upstream URLs 
 npm run lw -- kv publish --env dev              # Project curated data to KV (alias of legacy publish:kv)
 ```
 
-The shell `lw` bin is registered in `package.json#bin` so `npx lw …` works
-locally and in CI. Per memory `feedback_seeding_is_buildops_not_runtime`:
-ingest is build/ops, never runtime — the Worker + admin SPA observe state
-via `audit_log` but never drive ingest.
+Invoke via `npm run lw -- <cmd>` from inside this repo (or `tsx scripts/cli.ts
+<cmd>` directly). The CLI is not published as a standalone binary — it's
+internal tooling, not a consumer-facing package. Per memory
+`feedback_seeding_is_buildops_not_runtime`: ingest is build/ops, never
+runtime — the Worker + admin SPA observe state via `audit_log` but never
+drive ingest.
 
 ## Key Algorithms
 

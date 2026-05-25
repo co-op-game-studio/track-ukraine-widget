@@ -70,8 +70,13 @@ export async function importBillFromCongress(
 
   const congressClient: CongressClient = makeRealCongressClient({
     apiKey: env.CONGRESS_API_KEY,
-    // Worker has a generous Workers-Subrequest budget; honor the same
-    // 2,500/h soft ceiling the CLI uses to be polite to the upstream.
+    // Worker stays at ratePerHour=0 (no throttle). Two reasons:
+    //   1) Per-request handlers shouldn't block on a global token bucket
+    //      — the Worker only has the in-flight request's CPU budget.
+    //   2) The token bucket is per-Worker-instance, not global, so it
+    //      can't meaningfully enforce a Congress.gov rate ceiling here.
+    // The CLI (`lw bills backfill`) is the actual ingest path; it runs
+    // with ratePerHour=5000 per scripts/lib/runtime.ts.
   });
 
   const auditLog = makeD1AuditLogger(d1);

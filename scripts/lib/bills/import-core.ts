@@ -44,9 +44,13 @@ export interface ImportBillRequest {
 export interface ImportBillDeps {
   d1: D1Like;
   congressClient: CongressClient;
-  auditLog: AuditLogger;
+  /** AuditLogger is no longer used by importBillCore (the import audit row
+   *  is now pushed into the atomic d1.batch) but the field is kept on the
+   *  interface so callers (backfill driver) can use the same deps bundle
+   *  shape and write `bill_backfill_error` audit rows from the loop. */
+  auditLog?: AuditLogger;
   /** Optional KV invalidation callback. Worker passes one that hits
-   *  `env.KV_VOTER_INFO.delete(...)`. CLI passes nothing (or a shell impl). */
+   *  `env.KV_VOTER_INFO.delete(...)`. CLI passes a CF KV REST API impl. */
   kvInvalidate?: (billId: string) => Promise<void>;
   /** Optional structured-log callback. Worker passes `logEvent` from
    *  proxy/observability/log; CLI passes a console.log-shaped fn. */
@@ -216,7 +220,9 @@ export async function importBillCore(
   deps: ImportBillDeps,
 ): Promise<ImportBillResult> {
   const t0 = Date.now();
-  const { d1, congressClient, auditLog, kvInvalidate, log } = deps;
+  // auditLog is intentionally not destructured — the audit row is now
+  // written into d1.batch (review #2). The field stays on deps for callers.
+  const { d1, congressClient, kvInvalidate, log } = deps;
   const billId = `${req.congress}-${req.type.toUpperCase()}-${req.number}`;
 
   // 1. Fetch bill detail. Required.
@@ -595,28 +601,41 @@ export async function importBillCore(
     actions_imported++;
   }
 
-  // 8. Commit batch.
+  // 8. Audit row — single parent for the whole import. Pushed into the
+  // batch so it lands atomically with the bills/votes/cosponsors/actions
+  // rows. Pre-v4.1.0 had this exact posture; the v4.1.0 extraction must
+  // preserve it (review #2 — audit atomicity).
+  stmts.push(
+    d1
+      .prepare(
+        `INSERT INTO audit_log (
+           id, actor_email, action, target_table, row_id, row_title,
+           before_json, after_json, reason, trace_id, created_at
+         ) VALUES (?, ?, 'import_bill', 'bills', ?, ?, NULL, ?, ?, ?, ?)`,
+      )
+      .bind(
+        newUlid(),
+        req.actorEmail,
+        billId,
+        detail.bill.title ?? billId,
+        JSON.stringify({
+          votes_imported,
+          votes_updated,
+          votes_skipped,
+          cosponsors_imported,
+          actions_imported,
+        }),
+        `Bill import (force=${req.force ? '1' : '0'})`,
+        req.traceId,
+        now,
+      ),
+  );
+
+  // 9. Commit batch — bill, votes, cosponsors, actions, audit ALL atomic.
   await d1.batch(stmts);
 
-  // 9. Audit log (via injected AuditLogger).
-  await auditLog.log({
-    action: 'import_bill',
-    actorEmail: req.actorEmail,
-    targetTable: 'bills',
-    rowId: billId,
-    rowTitle: detail.bill.title ?? billId,
-    afterJson: JSON.stringify({
-      votes_imported,
-      votes_updated,
-      votes_skipped,
-      cosponsors_imported,
-      actions_imported,
-    }),
-    reason: `Bill import (force=${req.force ? '1' : '0'})`,
-    traceId: req.traceId,
-  });
-
-  // 10. Invalidate KV (Worker only; CLI typically doesn't need this).
+  // 10. Invalidate KV. Worker: env.KV.delete via the injected callback.
+  // CLI: cf-kv-rest-api impl (runtime.ts). Best-effort — failures swallowed.
   if (kvInvalidate) {
     await kvInvalidate(billId).catch(() => undefined);
   }

@@ -75,11 +75,12 @@ const COLUMNS: MenuColumn[] = [
   {
     heading: 'Admin',
     links: [
-      { label: 'Keywords',    to: '/settings/keywords' },
-      { label: 'Tags',        to: '/settings/tags' },
-      { label: 'Cache',       to: '/settings/cache' },
-      { label: 'Poll status', to: '/settings/poll-status' },
-      { label: 'App config',  to: '/settings/config' },
+      { label: 'Keywords',       to: '/settings/keywords' },
+      { label: 'Tags',           to: '/settings/tags' },
+      { label: 'Cache',          to: '/settings/cache' },
+      { label: 'Poll status',    to: '/settings/poll-status' },
+      { label: 'Data freshness', to: '/settings/freshness' },
+      { label: 'App config',     to: '/settings/config' },
     ],
   },
   {

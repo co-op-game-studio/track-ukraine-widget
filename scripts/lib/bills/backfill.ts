@@ -26,6 +26,10 @@ export interface BackfillBillsInput {
   congressClient: CongressClient;
   auditLog: AuditLogger;
   logger: CliLogger;
+  /** KV-key delete callback. Threaded into importBillCore so each successful
+   *  bill import busts its KV projection. Optional — when absent, KV stays
+   *  stale until next `lw kv publish` run. */
+  kvInvalidate?: (key: string) => Promise<void>;
   /** Resume cursor — only process rows with bill_id > this value. */
   after?: string;
   /** Cap on bills processed this run. Default: no cap. */
@@ -67,6 +71,7 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
     congressClient,
     auditLog,
     logger,
+    kvInvalidate,
     after = '',
     limit,
     force = false,
@@ -125,6 +130,11 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
             d1,
             congressClient,
             auditLog,
+            // Build the KV key here (matches proxy/services/kv-projector.ts
+            // KV_KEY.bill shape: "bill:v1:{bill_id}").
+            kvInvalidate: kvInvalidate
+              ? (billId: string) => kvInvalidate(`bill:v1:${billId}`)
+              : undefined,
             log: (e) => {
               const event = typeof e.event === 'string' ? e.event : 'log';
               const level = typeof e.level === 'string' ? e.level : undefined;

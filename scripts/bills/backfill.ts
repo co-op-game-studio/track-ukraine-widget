@@ -63,6 +63,7 @@ export function attach(parent: Command): void {
           congressClient: runtime.congressClient,
           auditLog: runtime.auditLog,
           logger: runtime.logger,
+          kvInvalidate: runtime.kvInvalidate,
           after: opts.after,
           limit: opts.limit,
           force: opts.force,

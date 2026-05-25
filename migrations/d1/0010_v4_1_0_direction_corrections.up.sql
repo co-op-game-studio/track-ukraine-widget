@@ -25,7 +25,9 @@ SET direction = 'neutral',
     updated_at = CURRENT_TIMESTAMP
 WHERE bill_id = '118-S-2552' AND direction = 'anti-ukraine';
 
-INSERT INTO audit_log (
+-- INSERT OR IGNORE so the migration is safe to re-run (CI retry, multi-env
+-- apply, hand-replay). PK conflict on `id` is silently swallowed.
+INSERT OR IGNORE INTO audit_log (
   id, actor_email, action, target_table, row_id, row_title,
   before_json, after_json, reason, trace_id, created_at
 ) VALUES (
@@ -42,7 +44,7 @@ INSERT INTO audit_log (
   CURRENT_TIMESTAMP
 );
 
-INSERT INTO audit_log (
+INSERT OR IGNORE INTO audit_log (
   id, actor_email, action, target_table, row_id, row_title,
   before_json, after_json, reason, trace_id, created_at
 ) VALUES (

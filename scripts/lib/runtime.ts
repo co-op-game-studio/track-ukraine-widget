@@ -17,11 +17,22 @@ export type EnvName = 'dev' | 'uat' | 'stg' | 'prod';
 
 const VALID_ENVS: ReadonlySet<EnvName> = new Set(['dev', 'uat', 'stg', 'prod']);
 
+// Per-env KV namespace IDs — must match wrangler.toml + scripts/publish-to-kv.ts.
+const KV_NAMESPACE_IDS: Record<EnvName, string> = {
+  dev: '743b2feda53648cd8242d3b89538bfac',
+  uat: '3756142363984d218d5f489151716b30',
+  stg: '4ff9a8e54b82489fb9a300466bd68686',
+  prod: '72d3dbce1a1d4ea4aec74b305d7995e6',
+};
+
 export interface RuntimeBundle {
   envName: EnvName;
   d1: D1Like;
   congressClient: CongressClient;
   auditLog: AuditLogger;
+  /** Best-effort KV-key delete callback. Used by importBillCore + future
+   *  per-resource invalidators to bust the stale projection after a write. */
+  kvInvalidate: (key: string) => Promise<void>;
   logger: CliLogger;
   /** Whether the CLI is hitting a remote (deployed) D1 binding or the local one.
    *  Always remote for non-dev envs; defaults to local for dev. */
@@ -74,6 +85,55 @@ export function resolveRuntime(opts: ResolveRuntimeOpts): RuntimeBundle {
     },
   });
   const auditLog = makeD1AuditLogger(d1);
+  const kvInvalidate = makeKvInvalidate(envName, logger);
 
-  return { envName, d1, congressClient, auditLog, logger, remote };
+  return { envName, d1, congressClient, auditLog, kvInvalidate, logger, remote };
+}
+
+/**
+ * Build a best-effort KV-key delete callback using the Cloudflare REST API.
+ *
+ * Requires CLOUDFLARE_API_TOKEN (with KV:Edit scope) + CLOUDFLARE_ACCOUNT_ID
+ * in env. If either is missing, returns a no-op that warns once at construct
+ * time — the backfill still works (D1 truth is correct), KV just stays stale
+ * until next `lw kv publish` run.
+ *
+ * Per-bill invalidation uses POST /bulk with single-item payload (instead of
+ * DELETE /values/{key}) because the bulk API supports up to 10k keys per call
+ * and gives us a consistent error-handling shape. For v4.1.0's 63-bill corpus
+ * the difference is irrelevant; FR-60's 48k corpus benefits.
+ */
+function makeKvInvalidate(
+  envName: EnvName,
+  logger: CliLogger,
+): (key: string) => Promise<void> {
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const namespaceId = KV_NAMESPACE_IDS[envName];
+
+  if (!token || !accountId) {
+    logger.warn(
+      'kvInvalidate: CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID missing — KV invalidation will no-op. ' +
+      "Backfill writes D1 correctly; run `lw kv publish --env " + envName + "` to repopulate KV.",
+    );
+    return async () => {};
+  }
+
+  return async (key: string) => {
+    const url = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`;
+    try {
+      const resp = await fetch(url, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!resp.ok && resp.status !== 404) {
+        // 404 = key didn't exist, which is fine.
+        logger.warn(`kvInvalidate: ${key} → ${resp.status}`);
+      } else {
+        logger.debug(`kvInvalidate: ${key} → ${resp.status}`);
+      }
+    } catch (err) {
+      logger.warn(`kvInvalidate: ${key} → ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 }
