@@ -156,6 +156,55 @@ describe('handleFetch — query-param allowlist + canonical cache key (AC-27.20)
     // First call is a miss; next two are cache hits.
     expect(upstreamCalls).toBe(1);
   });
+
+  // AC-40.11: dual of the nonce-fuzz test above. Two census-geocoder requests
+  // that differ in an ALLOWED param (`address`) MUST NOT share an edge cache
+  // entry. Regression test for the 2026-05-25 prod incident on
+  // trackukraine.com where the edge-tier keyToUrl adapter dropped
+  // CacheKey.params, collapsing every address lookup onto one bucket per POP.
+  // See ADR-019.
+  it('cache key DOES fragment on allowed params — two distinct addresses each miss the edge tier', async () => {
+    const upstreamCalls: string[] = [];
+    fakeUpstream = async (u) => {
+      const parsed = new URL(u);
+      upstreamCalls.push(parsed.searchParams.get('address') ?? '');
+      // Echo the submitted address back in the response so a hit would be
+      // detectable here too (defense-in-depth assertion below).
+      return new Response(
+        JSON.stringify({ result: { input: { address: { address: parsed.searchParams.get('address') } } } }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+    const cache = makeFakeCache();
+    const env = makeEnv();
+    const addrA = '100 N Clark St, Chicago, IL 60602';
+    const addrB = '1600 Pennsylvania Ave NW, Washington, DC 20500';
+    const respA = await handleFetch(
+      new Request(
+        `https://vote.cogs.it.com/api/census/geocoder/geographies/onelineaddress?address=${encodeURIComponent(addrA)}&benchmark=Public_AR_Current&vintage=Current_Current&layers=54&format=json`,
+        { headers: { Origin: 'https://trackukraine.com' } },
+      ),
+      env,
+      cache,
+    );
+    const respB = await handleFetch(
+      new Request(
+        `https://vote.cogs.it.com/api/census/geocoder/geographies/onelineaddress?address=${encodeURIComponent(addrB)}&benchmark=Public_AR_Current&vintage=Current_Current&layers=54&format=json`,
+        { headers: { Origin: 'https://trackukraine.com' } },
+      ),
+      env,
+      cache,
+    );
+    // Two upstream fetches — one per distinct address.
+    expect(upstreamCalls).toEqual([addrA, addrB]);
+    // And the responses received by each caller must echo the address each
+    // ACTUALLY requested — the smoking-gun symptom of the prod bug was the
+    // second request receiving the first response.
+    const bodyA = (await respA.json()) as { result: { input: { address: { address: string } } } };
+    const bodyB = (await respB.json()) as { result: { input: { address: { address: string } } } };
+    expect(bodyA.result.input.address.address).toBe(addrA);
+    expect(bodyB.result.input.address.address).toBe(addrB);
+  });
 });
 
 afterAll(() => {

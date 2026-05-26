@@ -3,7 +3,7 @@
  * handler tables (`bills`, `votes`, `comments`, `social-posts`, `quotes`) and
  * the cross-cutting error / dispatch branches that aren't covered by
  * `apiAdminRoutes.test.ts` (which focuses on /config, /tags, /cache, /audit,
- * /import-bill, /backfill-bills) or `adminRoutes.test.ts` (which focuses on
+ * /import-bill) or `adminRoutes.test.ts` (which focuses on
  * `_reason` plumbing and the `?billId=` filter shape).
  *
  * Goal: push api-admin.ts above 90% lines + 85% functions. The function gap
