@@ -1,4 +1,3 @@
-/// <reference types="node" />
 /**
  * D1Like — narrow interface the `lw` CLI subcommands depend on.
  *
