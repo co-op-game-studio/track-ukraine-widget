@@ -229,3 +229,43 @@ Both encode the full dotted form into the URL; both make the URL injective over 
 2. **stg + prod promotion** — reviewer-gated, normal release cadence.
 3. **PR #118** — the original prod→main CI sync that prompted this whole effort. Either close (the work it carried is now in PR #120 / rc3) or rebase + re-resolve.
 4. **v4.1.1 punch list above** — small follow-ups; none blocking.
+
+---
+
+## Deep front-end verification (2026-05-26, post-rc3 deploy)
+
+Three user flows exercised against the deployed dev SPA + widget, beyond the structural smoke from Phase 6.
+
+### (a) PeopleTab zero-handle card flow ✅
+
+- 32 instances of "no handles tracked" caption rendered in the list (16 distinct MoCs × duplicate DOM nodes from list rendering).
+- Opened Abraham Hamadeh (R-AZ-8, no handles): profile loads cleanly. Social handles section shows "No social handles linked to this person." Quotes (0), Ingested Posts (0) sections all render with graceful empty states.
+- **Result:** PeopleTab roster enumeration + empty-state UX works as designed.
+
+### (b) 119th bill detail flow ✅
+
+- Opened `119-HR-2913 — Ukraine Support Act` in BillsTab.
+- Sponsorship section: **"Sponsorship (41 cosponsors, 4 original)"** — matches seed run output exactly (`cos=41`).
+- Action history section: **"Action history (11)"** — matches seed output (`act=11`).
+- Expanded cosponsor list: all 41 names render with party, state, district, sponsorship date. Format example: `Rep. Connolly, Gerald E. [D-VA-11] (D-VA)-11`. First 4 marked "original cosponsor"; the remaining 37 with their `2025-04-21 / 2025-04-29 / 2025-06-03 / 2025-06-04` dates from upstream.
+- **Result:** D1 → API → SPA read path renders newly-populated 119th data correctly.
+
+### (c) Public widget — edge-tier cache fix end-to-end reverify ✅
+
+The original bug that started v4.1.0. Pre-fix: census-geocoder edge cache collapsed all addresses onto one bucket per POP, so the second lookup at a warm POP returned the first's response.
+
+- Address 1: `1100 Congress Ave, Austin, TX 78701` → **Cornyn, Cruz, Doggett** (Texas CD-37) ✅
+- Address 2: `1315 10th St, Sacramento, CA 95814` → **Padilla, Schiff, Matsui** (California CD-7) ✅
+- **Distinct results.** Pre-rc3 (and on the v4.0.0 prod widget) the second lookup would have returned Cornyn/Cruz/Doggett or whatever the POP had cached. The `cacheKeyToDottedString` URL parameterization (per `edgeKeyToUrl` helper in api-upstream.ts) routes each address to its own edge entry.
+- **Result:** AC-40.11 verified live. The bug fix that motivated this whole release works in production-shaped conditions on dev.
+
+### Cosmetic find (non-blocking)
+
+- "Widget Preview — **legislation.watch**" string leaked into the admin SPA's PersonProfile view. Forward-domain reference (the not-yet-launched legislation.watch). Tracking on the v4.1.1 punch list as a one-line copy fix.
+
+### Net assessment
+
+v4.1.0 dev rollout is verified end-to-end. All three primary deliverables work in the deployed environment:
+1. Edge-tier cache key fix (the original incident motivator)
+2. 119th Congress data restored (seeded via the new CLI)
+3. PeopleTab + Data Freshness panel improvements visible in the admin SPA
