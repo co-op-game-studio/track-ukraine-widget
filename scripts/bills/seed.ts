@@ -36,10 +36,6 @@ export function attach(parent: Command): void {
       'Filter to one congress (117 | 118 | 119)',
       (v) => Number.parseInt(v, 10),
     )
-    .option(
-      '--local',
-      'Use the local wrangler D1 binding instead of remote (dev iteration only)',
-    )
     .option('--dry-run', 'Walk bills + show what would change, but do not write — NOT YET IMPLEMENTED')
     .action(
       async (opts: {
@@ -49,7 +45,6 @@ export function attach(parent: Command): void {
         force?: boolean;
         concurrency?: number;
         congress?: number;
-        local?: boolean;
         dryRun?: boolean;
       }) => {
         if (opts.dryRun) {
@@ -60,7 +55,7 @@ export function attach(parent: Command): void {
 
         let runtime;
         try {
-          runtime = resolveRuntime({ env: opts.env, remote: !opts.local });
+          runtime = resolveRuntime({ env: opts.env });
         } catch (err) {
           // eslint-disable-next-line no-console
           console.error(`[lw bills seed] config: ${err instanceof Error ? err.message : String(err)}`);

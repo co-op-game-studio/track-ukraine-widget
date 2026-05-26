@@ -7,9 +7,16 @@
  * (importBillCore, publishCore, …) can be called from either runtime.
  *
  * **Tests pass an in-memory fake.**
- * **CLI passes a wrangler-shell implementation** that shells out to
- * `wrangler d1 execute <db> --command <sql>`.
+ * **CLI passes a REST-API-backed implementation** (`makeRestD1`) that talks
+ * to `POST /accounts/{acct}/d1/database/{db}/query`. Native parameter
+ * binding (no string interpolation), supports batches via the same endpoint.
  * **Worker passes the live `env.D1_VOTER_INFO` binding directly.**
+ *
+ * Why REST and not `wrangler d1 execute`: the shell-out via `wrangler …
+ * --command=<SQL>` tokenizes the SQL on whitespace + commas because the
+ * subprocess invocation goes through the shell on Windows. The REST API
+ * has no such shell-parsing layer and supports `params: [...]` natively
+ * so we never inline-interpolate values.
  *
  * The interface is intentionally minimal — only the methods the lib actually
  * calls. Adding to this surface is a deliberate widening that every consumer
@@ -29,124 +36,109 @@ export interface D1Like {
 }
 
 /* -------------------------------------------------------------------------- */
-/*                     wrangler-shell implementation                          */
+/*                       REST-API implementation                              */
 /* -------------------------------------------------------------------------- */
 
-import { spawn } from 'node:child_process';
+export type EnvName = 'dev' | 'uat' | 'stg' | 'prod';
 
-interface WranglerD1Opts {
-  /** D1 database name as declared in wrangler.toml (e.g. "voter-info-d1"). */
-  database: string;
-  /** Wrangler environment flag (dev/uat/stg/prod). Maps to `--env <name>`. */
-  env: string;
-  /** Whether to use --remote (production binding) or --local (local SQLite). */
-  remote: boolean;
+/** Per-env D1 database IDs — must match wrangler.toml. Mirrors KV_NAMESPACE_IDS
+ *  in runtime.ts; both maps are owned by the CLI side. */
+export const D1_DATABASE_IDS: Record<EnvName, string> = {
+  dev: '05e0fc19-127c-4a7e-9708-1055996b134c',
+  uat: '530a894e-8fc2-431f-9ade-d288fc9e0a1d',
+  stg: '24506b27-d533-45a9-bb16-2d182630d587',
+  prod: 'd22db275-7b64-472a-873b-76dd97020603',
+};
+
+export interface RestD1Opts {
+  envName: EnvName;
+  accountId: string;
+  apiToken: string;
+  /** Override fetch (for tests). Defaults to globalThis.fetch. */
+  fetchImpl?: typeof fetch;
+}
+
+interface CfApiResponse<T> {
+  result?: T;
+  success: boolean;
+  errors?: Array<{ code: number; message: string }>;
+  messages?: unknown[];
+}
+
+interface D1QueryResult {
+  results?: unknown[];
+  success: boolean;
+  meta?: unknown;
 }
 
 /**
- * Run a `wrangler d1 execute` invocation and return its parsed JSON output.
- *
- * wrangler emits an array of result objects, one per statement. We always
- * pass a single statement, so we read `[0]`.
+ * Build a D1Like that POSTs to the Cloudflare D1 REST query endpoint.
+ * Native parameter binding — values are passed as a `params: [...]` array,
+ * never inline-interpolated. No shell, no escaping, no quote bugs.
  */
-async function execWrangler(
-  opts: WranglerD1Opts,
-  sql: string,
-  params: unknown[],
-): Promise<{ results?: unknown[]; meta?: unknown }> {
-  // wrangler d1 execute supports `--command` (inline SQL) but not parameter
-  // binding directly. We have two options: (a) inline-interpolate (vulnerable
-  // to injection if values aren't sanitized), or (b) use `--file` with a
-  // temp .sql and the `-- :param` placeholder syntax.
-  //
-  // For v4.1.0 we use the safer-but-clunky path: interpolate values that we
-  // generate ourselves (ULIDs, ISO timestamps, constants — never user input)
-  // and reject anything containing a quote character that could break out
-  // of the string literal. The CLI never accepts free-form SQL from outside.
-  const interpolated = interpolateParams(sql, params);
-  const args = [
-    'd1', 'execute', opts.database,
-    `--env=${opts.env}`,
-    opts.remote ? '--remote' : '--local',
-    '--json',
-    `--command=${interpolated}`,
-  ];
+export function makeRestD1(opts: RestD1Opts): D1Like {
+  const dbId = D1_DATABASE_IDS[opts.envName];
+  if (!dbId) {
+    throw new Error(`makeRestD1: no D1 database ID configured for env '${opts.envName}'`);
+  }
+  const url = `https://api.cloudflare.com/client/v4/accounts/${opts.accountId}/d1/database/${dbId}/query`;
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
 
-  return new Promise((resolve, reject) => {
-    const proc = spawn('npx', ['wrangler', ...args], { shell: true });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d) => (stdout += d.toString()));
-    proc.stderr.on('data', (d) => (stderr += d.toString()));
-    proc.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`wrangler d1 execute exit ${code}: ${stderr || stdout}`));
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout);
-        // wrangler returns an array of statement results.
-        resolve(Array.isArray(parsed) ? parsed[0] : parsed);
-      } catch (e) {
-        reject(new Error(`wrangler d1 execute: bad JSON output: ${stdout.slice(0, 200)}`));
-      }
+  async function execOne(sql: string, params: unknown[]): Promise<D1QueryResult> {
+    const resp = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${opts.apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sql, params }),
     });
-  });
-}
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`D1 REST ${resp.status}: ${text.slice(0, 400)}`);
+    }
+    const body = (await resp.json()) as CfApiResponse<D1QueryResult[]>;
+    if (!body.success) {
+      const errs = (body.errors ?? []).map((e) => `${e.code}: ${e.message}`).join('; ');
+      throw new Error(`D1 REST error: ${errs || 'unknown'}`);
+    }
+    // The query endpoint returns `result: [{results, success, meta}]` — array
+    // because the endpoint historically supported semicolon-separated multi-
+    // statement strings. We always send one statement.
+    const arr = body.result ?? [];
+    return arr[0] ?? { success: true };
+  }
 
-/**
- * Inline-interpolate `?` placeholders with the given params.
- *
- * Strings get single-quoted with single-quote-doubling escape. Numbers and
- * booleans render as literals. null/undefined render as `NULL`. Any other
- * type throws (we don't pass blobs or objects through this path).
- */
-function interpolateParams(sql: string, params: unknown[]): string {
-  let i = 0;
-  return sql.replace(/\?/g, () => {
-    if (i >= params.length) throw new Error('interpolateParams: not enough params');
-    const v = params[i++];
-    if (v === null || v === undefined) return 'NULL';
-    if (typeof v === 'number') return String(v);
-    if (typeof v === 'boolean') return v ? '1' : '0';
-    if (typeof v === 'string') return `'${v.replace(/'/g, "''")}'`;
-    throw new Error(`interpolateParams: unsupported param type ${typeof v}`);
-  });
-}
-
-/**
- * Build a D1Like that shells out to `wrangler d1 execute`. Used by the CLI.
- */
-export function makeWranglerD1(opts: WranglerD1Opts): D1Like {
   return {
     prepare(query: string): D1PreparedStatement {
-      const params: unknown[] = [];
+      const boundParams: unknown[] = [];
       const stmt: D1PreparedStatement = {
         bind(...values) {
-          params.push(...values);
+          boundParams.push(...values);
           return stmt;
         },
         async first<T>() {
-          const res = await execWrangler(opts, query, params);
-          const rows = (res?.results ?? []) as T[];
+          const res = await execOne(query, boundParams);
+          const rows = (res.results ?? []) as T[];
           return rows[0] ?? null;
         },
         async all<T>() {
-          const res = await execWrangler(opts, query, params);
-          return { results: (res?.results ?? []) as T[] };
+          const res = await execOne(query, boundParams);
+          return { results: (res.results ?? []) as T[] };
         },
         async run() {
-          await execWrangler(opts, query, params);
-          return { success: true };
+          const res = await execOne(query, boundParams);
+          return { success: res.success, meta: res.meta };
         },
       };
       return stmt;
     },
     async batch(statements: D1PreparedStatement[]) {
-      // wrangler doesn't expose a single-shot batch over the CLI, but D1's
-      // semantics let us run statements sequentially. We sacrifice atomicity
-      // here vs the Worker binding — acceptable for ingest jobs that are
-      // restartable. Document this on the interface.
+      // Each statement carries its own `query` + `boundParams` via closure.
+      // We can't introspect those from outside, so we wrap each statement
+      // such that calling `run()` returns the underlying QueryResult and
+      // we collect them. Simpler approach: each prepared statement's run()
+      // already issues one HTTP call. We just iterate.
       const out: unknown[] = [];
       for (const s of statements) {
         out.push(await s.run());

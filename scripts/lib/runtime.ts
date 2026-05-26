@@ -8,7 +8,7 @@
  * Tests don't call this; they build their own fake bundles directly.
  */
 
-import { makeWranglerD1, type D1Like } from './d1-client';
+import { makeRestD1, type D1Like } from './d1-client';
 import { makeRealCongressClient, type CongressClient } from './congress-client';
 import { makeD1AuditLogger, type AuditLogger } from './audit-log';
 import { makeCliLogger, type CliLogger } from './logger';
@@ -65,13 +65,23 @@ export function resolveRuntime(opts: ResolveRuntimeOpts): RuntimeBundle {
     );
   }
 
-  // Default: remote for every env (env-agnostic). Caller passes remote=false
-  // to opt into the local wrangler binding for dev iteration.
+  // Default: remote for every env (env-agnostic). The `remote` flag here is
+  // a no-op now that the D1 transport uses the REST API; --local is no
+  // longer supported in v4.1.0 (the wrangler-shell transport that backed it
+  // had a fatal SQL-tokenization bug — see release-v4.1.0-rollout-log.md).
+  // Local iteration is `npx wrangler d1 execute --local …` for ad-hoc SQL,
+  // not via `lw bills seed`.
   const remote = opts.remote ?? true;
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  if (!accountId || !apiToken) {
+    throw new Error(
+      'resolveRuntime: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN env vars required for D1 REST access',
+    );
+  }
 
   const logger = makeCliLogger();
-  const database = 'voter-info-d1';
-  const d1 = makeWranglerD1({ database, env: envName, remote });
+  const d1 = makeRestD1({ envName, accountId, apiToken });
   const congressClient = makeRealCongressClient({
     apiKey,
     // CLI is the ingest job — runs at the full Congress.gov ceiling of
