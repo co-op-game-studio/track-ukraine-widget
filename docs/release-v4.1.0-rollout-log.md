@@ -76,19 +76,22 @@ findings. Edited live as work progresses.
 | Item | State | Notes |
 |---|---|---|
 | Boot dev admin SPA via Claude-in-Chrome | ✅ | Home Chrome browser selected. User completed CF Access SSO manually. |
-| First SPA observation | ⚠️ Issue 3 | PeopleTab showed "510 people · 1276 handles" — no coverage metric, no "no handles tracked" caption. v4.1.0 frontend NOT yet deployed to dev (last Deploy run was 2026-05-06). |
-| Trigger Deploy workflow on dev | 🟡 | Run 26474574064 queued at 2026-05-26T20:54:16Z. |
-| Settings ▸ Data freshness loads | ⬜ | After deploy completes |
-| PeopleTab shows ~535 cards | ⬜ | After deploy completes |
-| Megamenu has "Data freshness" link | ⬜ | After deploy completes |
+| First SPA observation | ⚠️ Issue 3 | PeopleTab showed "510 people · 1276 handles" — no coverage metric. v4.1.0 frontend NOT yet deployed to dev. |
+| Trigger Deploy workflow on dev | ⚠️ Issue 4 | First `workflow_dispatch` rejected (branch protection: main not allowed → dev). Resolution: fast-forward develop to main, push triggers Deploy. |
+| Deploy workflow first attempt | ❌ Issue 5 | Run 26474749521 failed at "Deploy Worker" step: `node:crypto` import bleeding from CLI lib into Worker bundle. Fix in rc3 (PR #121, commit c510374). |
+| Deploy workflow retry (rc3) | ✅ | Run 26475379122 succeeded after merging rc3 + re-forwarding develop. |
+| Settings ▸ Data freshness loads | ✅ | After hard-reload (stale bundle caching). Shows: Total bills 63, Became law 8 of 63, By congress (117th/118th/119th rows), By direction. Last refresh attempted: timestamp. |
+| PeopleTab shows roster-enumerated members | ✅ | "538 people · 1782 handles · **522/538 Congress with handles**" (was "510 people · 1276 handles" with no coverage metric pre-rc3). |
+| Megamenu has "Data freshness" link | ✅ | Confirmed via DOM query. |
 
 ## Phase 7 — Final RC tag + report
 
 | Item | State | Notes |
 |---|---|---|
-| All phases above ✅ | ⬜ | |
-| Tag `v4.1.0-rcN` (final) | ⬜ | After last iteration |
-| Update changelog with RC trail | ⬜ | |
+| All phases above ✅ | ✅ | |
+| Tag `v4.1.0-rc3` (final) | ✅ | Tagged `4e6903c` on develop. Pushed `v4.1.0-rc3` to origin. |
+| Update changelog with RC trail | ✅ | See "RC bumps" section below + this row. |
+| Write end-of-rollout summary | ✅ | See "Dev rollout summary (2026-05-26)" below. |
 
 ---
 
@@ -176,4 +179,53 @@ Both encode the full dotted form into the URL; both make the URL injective over 
 
 ## Decisions made during rollout
 
-(populated as work progresses)
+- **Worker rate-limit reverted (rc2 review):** the per-Worker-instance bucket can't enforce a global Congress.gov ceiling anyway, and adding `ratePerHour: 2500` to the Worker path broke 19 existing tests. CLI keeps `ratePerHour: 5000` as the actual ingest path; Worker stays at 0 (pre-v4.1.0 fail-fast behavior preserved).
+- **`--local` flag removed in rc2:** the wrangler-shell D1 transport that backed `--local` had a fatal SQL-tokenization bug. REST transport is always remote; for ad-hoc local D1 work, operators use `npx wrangler d1 execute --local …` directly.
+- **AC-40.11 wording kept mine (post-merge):** when merging origin/main, both branches had independent fixes for the edge-tier cache bug. Kept the more detailed spec language (forbidden-case + ADR-019 reference) but took main's cleaner `edgeKeyToUrl(target, upstreamPath, key)` helper extraction.
+- **Develop forwarded twice during rollout:** rc2 deploy revealed `node:crypto` bleed (Issue 5); rc3 hotfix landed via PR #121 → main → fast-forward develop → redeploy. The pattern `main → ff develop → push triggers Deploy` is now the documented v4.x deploy path.
+
+---
+
+## Dev rollout summary (2026-05-26)
+
+### What landed on dev
+
+- **Edge-tier cache key fix** (AC-40.11, ADR-019) — query-keyed routes (census-geocoder) no longer collide on one edge entry per POP.
+- **FR-59 standalone seed CLI** (`lw bills seed`) — replaces the browser-tab-gated `useAutoBackfill` SPA hook with CI-driven seeding. 4-way concurrency, force=false default honors freshness gates.
+- **D1 corpus state restored:** 119th Congress went from **0/21 bills with cosponsors → 18/21 with cosponsors (525 cosponsor rows)**. became_law correctly set on 8 known Public Laws.
+- **PeopleTab roster enumeration:** shows **538 members** (was 510 with no coverage metric); coverage metric "**522/538 Congress with handles**" visible in header.
+- **Settings ▸ Data freshness panel:** Total/became-law/by-congress/by-direction stats, freshness buckets, stale-bills list, last-refresh-attempted timestamp. Megamenu link present.
+- **Migration 0010:** 118-HR-2445 + 118-S-2552 reclassified anti-ukraine → neutral.
+- **GitHub Actions workflow** (`.github/workflows/seed-bills.yml`): cron 6h dev/uat, 12h stg/prod, workflow_dispatch with env/force/limit/concurrency. First CI seed run on dev: 63/63 cached (steady state), 0 failures, 45s.
+
+### RC iteration trail
+
+| RC | What broke | What fixed it |
+|---|---|---|
+| rc1 → rc2 | `wrangler d1 execute --command=<SQL>` tokenized SQL on whitespace/commas (Issue 1) | Switched D1 transport to CF REST API (`makeRestD1`) with native parameter binding |
+| rc2 → rc3 | Worker deploy failed: `node:crypto` bleeding from CLI lib into Worker bundle (Issue 5) | Rewrote `scripts/lib/trace.ts` to use Web Crypto (`globalThis.crypto.getRandomValues`) — works in both Node 19+ and Workers |
+
+### Final RC: v4.1.0-rc3
+
+- **Tag:** `v4.1.0-rc3` on develop, commit `4e6903c`.
+- **Tests:** 157 files, 2189 passing, 5 skipped.
+- **Coverage:** 94.89% lines / 87.08% branches / 89.83% functions / 94.89% statements (all above 80% floors).
+- **Build:** SPA + IIFE + admin all green, SRI manifest emitted.
+- **Deploy:** dev Worker live at `dev.vote.cogs.it.com`, bundle `index-DUHuALSR.js` (rc3).
+- **D1 state:** verified via REST API queries — 63 bills, 8 became_law, 119th 18/21 cosponsors (was 0/21).
+- **CI seed run:** clean steady-state (`63/63 cached, 0 fresh, 0 failed`) — proves AC-59.10 byte-identical idempotency end-to-end.
+
+### Known issues for v4.1.1 punch-list
+
+1. **Worker bundle imports node:* detection** — would have caught Issue 5 at typecheck instead of deploy. Add a CI check that grep the bundled `worker.js` for `node:` imports.
+2. **`wrangler.toml` config precedence** — wrangler discovered a stray `wrangler.jsonc` in the parent directory before `wrangler.toml`. Migration step needed `--config=wrangler.toml` explicitly. Future fix: `.wranglerignore` or just delete the parent-dir config.
+3. **DB-name vs binding-name confusion** — wrangler `--config=… d1 execute X` wants the `database_name` (`viw_researcher_dev`), not the binding name (`voter-info-d1`). Documented in this log; consider a README pointer.
+4. **CLI's `D1.batch` runs sequentially, not atomically** — known tradeoff (acceptable given idempotent re-runs + freshness gate + audit_log). Could be promoted to a proper batch via D1's `/raw` endpoint or by chunking statements via the `--command=BEGIN; ... ; COMMIT;` route.
+5. **Branch-model docs for the deploy ladder** — the `main → ff develop → push triggers Deploy` pattern took two attempts to get right during this rollout (one wrong workflow_dispatch from main; one correct ff). Worth a short section in CLAUDE.md or `docs/deployment.md`.
+
+### What's next
+
+1. **UAT promotion** — when ready, repeat the ladder: cut a PR `develop → uat`, merge, watch Deploy. Apply migration 0010 to uat D1. Trigger seed-bills.yml with env=uat. Verify SPA.
+2. **stg + prod promotion** — reviewer-gated, normal release cadence.
+3. **PR #118** — the original prod→main CI sync that prompted this whole effort. Either close (the work it carried is now in PR #120 / rc3) or rebase + re-resolve.
+4. **v4.1.1 punch list above** — small follow-ups; none blocking.
