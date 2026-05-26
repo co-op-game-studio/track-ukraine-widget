@@ -1,4 +1,4 @@
-name: Backfill Bills (FR-59)
+name: Seed Bills (FR-59)
 
 on:
   schedule:
@@ -15,7 +15,7 @@ on:
         options: [dev, uat, stg, prod]
         default: dev
       force:
-        description: 'Force re-import all bills (slow)'
+        description: 'Force re-pull every bill ignoring freshness cache (slow)'
         required: false
         type: boolean
         default: false
@@ -31,7 +31,7 @@ on:
         default: '4'
 
 jobs:
-  backfill:
+  seed:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -84,14 +84,14 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: npm ci
 
-      - name: Run backfill (${{ matrix.env }})
+      - name: Run seed (${{ matrix.env }})
         if: steps.gate.outputs.run == 'true'
         env:
           CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          ARGS="bills backfill --env ${{ matrix.env }} --verbose"
+          ARGS="bills seed --env ${{ matrix.env }} --verbose"
           if [ "${{ inputs.force }}" = "true" ]; then
             ARGS="$ARGS --force"
           fi
@@ -108,12 +108,12 @@ jobs:
           # Exit 0 + 2 both green (2 = partial success, failures are in audit_log).
           # Exit 1 = config error → red build.
           if [ "$code" -eq 1 ]; then
-            echo "::error::backfill failed with config error (exit 1)"
+            echo "::error::seed failed with config error (exit 1)"
             exit 1
           elif [ "$code" -eq 2 ]; then
-            echo "::warning::backfill completed with per-bill failures. See audit_log."
+            echo "::warning::seed completed with per-bill failures. See audit_log."
             exit 0
           else
-            echo "backfill completed cleanly (exit 0)"
+            echo "seed completed cleanly (exit 0)"
             exit 0
           fi

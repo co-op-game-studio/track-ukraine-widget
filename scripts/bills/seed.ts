@@ -1,27 +1,31 @@
 /**
- * `lw bills backfill` — CLI wrapper.
+ * `lw bills seed` — CLI wrapper.
  *
- * Argv → input shape → backfillBills() → exit code.
+ * Argv → input shape → seedBills() → exit code.
  *
  * Exit codes per AC-59.1:
  *   0 — all bills processed successfully (or no bills matched).
  *   1 — configuration error (missing API key, unreachable D1, bad --env).
  *   2 — at-least-one-bill-failed (partial success). Failures are in
  *       audit_log. CI treats this as a warning, not a red build.
+ *
+ * Environment-agnostic: the same code path runs against any env. `--env`
+ * picks the D1/KV bindings; `--local` opts into the local wrangler binding
+ * for fast dev iteration (default is remote for every env).
  */
 
 import type { Command } from 'commander';
 import { resolveRuntime } from '../lib/runtime';
-import { backfillBills } from '../lib/bills/backfill';
+import { seedBills } from '../lib/bills/seed';
 
 export function attach(parent: Command): void {
   parent
-    .command('backfill')
-    .description('Re-import every bill in D1 from Congress.gov (FR-59)')
+    .command('seed')
+    .description('Ensure every bill in D1 reflects Congress.gov truth (FR-59)')
     .requiredOption('--env <env>', 'Environment: dev | uat | stg | prod')
     .option('--limit <n>', 'Max bills to process this run', (v) => Number.parseInt(v, 10))
     .option('--after <bill_id>', 'Resume cursor — start after this bill_id')
-    .option('--force', 'Force re-import even if congress_update_date is unchanged')
+    .option('--force', 'Force re-pull even if congress_update_date is unchanged')
     .option(
       '--concurrency <n>',
       'In-flight bills (default 4; token bucket throttles aggregate to 5000/h)',
@@ -32,6 +36,10 @@ export function attach(parent: Command): void {
       'Filter to one congress (117 | 118 | 119)',
       (v) => Number.parseInt(v, 10),
     )
+    .option(
+      '--local',
+      'Use the local wrangler D1 binding instead of remote (dev iteration only)',
+    )
     .option('--dry-run', 'Walk bills + show what would change, but do not write — NOT YET IMPLEMENTED')
     .action(
       async (opts: {
@@ -41,24 +49,25 @@ export function attach(parent: Command): void {
         force?: boolean;
         concurrency?: number;
         congress?: number;
+        local?: boolean;
         dryRun?: boolean;
       }) => {
         if (opts.dryRun) {
           // eslint-disable-next-line no-console
-          console.error('[lw bills backfill] --dry-run not yet implemented');
+          console.error('[lw bills seed] --dry-run not yet implemented');
           process.exit(1);
         }
 
         let runtime;
         try {
-          runtime = resolveRuntime({ env: opts.env });
+          runtime = resolveRuntime({ env: opts.env, remote: !opts.local });
         } catch (err) {
           // eslint-disable-next-line no-console
-          console.error(`[lw bills backfill] config: ${err instanceof Error ? err.message : String(err)}`);
+          console.error(`[lw bills seed] config: ${err instanceof Error ? err.message : String(err)}`);
           process.exit(1);
         }
 
-        const result = await backfillBills({
+        const result = await seedBills({
           d1: runtime.d1,
           congressClient: runtime.congressClient,
           auditLog: runtime.auditLog,

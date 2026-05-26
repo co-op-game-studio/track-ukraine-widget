@@ -117,8 +117,8 @@ export async function handleAdmin(
   if (resource === 'audit') return await handleAudit(request, env, adminCtx);
   if (resource === 'import-bill') return await handleImportBill(request, env, adminCtx);
   if (resource === 'data-freshness') return await handleDataFreshness(request, env, adminCtx);
-  // `backfill-bills` route removed in v4.1.0 — ingest is `lw bills backfill`
-  // in CI now. See spec.md FR-59 + ADR n/a (CLI is build/ops, not runtime).
+  // `backfill-bills` route removed in v4.1.0 — ingest is `lw bills seed`
+  // in CI now. See spec.md FR-59 + memory feedback_seeding_is_buildops_not_runtime.
   if (resource === 'ingest') {
     const ingestSubpath = [id, action].filter(Boolean).join('/');
     return await handleIngest(ingestSubpath, request, env, {
@@ -1034,7 +1034,7 @@ async function handleImportBill(
 }
 
 // handleBackfillBills + /api/admin/backfill-bills route removed in v4.1.0.
-// Ingest moved to scripts/bills/backfill.ts (lw CLI) running in CI.
+// Ingest moved to scripts/bills/seed.ts (`lw bills seed`) running in CI.
 // See docs/spec.md FR-59 + memory feedback_seeding_is_buildops_not_runtime.
 
 /* -------------------------------------------------------------------------- */
@@ -1104,12 +1104,12 @@ async function handleDataFreshness(
     .bind(within24h)
     .all<{ bill_id: string; title: string; last_freshness_check_at: string | null }>();
 
-  // Last successful backfill run from audit_log.
+  // Last successful seed run from audit_log.
   const lastRun = await d1
     .prepare(
       `SELECT created_at, actor_email, trace_id
        FROM audit_log
-       WHERE action = 'import_bill' OR action = 'bill_backfill_error'
+       WHERE action = 'import_bill' OR action = 'bill_seed_error'
        ORDER BY created_at DESC
        LIMIT 1`,
     )

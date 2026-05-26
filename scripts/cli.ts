@@ -55,8 +55,8 @@ const bills = program.command('bills').description('Bill ingest + maintenance');
 // Each subcommand module exports `attach(program: Command)` which calls
 // .command(...) on the passed Command instance.
 
-import { attach as attachBillsBackfill } from './bills/backfill';
-attachBillsBackfill(bills);
+import { attach as attachBillsSeed } from './bills/seed';
+attachBillsSeed(bills);
 
 /* ------------------------------------------------------------------------ */
 /*                                kv group                                  */

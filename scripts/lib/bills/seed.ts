@@ -1,6 +1,11 @@
 /**
- * backfillBills — pure orchestrator for "iterate every bill in D1 and
- * call importBillCore for each."
+ * seedBills — pure orchestrator for "iterate every bill in D1 and ensure
+ * its row + cosponsors + votes + actions reflect Congress.gov truth."
+ *
+ * "Seed" intentionally, not "backfill" — the job doesn't presuppose an
+ * existing dataset. Every run is independent, environment-agnostic, and
+ * idempotent: a second consecutive run against unchanged upstream
+ * produces byte-identical D1 state and zero new rows.
  *
  * Per AC-59.1 + AC-59.10:
  *   - Reads bills ordered by `bill_id ASC`. Resumable via `after` cursor.
@@ -21,7 +26,7 @@ import type { CliLogger } from '../logger';
 import { importBillCore, type ImportBillResult } from './import-core';
 import { generateTraceId } from '../trace';
 
-export interface BackfillBillsInput {
+export interface SeedBillsInput {
   d1: D1Like;
   congressClient: CongressClient;
   auditLog: AuditLogger;
@@ -38,13 +43,13 @@ export interface BackfillBillsInput {
   force?: boolean;
   /** Concurrency width. Default 4 — the shared token bucket throttles. */
   concurrency?: number;
-  /** Audit-log actor email. Default `ci@backfill`. */
+  /** Audit-log actor email. Default `ci@seed`. */
   actorEmail?: string;
   /** Filter to bills matching this predicate (e.g. only 119th). */
   filter?: (row: BillRow) => boolean;
 }
 
-export interface BackfillBillsResult {
+export interface SeedBillsResult {
   processed: number;
   ok: number;
   failed: number;
@@ -62,9 +67,9 @@ interface BillRow {
 }
 
 const DEFAULT_CONCURRENCY = 4;
-const DEFAULT_ACTOR = 'ci@backfill';
+const DEFAULT_ACTOR = 'ci@seed';
 
-export async function backfillBills(input: BackfillBillsInput): Promise<BackfillBillsResult> {
+export async function seedBills(input: SeedBillsInput): Promise<SeedBillsResult> {
   const t0 = Date.now();
   const {
     d1,
@@ -81,7 +86,7 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
   } = input;
 
   logger.info(
-    `backfill start: after=${after || '(none)'} limit=${limit ?? 'none'} force=${force} concurrency=${concurrency}`,
+    `seed start: after=${after || '(none)'} limit=${limit ?? 'none'} force=${force} concurrency=${concurrency}`,
   );
 
   // 1. Pull the work list. Single query — even thousands of bills is OK
@@ -93,12 +98,12 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
   const queryRes = await stmt.all<BillRow>();
   let rows = queryRes.results ?? [];
   if (filter) rows = rows.filter(filter);
-  logger.verbose(`backfill: ${rows.length} bills to process`);
+  logger.verbose(`seed: ${rows.length} bills to process`);
 
   // 2. Run with bounded concurrency. Each slot picks the next bill from
   //    the queue until empty. Errors land in `errors[]` and don't stop
   //    the loop.
-  const result: BackfillBillsResult = {
+  const result: SeedBillsResult = {
     processed: 0,
     ok: 0,
     failed: 0,
@@ -147,7 +152,7 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
         const elapsedMs = Date.now() - tBill;
         const tag = r.cached ? 'cached' : 'ok';
         logger.info(
-          `[backfill] ${row.bill_id} ${tag} ${elapsedMs}ms ` +
+          `[seed] ${row.bill_id} ${tag} ${elapsedMs}ms ` +
           `votes_in=${r.votes_imported} votes_up=${r.votes_updated} votes_skip=${r.votes_skipped} ` +
           `cos=${r.cosponsors_imported} act=${r.actions_imported}`,
         );
@@ -156,11 +161,11 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
         const message = err instanceof Error ? err.message : String(err);
         result.errors.push({ bill_id: row.bill_id, error: message, traceId });
         const elapsedMs = Date.now() - tBill;
-        logger.error(`[backfill] ${row.bill_id} FAILED ${elapsedMs}ms trace=${traceId}: ${message}`);
+        logger.error(`[seed] ${row.bill_id} FAILED ${elapsedMs}ms trace=${traceId}: ${message}`);
         // Best-effort audit row. If this also fails, just log and move on.
         try {
           await auditLog.log({
-            action: 'bill_backfill_error',
+            action: 'bill_seed_error',
             actorEmail,
             targetTable: 'bills',
             rowId: row.bill_id,
@@ -169,7 +174,7 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
           });
         } catch (auditErr) {
           logger.warn(
-            `[backfill] ${row.bill_id} audit-log write failed: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
+            `[seed] ${row.bill_id} audit-log write failed: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
           );
         }
       } finally {
@@ -187,10 +192,10 @@ export async function backfillBills(input: BackfillBillsInput): Promise<Backfill
   result.durationMs = Date.now() - t0;
   const fresh = result.ok - result.cached;
   logger.info(
-    `backfill done: processed=${result.processed} ok=${result.ok} cached=${result.cached} fresh=${fresh} failed=${result.failed} ${(result.durationMs / 1000).toFixed(1)}s`,
+    `seed done: processed=${result.processed} ok=${result.ok} cached=${result.cached} fresh=${fresh} failed=${result.failed} ${(result.durationMs / 1000).toFixed(1)}s`,
   );
   if (result.errors.length > 0) {
-    logger.warn(`backfill: ${result.errors.length} bills failed. See audit_log + above for details.`);
+    logger.warn(`seed: ${result.errors.length} bills failed. See audit_log + above for details.`);
   }
   return result;
 }

@@ -295,10 +295,11 @@ All ingest + projection work that runs outside the Worker lives under the
 `lw` CLI:
 
 ```bash
-npm run lw -- bills backfill --env dev          # Re-import every bill (FR-59)
-npm run lw -- bills backfill --env dev --force  # Force refresh ignoring updateDate cache
-npm run lw -- bills backfill --env dev --verbose  # Per-bill timing + counters
-npm run lw -- bills backfill --env dev --debug    # Verbose + raw upstream URLs (key-redacted)
+npm run lw -- bills seed --env dev               # Ensure every bill matches Congress.gov truth (FR-59)
+npm run lw -- bills seed --env dev --force       # Force re-pull, ignoring freshness cache
+npm run lw -- bills seed --env dev --verbose     # Per-bill timing + counters
+npm run lw -- bills seed --env dev --debug       # Verbose + raw upstream URLs (key-redacted)
+npm run lw -- bills seed --env dev --local       # Use local wrangler binding (dev iteration only)
 npm run lw -- kv publish --env dev              # Project curated data to KV (alias of legacy publish:kv)
 ```
 

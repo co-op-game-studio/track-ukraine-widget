@@ -34,14 +34,17 @@ export interface RuntimeBundle {
    *  per-resource invalidators to bust the stale projection after a write. */
   kvInvalidate: (key: string) => Promise<void>;
   logger: CliLogger;
-  /** Whether the CLI is hitting a remote (deployed) D1 binding or the local one.
-   *  Always remote for non-dev envs; defaults to local for dev. */
+  /** Whether the CLI is hitting the env's remote D1 binding (default) or
+   *  the local wrangler binding (--local opt-in for dev iteration). */
   remote: boolean;
 }
 
 export interface ResolveRuntimeOpts {
   env: string;
-  /** Force remote D1 (overrides default-by-env). */
+  /** Whether to use the env's remote D1 binding (default: true, every env).
+   *  Pass `false` (via CLI `--local`) for fast local iteration during dev.
+   *  Environment-agnostic posture: the same code path runs against any env;
+   *  this flag only changes the transport, not the orchestration logic. */
   remote?: boolean;
   /** Override the Congress API key (defaults to env var). */
   congressApiKey?: string;
@@ -62,9 +65,9 @@ export function resolveRuntime(opts: ResolveRuntimeOpts): RuntimeBundle {
     );
   }
 
-  // Default: remote for everything except dev, where we prefer the local
-  // wrangler binding so iteration is fast and free.
-  const remote = opts.remote ?? envName !== 'dev';
+  // Default: remote for every env (env-agnostic). Caller passes remote=false
+  // to opt into the local wrangler binding for dev iteration.
+  const remote = opts.remote ?? true;
 
   const logger = makeCliLogger();
   const database = 'voter-info-d1';

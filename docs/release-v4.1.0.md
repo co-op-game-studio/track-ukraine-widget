@@ -96,7 +96,7 @@ This is the bulk of the new work. Tracked task by task below.
 |---|---|---|
 | Full suite green | ✅ 2026-05-25 | 156 files, 2186 tests, 5 skipped, all green |
 | Typecheck clean | ✅ 2026-05-25 | `npm run typecheck` passes both root + proxy configs |
-| Live dev verification | ⬜ pending | `npx lw bills backfill --env dev --limit 5` against real dev D1 — requires CONGRESS_API_KEY + wrangler auth |
+| Live dev verification | ⬜ pending | `npx tsx scripts/cli.ts bills seed --env dev --limit 5` against real dev D1 — requires CONGRESS_API_KEY + CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID |
 | Commit + push to chore/coverage-deep-pass | ✅ 2026-05-25 | Commit `c7f6f9b` on `chore/coverage-deep-pass` |
 | Open PR → main + tag `v4.1.0` | ⬜ pending | After human reviews + you choose to push |
 | Update [docs/tasks.md](tasks.md) with T-134..T-141 entries | ✅ 2026-05-25 | Mirrored as T-134..T-141 |
@@ -204,3 +204,5 @@ These came up during the chat but are **NOT** in v4.1.0. Listed here so a future
 | 2026-05-25 | Group 3.4 complete — `lw bills backfill` subcommand wired. Concurrency 4. force=false default → warm-run cost ~63 calls/45s. Spec AC-59.10 expanded to make the "save once, don't re-pull unless changed" posture explicit + quantified. Typecheck + full suite green. |
 | 2026-05-25 | Groups 3.6–3.12 complete. Deleted useAutoBackfill hook + /api/admin/backfill-bills route + their tests. Migration 0010 (HR-2445/S-2552 → neutral). Data Freshness panel + endpoint (research-facing, NOT operator-state). PeopleTab enumerates from KV name-index roster — all sitting members visible. GitHub Actions workflow (.github/workflows/backfill-bills.yml). Spec touch-ups (CLAUDE.md, ADR-011). v4.1.0 task rows added (T-134..T-141). |
 | 2026-05-25 | Committed as c7f6f9b on chore/coverage-deep-pass. Branch is ready to PR to main. 156 files / 2186 tests green, typecheck clean. |
+| 2026-05-25 | Deep-review fixes landed as a82b2f8: migration INSERT OR IGNORE for re-run safety, audit row back into d1.batch (atomic), CLI kvInvalidate via CF KV REST API. Worker rate-limit revert (broke tests, per-Worker bucket can't enforce global). Megamenu Data Freshness link. Drop bin entry. 4 doc nits. |
+| 2026-05-26 | **Rename pass: backfill → seed.** "Backfill" was wrong terminology — implies an existing dataset with gaps. The job is *seeding*: every run populates from upstream truth, env-agnostic, idempotent. Renamed CLI command, file paths, fn names, types, audit action (`bill_seed_error`), workflow filename + step labels, log prefixes. Added AC-59.12 (env-agnostic execution). Tightened AC-59.10 with byte-identical-idempotency test. Removed `envName !== 'dev'` branch in runtime.ts — default is `--remote` for every env; `--local` is opt-in for dev iteration. |

@@ -1,17 +1,17 @@
 /**
- * Tests for scripts/lib/bills/backfill.ts — the corpus driver behind
- * `lw bills backfill`.
+ * Tests for scripts/lib/bills/seed.ts — the corpus driver behind
+ * `lw bills seed`.
  *
  * Covers the AC-59 driver-level guarantees that aren't tested by
  * importBillCore directly:
  *   - per-bill failures don't abort the loop (AC-59.3)
  *   - cursor honored (AC-59.1)
  *   - limit honored (AC-59.1)
- *   - audit_log gets a bill_backfill_error row on failure (AC-59.3)
+ *   - audit_log gets a bill_seed_error row on failure (AC-59.3)
  *   - cached counts surface in the result (AC-59.10)
  */
 import { describe, it, expect } from 'vitest';
-import { backfillBills } from '../../../scripts/lib/bills/backfill';
+import { seedBills } from '../../../scripts/lib/bills/seed';
 import type { D1Like, D1PreparedStatement } from '../../../scripts/lib/d1-client';
 import type { AuditLogger, AuditEvent } from '../../../scripts/lib/audit-log';
 import type { CongressClient } from '../../../scripts/lib/congress-client';
@@ -59,7 +59,7 @@ function quietLogger() {
   return makeCliLogger({ verbosity: 'quiet' });
 }
 
-describe('backfillBills — driver behavior', () => {
+describe('seedBills — driver behavior (env-agnostic, idempotent)', () => {
   it('processes every bill returned by the query', async () => {
     const d1 = makeBillsD1([
       { bill_id: '117-HR-1', congress: 117, type: 'HR', number: '1' },
@@ -70,16 +70,16 @@ describe('backfillBills — driver behavior', () => {
     const congressClient: CongressClient = { async get() { return null; } };
     const auditLog = makeAuditLogger();
 
-    const r = await backfillBills({
+    const r = await seedBills({
       d1, congressClient, auditLog, logger: quietLogger(), concurrency: 2,
     });
 
     expect(r.processed).toBe(3);
     expect(r.ok).toBe(0);
     expect(r.failed).toBe(3);
-    // Audit log got one bill_backfill_error per failure.
+    // Audit log got one bill_seed_error per failure.
     expect(auditLog.events.length).toBe(3);
-    expect(auditLog.events.every((e) => e.action === 'bill_backfill_error')).toBe(true);
+    expect(auditLog.events.every((e) => e.action === 'bill_seed_error')).toBe(true);
   });
 
   it('continues past a single bill failure (AC-59.3)', async () => {
@@ -98,7 +98,7 @@ describe('backfillBills — driver behavior', () => {
     };
     const auditLog = makeAuditLogger();
 
-    const r = await backfillBills({
+    const r = await seedBills({
       d1, congressClient, auditLog, logger: quietLogger(), concurrency: 1,
     });
 
@@ -116,7 +116,7 @@ describe('backfillBills — driver behavior', () => {
     const congressClient: CongressClient = { async get() { return null; } };
     const auditLog = makeAuditLogger();
 
-    const r = await backfillBills({
+    const r = await seedBills({
       d1, congressClient, auditLog, logger: quietLogger(),
       limit: 2,
     });
@@ -133,7 +133,7 @@ describe('backfillBills — driver behavior', () => {
     const congressClient: CongressClient = { async get() { return null; } };
     const auditLog = makeAuditLogger();
 
-    const r = await backfillBills({
+    const r = await seedBills({
       d1, congressClient, auditLog, logger: quietLogger(),
       after: '117-HR-2',
     });
@@ -151,7 +151,7 @@ describe('backfillBills — driver behavior', () => {
     const congressClient: CongressClient = { async get() { return null; } };
     const auditLog = makeAuditLogger();
 
-    const r = await backfillBills({
+    const r = await seedBills({
       d1, congressClient, auditLog, logger: quietLogger(),
       filter: (row) => row.congress === 119,
     });
