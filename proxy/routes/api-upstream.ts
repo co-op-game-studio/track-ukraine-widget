@@ -34,6 +34,21 @@ import type { CacheKey } from '../cache/key';
 import { cacheKeyToDottedString } from '../cache/key';
 import { resolveTraceId } from '../observability/trace';
 
+/**
+ * Build the synthetic URL used as the EdgeTier cache key for a given route +
+ * cache key. Two distinct CacheKeys MUST produce distinct URLs (FR-40
+ * AC-40.11). The kind + canonically-sorted params are appended via
+ * `cacheKeyToDottedString`; without the params suffix, query-keyed routes
+ * (e.g. census-geocoder, where `params.qs` carries the address) collapse
+ * to a single edge entry per pathname and poison every other request at
+ * that POP — the 2026-05-03 prod incident.
+ */
+export function edgeKeyToUrl(target: string, upstreamPath: string, key: CacheKey): URL {
+  const u = new URL(`${target}/${upstreamPath}`);
+  u.pathname += `#${cacheKeyToDottedString(key)}`;
+  return u;
+}
+
 export async function handleApi(
   request: Request,
   url: URL,
@@ -135,18 +150,9 @@ export async function handleApi(
     if (match) {
       const routeClass = match.cacheKind;
       const tiered = new TieredCache<string>([
-        new EdgeTier<string>(cache, (k: CacheKey) => {
-          // AC-40.11 / ADR-019: the edge-tier URL MUST be injective on the
-          // full (kind, params) of the CacheKey, not just on the request
-          // pathname. Census-geocoder carries identity in the query string
-          // (`address`), so a key-derivation that ignores params collapses
-          // every address lookup onto one bucket per POP — the 2026-05-25
-          // prod regression. Encode the canonical dotted form of the key
-          // (same serialization the KV tier uses) as a `__ck` query param.
-          const u = new URL(`${route.target}/${upstreamPath}`);
-          u.searchParams.set('__ck', cacheKeyToDottedString(k));
-          return u;
-        }),
+        new EdgeTier<string>(cache, (k: CacheKey) =>
+          edgeKeyToUrl(route.target, upstreamPath, k),
+        ),
         new KvTier<string>({
           // env.KV_VOTER_INFO.get returns `string | null | unknown`; KvLike
           // expects `string | null`. Narrow via adapter since the tier only
