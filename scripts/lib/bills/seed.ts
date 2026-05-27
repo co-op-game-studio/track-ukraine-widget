@@ -91,13 +91,23 @@ export async function seedBills(input: SeedBillsInput): Promise<SeedBillsResult>
 
   // 1. Pull the work list. Single query — even thousands of bills is OK
   //    because we only read 4 columns per row.
-  const sql = `SELECT bill_id, congress, type, number FROM bills WHERE bill_id > ? ORDER BY bill_id ASC${limit ? ' LIMIT ?' : ''}`;
-  const stmt = limit
+  //    Note: `--limit` is applied AFTER the in-memory filter, not as the
+  //    SQL LIMIT, because the filter may drop rows (e.g. --congress 119
+  //    keeps only ~1/3 of the table). If we used SQL LIMIT first the
+  //    filter could reduce the result to fewer than `limit` rows, or
+  //    drop to zero (the v4.1.0-rc3 → rc4 bug). When no filter is given
+  //    the SQL LIMIT is still applied as an optimization.
+  const sqlHasLimit = limit !== undefined && filter === undefined;
+  const sql = `SELECT bill_id, congress, type, number FROM bills WHERE bill_id > ? ORDER BY bill_id ASC${sqlHasLimit ? ' LIMIT ?' : ''}`;
+  const stmt = sqlHasLimit
     ? d1.prepare(sql).bind(after, limit)
     : d1.prepare(sql).bind(after);
   const queryRes = await stmt.all<BillRow>();
   let rows = queryRes.results ?? [];
   if (filter) rows = rows.filter(filter);
+  // Apply the user-facing `limit` AFTER the filter so `--limit 5 --congress 119`
+  // returns 5 119th bills, not "first 5 rows AND happen to be 119th".
+  if (limit !== undefined && filter !== undefined) rows = rows.slice(0, limit);
   logger.verbose(`seed: ${rows.length} bills to process`);
 
   // 2. Run with bounded concurrency. Each slot picks the next bill from
