@@ -223,12 +223,24 @@ Both encode the full dotted form into the URL; both make the URL injective over 
 4. **CLI's `D1.batch` runs sequentially, not atomically** — known tradeoff (acceptable given idempotent re-runs + freshness gate + audit_log). Could be promoted to a proper batch via D1's `/raw` endpoint or by chunking statements via the `--command=BEGIN; ... ; COMMIT;` route.
 5. **Branch-model docs for the deploy ladder** — the `main → ff develop → push triggers Deploy` pattern took two attempts to get right during this rollout (one wrong workflow_dispatch from main; one correct ff). Worth a short section in CLAUDE.md or `docs/deployment.md`.
 
+### Ladder progression (rc4)
+
+| Env | State | Verification |
+|---|---|---|
+| dev | ✅ Live | Full deep FE verification: edge-tier fix, score recompute, PeopleTab roster + coverage metric, bill detail (119-HR-2913 41 cosp/11 act), seed idempotency, KV invalidation. |
+| uat | ✅ Live | Deploy run 26487037188 success; seed run 26487068153 success; migration 0010 applied (rows_written: 12). Auto-deployed on PR #123 merge to uat. |
+| stg | ⏸ Waiting on reviewer approval | PR #124 (uat → stg) merged. Deploy run 26487175881 queued behind reviewer-gate. Migration 0010 already applied to stg D1 (rows_written: 12). Seed run 26487196434 triggered. |
+| prod | ⏸ Held | PR #125 (stg → prod) open. Migration 0010 NOT yet applied to prod D1. No deploy attempted. |
+
 ### What's next
 
-1. **UAT promotion** — when ready, repeat the ladder: cut a PR `develop → uat`, merge, watch Deploy. Apply migration 0010 to uat D1. Trigger seed-bills.yml with env=uat. Verify SPA.
-2. **stg + prod promotion** — reviewer-gated, normal release cadence.
-3. **PR #118** — the original prod→main CI sync that prompted this whole effort. Either close (the work it carried is now in PR #120 / rc3) or rebase + re-resolve.
-4. **v4.1.1 punch list above** — small follow-ups; none blocking.
+1. **Approve stg deploy** in GH Actions UI when ready — should be a clean re-execution of the same path UAT just ran.
+2. **Approve prod deploy** at its own reviewer-gate when stg is verified.
+3. **Apply migration 0010 to prod D1** via `wrangler d1 execute viw_researcher_prod --env=prod --remote --file=migrations/d1/0010_v4_1_0_direction_corrections.up.sql --config=wrangler.toml`.
+4. **Trigger seed-bills env=prod** workflow_dispatch after deploy.
+5. **Smoke prod widget on trackukraine.com** — the original incident surface. Two-address swap repro to confirm the edge-tier fix lives in prod.
+6. **PR #118** — the original prod→main CI sync. Either close (subsumed) or rebase.
+7. **v4.1.1 punch list above** — small follow-ups; none blocking.
 
 ---
 
