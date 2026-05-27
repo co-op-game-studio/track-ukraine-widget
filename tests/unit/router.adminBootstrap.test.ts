@@ -156,3 +156,33 @@ describe('router /admin SPA bootstrap (FR-52 AC-52.2, FR-44 AC-44.22)', () => {
     expect(result.response.headers.get('Location')).toBeNull();
   });
 });
+
+describe('router root-path / (preview vs prod)', () => {
+  it('GET / on PREVIEW_MODE=true serves the preview HTML shell', async () => {
+    const env = makeEnv();
+    const result = await dispatch(makeHtmlGet('/'), env, fakeCache, fakeCtx);
+    expect(result.response.status).toBe(200);
+    expect(result.response.headers.get('Content-Type')).toContain('text/html');
+    expect(result.response.headers.get('X-Preview-Mode')).toBe('served');
+    expect(result.response.headers.get('Cache-Control')).toBe('no-store');
+    const html = await result.response.text();
+    expect(html.toLowerCase()).toContain('<!doctype html>');
+  });
+
+  it('GET / on prod (PREVIEW_MODE unset) 301-redirects to the embed host', async () => {
+    const env = {
+      ENV_NAME: 'prod',
+      ALLOWED_ORIGINS: 'https://trackukraine.com',
+      KV_VOTER_INFO: {
+        get: async () => null,
+        put: async () => {},
+        list: async () => ({ keys: [], list_complete: true }),
+        delete: async () => {},
+      },
+    } as unknown as import('../../proxy/env').ProxyEnv;
+    const result = await dispatch(makeHtmlGet('/'), env, fakeCache, fakeCtx);
+    expect(result.response.status).toBe(301);
+    expect(result.response.headers.get('Location')).toBe('https://trackukraine.com/');
+    expect(result.response.headers.get('X-Preview-Mode')).toBe('skipped (prod)');
+  });
+});

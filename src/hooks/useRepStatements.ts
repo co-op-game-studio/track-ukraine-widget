@@ -8,6 +8,7 @@
  * Traces to FR-51 AC-51.5, FR-53 AC-53.2.
  */
 import { useEffect, useState } from 'react';
+import { fetchRepBundle } from '../services/repBundle';
 
 export interface SocialPost {
   id: string;
@@ -50,23 +51,13 @@ export function useRepStatements(
     }
     let cancelled = false;
     setStatus('loading');
-    const base = apiBase.replace(/\/+$/, '');
-    fetch(`${base}/api/social-posts/${encodeURIComponent(bioguideId)}`)
-      .then(async (res) => {
+    fetchRepBundle(apiBase, bioguideId)
+      .then((bundle) => {
         if (cancelled) return;
-        if (res.status === 404) {
-          setPosts([]);
-          setStatus('empty');
-          return;
-        }
-        if (!res.ok) {
-          setPosts([]);
-          setStatus('empty');
-          return;
-        }
-        const json = (await res.json()) as SocialPostsRecord;
-        setPosts(json.posts ?? []);
-        setStatus(json.posts && json.posts.length > 0 ? 'success' : 'empty');
+        const record = bundle?.socialPosts as SocialPostsRecord | null;
+        const posts = record?.posts ?? [];
+        setPosts(posts);
+        setStatus(posts.length > 0 ? 'success' : 'empty');
       })
       .catch(() => {
         if (cancelled) return;
