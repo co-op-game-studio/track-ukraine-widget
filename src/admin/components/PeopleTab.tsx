@@ -1075,7 +1075,7 @@ function PersonProfileView({
 
       {/* ── Widget preview ── */}
       <div style={profileSectionStyle}>
-        <div style={profileSectionTitle}>Widget Preview — legislation.watch</div>
+        <div style={profileSectionTitle}>Widget Preview — trackukraine.com</div>
         <div style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', marginBottom: 4 }}>
           Search for "{personName}" in the widget below to see their current profile.
         </div>

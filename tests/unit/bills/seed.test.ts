@@ -159,4 +159,34 @@ describe('seedBills — driver behavior (env-agnostic, idempotent)', () => {
     expect(r.processed).toBe(1);
     expect(r.lastBillId).toBe('119-HR-1');
   });
+
+  // Regression: rc3 → rc4. `--limit N --congress X` was returning zero bills
+  // because SQL LIMIT ran BEFORE the in-memory filter. Fix: when a filter
+  // is provided, fetch all rows and slice() after filtering.
+  it('limit + filter applies limit AFTER filter (rc4 regression)', async () => {
+    // 117-HR-1, 117-HR-2, 118-HR-1, 119-HR-1, 119-HR-2, 119-HR-3 — six bills.
+    // With `limit=2, filter=119th`, naive impl would SELECT … LIMIT 2 → get
+    // [117-HR-1, 117-HR-2] → filter to 119th → 0 bills. Correct impl
+    // returns [119-HR-1, 119-HR-2].
+    const d1 = makeBillsD1([
+      { bill_id: '117-HR-1', congress: 117, type: 'HR', number: '1' },
+      { bill_id: '117-HR-2', congress: 117, type: 'HR', number: '2' },
+      { bill_id: '118-HR-1', congress: 118, type: 'HR', number: '1' },
+      { bill_id: '119-HR-1', congress: 119, type: 'HR', number: '1' },
+      { bill_id: '119-HR-2', congress: 119, type: 'HR', number: '2' },
+      { bill_id: '119-HR-3', congress: 119, type: 'HR', number: '3' },
+    ]);
+    const congressClient: CongressClient = { async get() { return null; } };
+    const auditLog = makeAuditLogger();
+
+    const r = await seedBills({
+      d1, congressClient, auditLog, logger: quietLogger(),
+      filter: (row) => row.congress === 119,
+      limit: 2,
+    });
+
+    expect(r.processed).toBe(2);
+    // The two should be 119th bills (first two by bill_id ASC after filter).
+    expect(r.lastBillId).toBe('119-HR-2');
+  });
 });
