@@ -31,7 +31,23 @@ import { R2Tier } from '../cache/r2-tier';
 import { serveCached } from '../cache/pipeline';
 import { createUpstreamRegistry } from '../upstreams/registry';
 import type { CacheKey } from '../cache/key';
+import { cacheKeyToDottedString } from '../cache/key';
 import { resolveTraceId } from '../observability/trace';
+
+/**
+ * Build the synthetic URL used as the EdgeTier cache key for a given route +
+ * cache key. Two distinct CacheKeys MUST produce distinct URLs (FR-40
+ * AC-40.11). The kind + canonically-sorted params are appended via
+ * `cacheKeyToDottedString`; without the params suffix, query-keyed routes
+ * (e.g. census-geocoder, where `params.qs` carries the address) collapse
+ * to a single edge entry per pathname and poison every other request at
+ * that POP — the 2026-05-03 prod incident.
+ */
+export function edgeKeyToUrl(target: string, upstreamPath: string, key: CacheKey): URL {
+  const u = new URL(`${target}/${upstreamPath}`);
+  u.pathname += `#${cacheKeyToDottedString(key)}`;
+  return u;
+}
 
 export async function handleApi(
   request: Request,
@@ -134,16 +150,9 @@ export async function handleApi(
     if (match) {
       const routeClass = match.cacheKind;
       const tiered = new TieredCache<string>([
-        new EdgeTier<string>(cache, (k: CacheKey) => {
-          // Use the upstream URL as the edge cache key so two requests
-          // for the same key land in the same bucket regardless of which
-          // POP served them. The API key never appears here.
-          const u = new URL(`${route.target}/${upstreamPath}`);
-          // Include kind + params in the pathname so same-URL different-
-          // kind doesn't collide (defense; matchRoute should prevent).
-          u.pathname += `#${k.kind}`;
-          return u;
-        }),
+        new EdgeTier<string>(cache, (k: CacheKey) =>
+          edgeKeyToUrl(route.target, upstreamPath, k),
+        ),
         new KvTier<string>({
           // env.KV_VOTER_INFO.get returns `string | null | unknown`; KvLike
           // expects `string | null`. Narrow via adapter since the tier only

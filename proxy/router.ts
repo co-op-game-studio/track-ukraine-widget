@@ -40,6 +40,13 @@ import { handleRollCall } from './routes/api-roll-calls';
 import { handleRollCallRoster } from './routes/api-roll-call-rosters';
 import { handleStateMembers } from './routes/api-state-members';
 import { handleApi } from './routes/api-upstream';
+import { handleAdmin } from './routes/api-admin';
+import { handleComments } from './routes/api-comments';
+import { handleSocialPosts } from './routes/api-social-posts';
+import { handleQuotes } from './routes/api-quotes';
+import { handleRepBundle } from './routes/api-rep-bundle';
+import { handleAuditPublic } from './routes/api-audit-public';
+import { handleStatsSummary } from './routes/api-stats';
 import { buildEmbedHtml, buildPreviewHtml } from './routes/preview';
 import { resolveTraceId, TRACE_HEADER } from './observability/trace';
 import { logEvent } from './observability/log';
@@ -52,12 +59,14 @@ import {
 /** Classify a URL pathname into the analytics `routeClass` blob value. */
 function classifyRoute(url: URL): string {
   const p = url.pathname;
-  const kv = p.match(/^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search)\b/);
+  if (p.startsWith('/api/admin/') || p === '/api/admin') return 'admin';
+  const kv = p.match(/^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search|comments|social-posts|quotes|audit|stats)\b/);
   if (kv) return kv[1]!;
   if (p.startsWith('/api/census/')) return 'census';
   if (p.startsWith('/api/congress/')) return 'congress-upstream';
   if (p.startsWith('/api/senate/')) return 'senate-upstream';
   if (p.startsWith('/api/')) return 'api-other';
+  if (p.startsWith('/admin')) return 'admin-spa';
   if (p === '/embed' || p === '/embed/') return 'embed-html';
   if (p === '/' || p === '') return 'root';
   return 'asset-or-404';
@@ -106,7 +115,16 @@ export async function handleFetch(
   const envLabel = env.ENV_NAME ?? 'prod';
   const routeClass = classifyRoute(url);
   const upstreamName = classifyUpstream(routeClass);
-  const redactList = env.CONGRESS_API_KEY ? [env.CONGRESS_API_KEY] : undefined;
+  // Defense-in-depth log scrub: any secret value seen verbatim in a log
+  // payload gets replaced. We never intentionally log these, but a future
+  // refactor that interpolates them into an error message (Worker fetch
+  // throws are opaque; upstream API bodies sometimes echo request URLs)
+  // would otherwise leak the raw token. Keep this list synchronized with
+  // every secret in env.ts.
+  const redactList = [
+    env.CONGRESS_API_KEY,
+    env.YOUTUBE_API_KEY,
+  ].filter((s): s is string => Boolean(s));
 
   let response: Response;
   let shape;
@@ -198,9 +216,33 @@ export async function dispatch(
   const allowedOrigins = parseAllowedOrigins(env);
   const allowLocalhost = env.ALLOW_LOCALHOST === 'true';
 
-  // 1. KV-backed curator read routes (ADR-011, FR-32).
+  // 0. Admin write API (FR-50). Cloudflare Access gates this path at the
+  //    edge; the Worker independently verifies the JWT. Path discipline is
+  //    enforced here so no `/api/admin/*` request can fall through to the
+  //    upstream-passthrough block below.
+  const adminMatch = url.pathname.match(/^\/api\/admin(?:\/(.*))?$/);
+  if (adminMatch) {
+    const rest = adminMatch[1] ?? '';
+    // Origin allowlist still applies — admin SPA is same-origin so this
+    // succeeds in practice; rejecting cross-origin is an extra layer.
+    if (!isPreviewEnv(env) && !isOriginAllowed(origin, allowedOrigins, allowLocalhost) && !isSameOriginBypass(request)) {
+      return {
+        response: new Response('Origin not allowed', {
+          status: 403,
+          headers: { Allow: 'GET, POST, PATCH, DELETE, OPTIONS' },
+        }),
+        shape: 'worker-emitted',
+      };
+    }
+    const adminRl = await applyRateLimit(request, url, env, origin);
+    if (adminRl) return adminRl;
+    const traceId = resolveTraceId(request);
+    return handleAdmin(rest, request, env, ctx, origin, traceId, env.ENV_NAME ?? 'prod');
+  }
+
+  // 1. KV-backed read routes (ADR-011 / FR-32 + V4 FR-51 / FR-56 / FR-58).
   const kvRouteMatch = url.pathname.match(
-    /^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search)(?:\/(.+))?$/,
+    /^\/api\/(members|bills|roll-calls|roll-call-rosters|state-members|name-search|comments|social-posts|quotes|audit|stats|rep-bundle)(?:\/(.+))?$/,
   );
   if (kvRouteMatch) {
     if (request.method === 'OPTIONS') {
@@ -245,13 +287,16 @@ export async function dispatch(
     if (kvRlResult) return kvRlResult;
 
     const [, kind, rest] = kvRouteMatch;
+    // AC-52.48 + AC-52.51 — read-through routes log cache events with
+    // the inbound traceId. Older routes don't consume it; pass anyway.
+    const kvTraceId = resolveTraceId(request);
     if (kind === 'members') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
       return handleMemberProfile(rest, request, env, ctx, origin!);
     }
     if (kind === 'bills') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_bill_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
-      return handleBill(rest, request, env, origin!);
+      return handleBill(rest, request, env, origin!, kvTraceId);
     }
     if (kind === 'roll-calls') {
       if (!rest) return { response: jsonResponse(400, { error: 'missing_roll_call_key' }, corsHeaders(origin)), shape: 'worker-emitted' };
@@ -268,6 +313,37 @@ export async function dispatch(
     if (kind === 'name-search') {
       return handleNameSearch(request, url, env, origin!);
     }
+    if (kind === 'comments') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bill_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleComments(rest, request, env, origin!, kvTraceId);
+    }
+    if (kind === 'social-posts') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleSocialPosts(rest, request, env, origin!, kvTraceId);
+    }
+    if (kind === 'quotes') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleQuotes(rest, request, env, origin!, kvTraceId);
+    }
+    if (kind === 'rep-bundle') {
+      if (!rest) return { response: jsonResponse(400, { error: 'missing_bioguide_id' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      return handleRepBundle(rest, request, env, ctx, origin!);
+    }
+    if (kind === 'audit') {
+      // Only the public sub-route is served from the public KV-route block.
+      // The authenticated /api/admin/audit lives under the admin block above.
+      if (rest !== 'public') {
+        return { response: jsonResponse(404, { error: 'not_found' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      }
+      return handleAuditPublic(request, env, origin!);
+    }
+    if (kind === 'stats') {
+      // FR-56 AC-56.1 — only /api/stats/v1/summary is exposed.
+      if (rest !== 'v1/summary') {
+        return { response: jsonResponse(404, { error: 'not_found' }, corsHeaders(origin)), shape: 'worker-emitted' };
+      }
+      return handleStatsSummary(request, env, origin!);
+    }
   }
 
   // 2. /api/* passthrough (census/congress/senate) — upstream fetch + edge cache.
@@ -277,9 +353,33 @@ export async function dispatch(
     return handleApi(request, url, env, origin, allowedOrigins, allowLocalhost, cache, ctx);
   }
 
-  // 3. Browser navigation: /embed (any env), preview (non-prod), or redirect (prod).
+  // 3. Browser navigation: /admin (FR-52, gated by CF Access), /embed,
+  //    preview (non-prod), or redirect (prod).
   const accept = request.headers.get('Accept') ?? '';
   if (request.method === 'GET' && accept.includes('text/html')) {
+    // FR-52 AC-52.2 — admin SPA. CF Access gates this path at the edge;
+    // by the time we get here the user is authenticated. We rewrite
+    // bare /admin and /admin/ to the SPA's index.html so the bundle
+    // bootstraps; nested paths (/admin/main.js, /admin/assets/*) fall
+    // through to the ASSETS binding below.
+    if (url.pathname === '/admin' || url.pathname === '/admin/') {
+      if (env.ASSETS) {
+        const indexReq = new Request(
+          new URL('/admin/index.html', url.origin),
+          { method: 'GET', headers: request.headers },
+        );
+        try {
+          const r = await env.ASSETS.fetch(indexReq);
+          if (r.status !== 404) {
+            return { response: r, shape: 'static-asset' };
+          }
+        } catch { /* fall through */ }
+      }
+      return {
+        response: new Response('admin SPA bundle missing', { status: 404 }),
+        shape: 'worker-emitted',
+      };
+    }
     if (url.pathname === '/embed' || url.pathname === '/embed/') {
       return {
         response: new Response(buildEmbedHtml(env.ENV_NAME ?? 'prod'), {
@@ -299,34 +399,45 @@ export async function dispatch(
         shape: 'embeddable-html',
       };
     }
-    if (env.PREVIEW_MODE === 'true') {
+    // AC-52.10 — `/admin/*` paths are admin SPA assets and SHALL NOT be
+    // intercepted by the preview-HTML branch (dev) or the 301-to-embed-host
+    // branch (prod). They fall through to env.ASSETS at the bottom of
+    // dispatch where the bundled `dist/admin/` files serve them. The bare
+    // `/admin` and `/admin/` paths are handled above by the explicit
+    // index.html rewrite block; this guard catches the nested paths
+    // (e.g. /admin/index.html, /admin/foo/bar.html).
+    const isAdminAssetPath = url.pathname.startsWith('/admin/');
+    if (!isAdminAssetPath) {
+      if (env.PREVIEW_MODE === 'true') {
+        return {
+          response: new Response(buildPreviewHtml(env.ENV_NAME ?? 'non-prod'), {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/html; charset=utf-8',
+              'Cache-Control': 'no-store',
+              'Content-Security-Policy':
+                "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; " +
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+                "font-src 'self' https://fonts.gstatic.com; " +
+                "img-src 'self' data: https:; " +
+                "connect-src 'self'; " +
+                "frame-ancestors 'none'; base-uri 'none'",
+              'X-Preview-Mode': 'served',
+            },
+          }),
+          shape: 'static-asset',
+        };
+      }
+      // Prod: bounce to the embed host.
+      const resp = Response.redirect('https://trackukraine.com/', 301);
+      const headers = new Headers(resp.headers);
+      headers.set('X-Preview-Mode', `skipped (prod)`);
       return {
-        response: new Response(buildPreviewHtml(env.ENV_NAME ?? 'non-prod'), {
-          status: 200,
-          headers: {
-            'Content-Type': 'text/html; charset=utf-8',
-            'Cache-Control': 'no-store',
-            'Content-Security-Policy':
-              "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; " +
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-              "font-src 'self' https://fonts.gstatic.com; " +
-              "img-src 'self' data: https:; " +
-              "connect-src 'self'; " +
-              "frame-ancestors 'none'; base-uri 'none'",
-            'X-Preview-Mode': 'served',
-          },
-        }),
-        shape: 'static-asset',
+        response: new Response(resp.body, { status: resp.status, headers }),
+        shape: 'worker-emitted',
       };
     }
-    // Prod: bounce to the embed host.
-    const resp = Response.redirect('https://trackukraine.com/', 301);
-    const headers = new Headers(resp.headers);
-    headers.set('X-Preview-Mode', `skipped (prod)`);
-    return {
-      response: new Response(resp.body, { status: resp.status, headers }),
-      shape: 'worker-emitted',
-    };
+    // /admin/* paths fall through to ASSETS below.
   }
 
   // 4. Unknown path: delegate to Worker Sites assets.

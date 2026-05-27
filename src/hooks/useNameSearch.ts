@@ -24,9 +24,12 @@ export interface NameSearchResult {
   /** Social-media handles (FR-48). */
   socials?: {
     twitter?: string;
-    facebook?: string;
     youtube?: string;
+    facebook?: string;
     instagram?: string;
+    threads?: string;
+    bluesky?: string;
+    mastodon?: string;
   };
 }
 

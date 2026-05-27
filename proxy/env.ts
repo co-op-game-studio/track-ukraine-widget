@@ -83,6 +83,77 @@ export interface ProxyEnv {
    * writeAnalyticsPoint no-ops when this is undefined.
    */
   ANALYTICS?: import('./observability/analytics').AnalyticsDatasetLike;
+  /**
+   * D1 database for the V4 admin backend (FR-49). Source of truth for
+   * editable content (bills, votes, comments, social posts, quotes, audit log).
+   * Absent in tests and in envs where D1 hasn't been provisioned yet —
+   * admin routes return 503 in that case rather than 500.
+   *
+   * Traces to FR-49 AC-49.1, ADR-017.
+   */
+  D1_VOTER_INFO?: D1Like;
+  /** YouTube Data API v3 key (FR-59). Set as a Worker secret. Optional —
+   *  YouTube adapter is only registered when this is present. */
+  YOUTUBE_API_KEY?: string;
+  /**
+   * Per-env social poll concurrency budget (FR-59). Caps how many handles
+   * the admin client may fan-out in parallel against /api/admin/ingest/poll-handle.
+   * Set per env in wrangler.toml; defaults to 4 when unset.
+   * This is a deployment knob (not data) — env-tunable to match upstream
+   * rate limits and Worker subrequest budgets.
+   */
+  POLL_CONCURRENCY?: string;
+  /**
+   * Cron schedule for the social poll loop (FR-59). Mirror of the value in
+   * `[env.<env>.triggers].crons`. Cloudflare doesn't expose the trigger schedule
+   * to runtime code, so we re-declare it here as the single source of truth for
+   * the staleness window: handles polled within `interval - 5min` are skipped
+   * by the cron AND the admin endpoint, so a manual poll inside the cron cycle
+   * doesn't double-pull but the next tick still fires.
+   * Defaults to `0 * * * *` (hourly) when unset.
+   */
+  SOCIAL_POLL_CRON?: string;
+  /**
+   * Cloudflare Access team subdomain (e.g. `cogs` for `cogs.cloudflareaccess.com`).
+   * Used to build the JWKS URL and the expected `iss` claim during JWT
+   * verification on admin routes. Per-env config in wrangler.toml.
+   * Traces to FR-50 AC-50.2.
+   */
+  CF_ACCESS_TEAM?: string;
+  /**
+   * Cloudflare Access application AUD tag (a 64-hex-char string from the CF
+   * Access dashboard). The Worker checks the JWT's `aud` claim against this
+   * value to confirm the token was minted by the *correct* Access app — even
+   * within the same team, a JWT for a different app is rejected.
+   * Traces to FR-50 AC-50.2.
+   */
+  CF_ACCESS_AUD?: string;
+}
+
+/**
+ * Minimal subset of Cloudflare's D1Database surface we depend on.
+ * Mirrors the Workers runtime interface — tests fake it via in-memory shims.
+ *
+ * Traces to FR-49 AC-49.1.
+ */
+export interface D1Like {
+  prepare(query: string): D1PreparedStatementLike;
+  batch<T = unknown>(statements: D1PreparedStatementLike[]): Promise<D1ResultLike<T>[]>;
+  exec(query: string): Promise<{ count: number; duration: number }>;
+}
+
+export interface D1PreparedStatementLike {
+  bind(...values: unknown[]): D1PreparedStatementLike;
+  first<T = unknown>(colName?: string): Promise<T | null>;
+  run(): Promise<D1ResultLike<unknown>>;
+  all<T = unknown>(): Promise<D1ResultLike<T>>;
+}
+
+export interface D1ResultLike<T> {
+  success: boolean;
+  results?: T[];
+  meta?: { changes?: number; last_row_id?: number; duration?: number };
+  error?: string;
 }
 
 export interface ApiRouteRule {

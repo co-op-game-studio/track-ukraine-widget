@@ -18,6 +18,7 @@ import { render, fireEvent, waitFor } from '@testing-library/react';
 import { RepDetail } from '../../src/components/RepDetail';
 import { MemberChip } from '../../src/components/MemberChip';
 import type { Representative } from '../../src/types/domain';
+import { _resetRepBundleCache } from '../../src/services/repBundle';
 
 /** A real curated House roll-call we can key mocks off of. */
 const HR2471_RC65 = { congress: 117, session: 2, rollCall: 65 }; // weight 0.9
@@ -66,6 +67,32 @@ function profileWithCosponsor(bioguideId: string) {
   };
 }
 
+/** A member profile with TWO cosponsored pro-Ukraine bills — needed under
+ *  FR-55 to clear NEW_REP_THRESHOLD=2 so a numeric score is rendered. */
+function profileWithTwoCosponsorships(bioguideId: string) {
+  return {
+    ...emptyProfile(bioguideId),
+    cosponsored: [
+      {
+        congress: 117,
+        type: 'HR',
+        number: '7691',
+        title: '$40B Ukraine Supplemental',
+        introducedDate: '2022-05-10',
+        latestAction: { text: 'Became law' },
+      },
+      {
+        congress: 118,
+        type: 'HR',
+        number: '815',
+        title: 'Israel Security Supplemental Appropriations Act, 2024',
+        introducedDate: '2024-02-13',
+        latestAction: { text: 'Became law' },
+      },
+    ],
+  };
+}
+
 /** House roster payload for a given roll-call; target bioguide gets `cast`,
  *  everyone else gets an irrelevant vote. */
 function houseRoster(rc: { congress: number; session: number; rollCall: number },
@@ -87,6 +114,32 @@ type Route = { match: RegExp | ((u: string) => boolean); body: unknown; status?:
 function installFetch(routes: Route[]) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = typeof input === 'string' ? input : (input as Request).url;
+    // The widget moved from /api/members/{id} to /api/rep-bundle/{id} for
+    // its main per-rep fetch (one call replaces a fan-out of ~30 reads).
+    // Tests still spec routes via /api/members/{id} for readability — translate
+    // the URL transparently and wrap the body in a bundle envelope so existing
+    // assertions keep working.
+    const bundleMatch = url.match(/\/api\/rep-bundle\/([\w-]+)/);
+    if (bundleMatch) {
+      const id = bundleMatch[1]!;
+      const memberUrl = url.replace(/\/api\/rep-bundle\//, '/api/members/');
+      for (const r of routes) {
+        const hit = typeof r.match === 'function' ? r.match(memberUrl) : r.match.test(memberUrl);
+        if (hit) {
+          const bundle = {
+            bioguideId: id,
+            member: r.body,
+            bills: {},
+            rollCalls: {},
+            comments: {},
+            socialPosts: null,
+            quotes: null,
+            bundledAt: '2026-01-01T00:00:00Z',
+          };
+          return new Response(JSON.stringify(bundle), { status: r.status ?? 200 });
+        }
+      }
+    }
     for (const r of routes) {
       const hit = typeof r.match === 'function' ? r.match(url) : r.match.test(url);
       if (hit) return new Response(JSON.stringify(r.body), { status: r.status ?? 200 });
@@ -108,8 +161,8 @@ function installFetch(routes: Route[]) {
 }
 
 describe('Score breakdown panel (integration)', () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
-  afterEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => { vi.restoreAllMocks(); _resetRepBundleCache(); });
+  afterEach(() => { vi.restoreAllMocks(); _resetRepBundleCache(); });
 
   it('AC-43.9 — header is a toggle button that expands/collapses the breakdown panel', async () => {
     installFetch([
@@ -134,9 +187,13 @@ describe('Score breakdown panel (integration)', () => {
     expect(container.querySelector('#viw-score-breakdown-panel')).toBeNull();
   });
 
-  it('AC-43.10 — per-action table reconciles Σ/Σ with the badge value for a single Aye on HR 2471', async () => {
+  it('AC-43.10 — per-action table reconciles Σ/Σ with the badge value for HR 2471 Aye + HR 7691 cosponsor', async () => {
+    // Under FR-55 NEW_REP_THRESHOLD=2 we need at least two contributing
+    // actions for the badge to render a number; combining a vote with a
+    // cosponsorship gets us there while still exercising the AC-43.10
+    // sign/amp/weight reconciliation contract.
     installFetch([
-      { match: /\/api\/members\/D000096/, body: emptyProfile('D000096') },
+      { match: /\/api\/members\/D000096/, body: profileWithCosponsor('D000096') },
       {
         match: /\/roll-call-rosters\/house\/117\/2\/65\b/,
         body: houseRoster(HR2471_RC65, 'D000096', 'Yea'),
@@ -144,7 +201,10 @@ describe('Score breakdown panel (integration)', () => {
     ]);
     const { container } = render(<RepDetail representative={houseRep} apiBase="" onClose={() => {}} />);
 
-    // Wait for the hook to produce at least one row in the flat list.
+    // Wait for the hook to produce both rows in the flat list. With
+    // 1 vote (sign=+1, amp=1.0, w=0.9 → +0.9) + 1 cosponsorship
+    // (sign=+1, amp=1.5, w=1.0 → +1.5), Σ signed = +2.4, Σ mag = 2.4,
+    // score = +1.00.
     await waitFor(() => {
       const badge = container.querySelector('.viw-score-value');
       expect(badge?.textContent?.trim()).toBe('+1.00');
@@ -152,36 +212,34 @@ describe('Score breakdown panel (integration)', () => {
 
     fireEvent.click(container.querySelector('.viw-score-header-toggle')!);
 
-    // The breakdown table should have one pro-UA row and a footer that
-    // matches the badge: sign × amp × weight = 1 × 1.0 × 0.9 = +0.90
-    // → Σ mag 0.90, Σ signed +0.90, score +0.90 / 0.90 = +1.00.
     const table = container.querySelector('.viw-score-breakdown-table')!;
-    const bodyRows = table.querySelectorAll('tbody tr');
-    expect(bodyRows.length).toBe(1);
-    const row = bodyRows[0]!;
-    expect(row.classList.contains('viw-valence-voted-pro')).toBe(true);
-    // Structured-data cell: slug (HR 2471) + description (curated label) + action.
-    const billCell = row.querySelector('.viw-score-row-bill')!;
+    const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+    expect(bodyRows.length).toBe(2);
+    // Sponsorships render first; the voted row should be the second.
+    const voteRow = bodyRows[1]!;
+    expect(voteRow.classList.contains('viw-valence-voted-pro')).toBe(true);
+    const billCell = voteRow.querySelector('.viw-score-row-bill')!;
     expect(billCell.querySelector('.viw-score-row-bill-slug')?.textContent).toBe('HR 2471');
     expect(billCell.querySelector('.viw-score-row-bill-desc')?.textContent)
       .toMatch(/FY22 Consolidated Appropriations/);
     expect(billCell.querySelector('.viw-score-row-bill-action')?.textContent)
       .toMatch(/Voted Aye/);
-    // Numeric cells: sign, amp×weight, contribution.
-    const tds = row.querySelectorAll('td');
+    const tds = voteRow.querySelectorAll('td');
     expect(tds[0]!.textContent).toBe('+1');
     expect(tds[1]!.textContent).toMatch(/1\.0 × 0\.90/);
     expect(tds[2]!.textContent).toBe('+0.90');
 
     const foot = table.querySelector('tfoot')!;
-    expect(foot.textContent).toMatch(/0\.90/);
-    expect(foot.textContent).toMatch(/\+0\.90/);
+    // Σ mag = 1.5 + 0.9 = 2.40; Σ signed = +2.40; score = +1.00.
+    expect(foot.textContent).toMatch(/2\.40/);
     expect(foot.textContent).toMatch(/\+1\.00/);
   });
 
   it('AC-43.10/43.12 — cosponsorship renders a sponsor-pro row with 1.5× amplifier contribution', async () => {
+    // FR-55 NEW_REP_THRESHOLD=2 — use two cosponsorships so the badge shows
+    // a number rather than "Insufficient record".
     installFetch([
-      { match: /\/api\/members\/D000096/, body: profileWithCosponsor('D000096') },
+      { match: /\/api\/members\/D000096/, body: profileWithTwoCosponsorships('D000096') },
     ]);
     const { container } = render(<RepDetail representative={houseRep} apiBase="" onClose={() => {}} />);
 
@@ -194,7 +252,7 @@ describe('Score breakdown panel (integration)', () => {
 
     const table = container.querySelector('.viw-score-breakdown-table')!;
     const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
-    // Sponsorships render first in the breakdown (rowsFromBills before rowsFromVoting).
+    // Both cosponsorships render with sponsor-pro valence + 1.5× amplifier.
     const sponsorRow = bodyRows[0]!;
     expect(sponsorRow.classList.contains('viw-valence-sponsor-pro')).toBe(true);
     expect(sponsorRow.querySelector('.viw-score-row-bill-action')?.textContent).toBe('Cosponsored');
@@ -205,8 +263,10 @@ describe('Score breakdown panel (integration)', () => {
   });
 
   it('AC-43.11 — the bar+obstruction region is a second toggle that opens the same panel', async () => {
+    // FR-55 — combine the vote with a cosponsorship so the bar (which only
+    // renders for a non-null displayed score) is visible.
     installFetch([
-      { match: /\/api\/members\/D000096/, body: emptyProfile('D000096') },
+      { match: /\/api\/members\/D000096/, body: profileWithCosponsor('D000096') },
       {
         match: /\/roll-call-rosters\/house\/117\/2\/65\b/,
         body: houseRoster(HR2471_RC65, 'D000096', 'Yea'),
@@ -234,7 +294,7 @@ describe('Score breakdown panel (integration)', () => {
 
   it('AC-43.13 — bar + obstruction note render ABOVE the breakdown panel when expanded', async () => {
     installFetch([
-      { match: /\/api\/members\/D000096/, body: emptyProfile('D000096') },
+      { match: /\/api\/members\/D000096/, body: profileWithCosponsor('D000096') },
       {
         match: /\/roll-call-rosters\/house\/117\/2\/65\b/,
         body: houseRoster(HR2471_RC65, 'D000096', 'Yea'),

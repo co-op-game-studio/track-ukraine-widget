@@ -27,6 +27,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { VoterInfoWidget } from '../../src/VoterInfoWidget';
+import { _resetRepBundleCache } from '../../src/services/repBundle';
 
 // ─── FR-37 envelope fixtures ─────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ function jsonResponse(body: unknown, status: number): Response {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', () => {
-  beforeEach(() => { vi.restoreAllMocks(); });
+  beforeEach(() => { vi.restoreAllMocks(); _resetRepBundleCache(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('VoterInfoWidget + useAddressLookup on 429: full envelope in ErrorBanner', async () => {
@@ -123,10 +124,9 @@ describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', ()
     render(<VoterInfoWidget apiBase="" />);
     await driveToRepDetail();
 
-    // Switch to Legislation tab where useSponsoredBills' error surfaces.
-    const legTab = await screen.findByRole('tab', { name: /Ukraine Legislation/i });
-    fireEvent.click(legTab);
-
+    // V4 (FR-53 AC-53.2): votes + legislation are merged on the default
+    // "Record" tab; useSponsoredBills' error surfaces in BillList without
+    // switching tabs.
     const banner = await waitFor(() => {
       const el = document.querySelector('.viw-error-banner');
       if (!el) throw new Error('ErrorBanner not yet rendered in RepDetail');
@@ -159,10 +159,8 @@ describe('hookErrorBanner — FR-37 envelope propagation (AC-44.17 / T-097)', ()
     render(<VoterInfoWidget apiBase="" />);
     await driveToRepDetail();
 
-    // Switch to Legislation tab. "UKRAINE LEGISLATION" is the visible label.
-    const legTab = await screen.findByRole('tab', { name: /Ukraine Legislation/i });
-    fireEvent.click(legTab);
-
+    // V4 (FR-53 AC-53.2): BillList renders on the default Record tab —
+    // no tab switch needed.
     const banner = await waitFor(() => {
       const el = document.querySelector('.viw-error-banner');
       if (!el) throw new Error('BillList error banner not rendered');
@@ -207,10 +205,23 @@ function setupVoterFlow(opts: FlowOptions): { fetchMock: MockInstance } {
       if (url.includes('/api/state-members/')) {
         return jsonResponse(stateMembersFixture(), 200);
       }
-      if (url.includes('/api/members/')) {
+      if (url.includes('/api/rep-bundle/')) {
         if (opts.billsError) {
           return jsonResponse(opts.billsError, opts.billsStatus ?? 500);
         }
+        const bundle = {
+          bioguideId: 'D000563',
+          member: memberProfileFixture(),
+          bills: {},
+          rollCalls: {},
+          comments: {},
+          socialPosts: null,
+          quotes: null,
+          bundledAt: '2026-01-01T00:00:00Z',
+        };
+        return jsonResponse(bundle, 200);
+      }
+      if (url.includes('/api/members/')) {
         return jsonResponse(memberProfileFixture(), 200);
       }
       if (url.includes('/api/roll-call-rosters/')) {

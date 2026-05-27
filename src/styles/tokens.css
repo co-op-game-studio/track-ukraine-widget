@@ -1,0 +1,137 @@
+/**
+ * Shared design tokens — Track Ukraine.
+ *
+ * Single source of truth for the embed widget AND the admin SPA. Both
+ * surfaces consume `--tk-*` semantic tokens; legacy `--viw-*` (embed) and
+ * `--bg/--fg/--panel/...` (admin) names alias to these so existing selectors
+ * keep working through the migration window.
+ *
+ * Scoping:
+ *   - `:root, :host, .viw-root` — both light DOM (admin) and shadow DOM (embed).
+ *   - `[data-theme="dark"]` — admin-SPA-only override (embed assumes host-page
+ *     contrast and does NOT include a dark block).
+ *
+ * Traces to AC-52.28, AC-52.29, AC-52.30.
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,500;0,700;0,900;1,700;1,900&display=swap');
+
+:root,
+:host,
+.viw-root {
+  /* ── Brand (theme-invariant) ── */
+  --tk-yellow: #fff100;
+  --tk-yellow-dark: #e6d600;
+  --tk-dem: #1d4ed8;
+  --tk-rep: #b91c1c;
+  --tk-ind: #555555;
+
+  --tk-valence-sponsor-pro:    #146c2e;
+  --tk-valence-voted-pro:      #1e8a3c;
+  --tk-valence-unstated:       #777777;
+  --tk-valence-voted-anti:     #b91c1c;
+  --tk-valence-sponsor-anti:   #7f1d1d;
+  --tk-valence-sponsor-pro-bg:  #dcfce7;
+  --tk-valence-voted-pro-bg:    #ecfdf5;
+  --tk-valence-unstated-bg:     transparent;
+  --tk-valence-voted-anti-bg:   #fff1f2;
+  --tk-valence-sponsor-anti-bg: #fee2e2;
+
+  /* ── Typography ── */
+  --tk-font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --tk-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --tk-fs-xs:   0.72rem;
+  --tk-fs-sm:   0.78rem;
+  --tk-fs-base: 0.9rem;
+  --tk-fs-md:   1rem;
+  --tk-fs-lg:   1.05rem;
+  --tk-fs-xl:   1.5rem;
+  --tk-fw-medium: 500;
+  --tk-fw-bold:   700;
+  --tk-fw-black:  900;
+  --tk-hero-shadow: 1px 1px 0 #000, 2px 2px 0 #000;
+
+  /* ── Geometry ── */
+  --tk-radius: 0;
+  --tk-border-w: 2px;
+  --tk-space-1: 4px;
+  --tk-space-2: 8px;
+  --tk-space-3: 12px;
+  --tk-space-4: 16px;
+  --tk-space-5: 24px;
+  --tk-space-6: 32px;
+
+  /* ── Semantic — light (default) ── */
+  --tk-bg: #ffffff;
+  --tk-surface: #f5f5f5;
+  --tk-fg: #000000;
+  --tk-muted: #555555;
+  --tk-subtle: #777777;
+  --tk-border: #000000;
+  --tk-border-soft: #d4d4d4;
+  --tk-accent: #fff100;
+  --tk-accent-fg: #000000;
+  --tk-danger: #b91c1c;
+  --tk-danger-fg: #ffffff;
+  --tk-success: #146c2e;
+  --tk-focus: #000000;
+
+  /* ── Embed legacy aliases (--viw-*) ──
+   * The widget's existing 80+ selectors keep working unchanged. The tokens
+   * above are the source of truth; these names just point at them.
+   */
+  --viw-yellow: var(--tk-yellow);
+  --viw-yellow-dark: var(--tk-yellow-dark);
+  --viw-black: var(--tk-fg);
+  --viw-white: var(--tk-bg);
+  --viw-off: var(--tk-surface);
+  --viw-border: var(--tk-border);
+  --viw-border-soft: var(--tk-border-soft);
+  --viw-muted: var(--tk-muted);
+  --viw-subtle: var(--tk-subtle);
+  --viw-dem: var(--tk-dem);
+  --viw-rep: var(--tk-rep);
+  --viw-ind: var(--tk-ind);
+  --viw-valence-sponsor-pro:    var(--tk-valence-sponsor-pro);
+  --viw-valence-voted-pro:      var(--tk-valence-voted-pro);
+  --viw-valence-unstated:       var(--tk-valence-unstated);
+  --viw-valence-voted-anti:     var(--tk-valence-voted-anti);
+  --viw-valence-sponsor-anti:   var(--tk-valence-sponsor-anti);
+  --viw-valence-sponsor-pro-bg:  var(--tk-valence-sponsor-pro-bg);
+  --viw-valence-voted-pro-bg:    var(--tk-valence-voted-pro-bg);
+  --viw-valence-unstated-bg:     var(--tk-valence-unstated-bg);
+  --viw-valence-voted-anti-bg:   var(--tk-valence-voted-anti-bg);
+  --viw-valence-sponsor-anti-bg: var(--tk-valence-sponsor-anti-bg);
+  --viw-font: var(--tk-font);
+  --viw-hero-shadow: var(--tk-hero-shadow);
+
+  /* ── Admin legacy aliases ──
+   * Inline styles across the admin SPA reference these. As callsites migrate
+   * to --tk-*, drop them. Until then, they alias.
+   */
+  --bg: var(--tk-bg);
+  --panel: var(--tk-surface);
+  --fg: var(--tk-fg);
+  --muted: var(--tk-muted);
+  --accent: var(--tk-accent);
+  --border: var(--tk-border-soft);
+  --danger: var(--tk-danger);
+  --success: var(--tk-success);
+}
+
+/* ── Semantic — dark (admin SPA only) ── */
+[data-theme="dark"] {
+  --tk-bg: #0d0f12;
+  --tk-surface: #16191f;
+  --tk-fg: #e6e9ef;
+  --tk-muted: #8c93a3;
+  --tk-subtle: #6c7280;
+  --tk-border: #e6e9ef;
+  --tk-border-soft: #2a2f38;
+  --tk-accent: #fff100;
+  --tk-accent-fg: #000000;
+  --tk-danger: #fa5252;
+  --tk-danger-fg: #000000;
+  --tk-success: #37b24d;
+  --tk-focus: #fff100;
+}

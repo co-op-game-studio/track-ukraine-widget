@@ -4,7 +4,8 @@
  *
  * Owns its implementation as of Phase 12 T-075 (2026-04-19).
  *
- * Traces: FR-32 AC-32.1, AC-32.18, AC-32.19. FR-42.
+ * Traces: FR-32 AC-32.1, AC-32.18, AC-32.19. FR-42. FR-55 AC-55.6 / ADR-018 §6
+ * (party-prior stamping during read-through fill).
  */
 import type { ProxyEnv } from '../env';
 import type { DispatchResult, WaitUntilLike } from './common';
@@ -14,6 +15,59 @@ import { sanitizeHttpUrl } from '../security/url-validator';
 import { normalizeSearchKey } from '../kv/name-index';
 import { KV_PREFIXES } from '../kv/prefixes';
 import { PROFILE_TTL_SECONDS, type MemberProfile } from '../kv/member-profile';
+
+/* ─── Party-prior stamping (FR-55 AC-55.6 / ADR-018 §6) ─────────────────── */
+
+interface PartyPriorsRecord {
+  generatedAt: string;
+  schemaVersion: number;
+  /** Map of party code ('D' | 'R' | 'I' | …) → mean Ukraine score in [-1, +1],
+   *  or `null` for degenerate populations (<5 full-confidence reps). */
+  priors: Record<string, number | null>;
+}
+
+/** Cached priors map within a single Worker isolate. The KV record changes
+ *  only when the publish job runs (every 15 min on cron); per-request KV
+ *  reads are cheap but module-scope memoization saves the round-trip in the
+ *  common case. Reset to `null` on each isolate boot. */
+let priorsCache: { fetchedAt: number; map: Record<string, number | null> } | null = null;
+const PRIORS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+/** Look up the per-party prior map. Always returns an object; missing record
+ *  or KV error → empty map → frontend treats every rep as "no shrink." */
+async function loadPartyPriors(env: ProxyEnv): Promise<Record<string, number | null>> {
+  if (priorsCache && Date.now() - priorsCache.fetchedAt < PRIORS_CACHE_TTL_MS) {
+    return priorsCache.map;
+  }
+  try {
+    const raw = await env.KV_VOTER_INFO.get(KV_PREFIXES.scores + 'party-priors', 'text');
+    if (!raw) {
+      // Cold deploy or pre-publish: priors not yet computed. Frontend
+      // gracefully degrades to raw-score behavior (ADR-018 cold-start path).
+      priorsCache = { fetchedAt: Date.now(), map: {} };
+      return priorsCache.map;
+    }
+    const record = JSON.parse(raw as string) as PartyPriorsRecord;
+    priorsCache = { fetchedAt: Date.now(), map: record.priors ?? {} };
+    return priorsCache.map;
+  } catch {
+    // Malformed JSON or KV outage: same fallback as missing record. Don't
+    // 5xx the member request just because the priors KV blob is broken.
+    priorsCache = { fetchedAt: Date.now(), map: {} };
+    return priorsCache.map;
+  }
+}
+
+/** Stamp `partyPrior` onto a member profile. Mutates in place and returns
+ *  the same reference for ergonomic chaining. */
+function stampPartyPrior(profile: MemberProfile, priors: Record<string, number | null>): MemberProfile {
+  // Look up by exact party code first ('D' / 'R' / 'I'). If the rep's party
+  // doesn't appear in the priors map (cold-start or new third-party), use
+  // null → no shrink, raw score wins (ADR-018 degenerate-population fallback).
+  const value = profile.party in priors ? priors[profile.party] ?? null : null;
+  profile.partyPrior = value;
+  return profile;
+}
 
 /**
  * Fetch + assemble a member profile from upstream Congress.gov in three
@@ -173,12 +227,26 @@ export async function handleMemberProfile(
 
   const cached = await env.KV_VOTER_INFO.get(KV_PREFIXES.member + bioguideId, 'text');
   if (cached) {
+    // FR-55 AC-55.6 / ADR-018 §6 — older cached records may pre-date the
+    // partyPrior field (or were written before the publish job ran for the
+    // first time). Stamp it on the way out so the client always sees a
+    // current value without needing to wait for the 30-day TTL to expire.
+    let body: string = cached as string;
+    try {
+      const profile = JSON.parse(body) as MemberProfile;
+      const priors = await loadPartyPriors(env);
+      stampPartyPrior(profile, priors);
+      body = JSON.stringify(profile);
+    } catch {
+      // Malformed cached JSON: serve as-is rather than 5xx; the next miss
+      // will rebuild it cleanly.
+    }
     const headers = new Headers(corsHeaders(origin));
     headers.set('Content-Type', 'application/json; charset=utf-8');
     headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
     headers.set('X-Cache', 'HIT');
     return {
-      response: new Response(request.method === 'HEAD' ? null : (cached as string), {
+      response: new Response(request.method === 'HEAD' ? null : body, {
         status: 200,
         headers,
       }),
@@ -211,6 +279,11 @@ export async function handleMemberProfile(
       shape: 'worker-emitted',
     };
   }
+
+  // FR-55 AC-55.6 / ADR-018 §6 — stamp partyPrior before the KV write so
+  // every cached record carries the current prior.
+  const priors = await loadPartyPriors(env);
+  stampPartyPrior(profile, priors);
 
   const body = JSON.stringify(profile);
   ctx.waitUntil(

@@ -8,6 +8,12 @@ import type { ClusteredMemberVoteWithValence, MemberVoteRow } from '../hooks/use
 import type { Valence } from '../services/valence';
 import { formatDate } from '../utils/formatters';
 import { ErrorBanner } from './ErrorBanner';
+import { CommentExpand } from './CommentExpand';
+import {
+  commentsForRow,
+  rollCallKey,
+  type CommentsByBill,
+} from '../hooks/useRepComments';
 
 export interface VoteListProps {
   clusters: ClusteredMemberVoteWithValence[];
@@ -17,6 +23,9 @@ export interface VoteListProps {
    *  render via `ErrorBanner` instead of the legacy inline div. */
   errorTraceId?: string;
   errorOnRetry?: () => void;
+  /** FR-53 AC-53.1 — researcher comments keyed by bill_id. When undefined or
+   *  empty, no expand affordances are rendered (preserves pre-V4 behavior). */
+  commentsByBill?: CommentsByBill;
 }
 
 export function VoteList({
@@ -25,6 +34,7 @@ export function VoteList({
   error = null,
   errorTraceId,
   errorOnRetry,
+  commentsByBill,
 }: VoteListProps) {
   if (loading && clusters.length === 0) {
     return <div className="viw-votelist-empty">Loading Ukraine votes…</div>;
@@ -62,7 +72,7 @@ export function VoteList({
         </thead>
         <tbody>
           {clusters.map((c, i) => (
-            <VoteCluster key={i} cluster={c} />
+            <VoteCluster key={i} cluster={c} commentsByBill={commentsByBill} />
           ))}
         </tbody>
       </table>
@@ -70,7 +80,13 @@ export function VoteList({
   );
 }
 
-function VoteCluster({ cluster }: { cluster: ClusteredMemberVoteWithValence }) {
+function VoteCluster({
+  cluster,
+  commentsByBill,
+}: {
+  cluster: ClusteredMemberVoteWithValence;
+  commentsByBill?: CommentsByBill;
+}) {
   const hasProcedural = cluster.procedural.length > 0;
   // Clusters start collapsed by default. Voters can opt in to the procedural
   // detail by clicking "Show N procedural votes". See spec FR-21 AC-21.3.
@@ -85,10 +101,16 @@ function VoteCluster({ cluster }: { cluster: ClusteredMemberVoteWithValence }) {
         expanded={expanded}
         onToggle={() => setExpanded((e) => !e)}
         proceduralCount={cluster.procedural.length}
+        commentsByBill={commentsByBill}
       />
       {expanded &&
         cluster.procedural.map((row, i) => (
-          <VoteRow key={`proc-${i}`} row={row} isProcedural />
+          <VoteRow
+            key={`proc-${i}`}
+            row={row}
+            isProcedural
+            commentsByBill={commentsByBill}
+          />
         ))}
     </>
   );
@@ -102,6 +124,7 @@ interface VoteRowProps {
   expanded?: boolean;
   onToggle?: () => void;
   proceduralCount?: number;
+  commentsByBill?: CommentsByBill;
 }
 
 function VoteRow({
@@ -112,7 +135,17 @@ function VoteRow({
   expanded = false,
   onToggle,
   proceduralCount = 0,
+  commentsByBill,
 }: VoteRowProps) {
+  // FR-53 AC-53.1 — comments scoped to this bill / roll-call.
+  const billId = `${row.bill.congress}-${row.bill.type}-${row.bill.number}`;
+  const rcKey = rollCallKey(
+    row.vote.chamber,
+    row.vote.congress,
+    row.vote.session,
+    row.vote.rollCall,
+  );
+  const comments = commentsByBill ? commentsForRow(commentsByBill, billId, rcKey) : [];
   const cls = [
     `viw-valence-${valenceCss(row.valence)}`,
     isPrimary ? 'viw-vote-row-primary' : '',
@@ -157,6 +190,7 @@ function VoteRow({
             {proceduralCount === 1 ? '' : 's'}
           </button>
         )}
+        {comments.length > 0 && <CommentExpand comments={comments} />}
       </td>
       <td className="viw-votelist-date" data-label="Date">{safeDate(row.vote.date)}</td>
       <td data-label="Position">

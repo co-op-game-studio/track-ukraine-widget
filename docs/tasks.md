@@ -968,3 +968,317 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Follow-up**: NFR-7.4 specifies a CI grep gate (`scripts/secret-scan.mjs`) that rejects commits introducing literal secret patterns into tracked files. Deferred from this task — tracked as T-107 to bundle with the stress-test / remote-mode work.
 - **Traces to**: NFR-7.1–7.5.
 - **Status**: [x] Audit complete 2026-04-19. CI grep gate deferred to T-107.
+
+## Phase 14: V4 — Researcher Backend + Editorial Surfaces (v2.7.0 — ADR-017 / ADR-018)
+
+**Target**: Sunday 2026-05-09 ~midnight US off-hours. Tier model:
+- **Tier A (must-ship)**: T-107 .. T-122 — D1, auth, publish pipeline, admin SPA, score weight, embed tabs + comments.
+- **Tier B (stretch)**: T-123 .. T-127 — Bayesian shrink, Insufficient-record badge, About-panel feed, stats endpoint.
+- **Tier C (explicit slip)**: T-128 .. T-130 — frozen-JSON CI gate, Discord SSO migration, video-quote rendering polish.
+
+### T-107: D1 schema migration `0001_init.sql` (FR-49)
+- **Description**: Author the SQLite-flavored DDL per design.md §4.16. Tables: `researchers`, `bills`, `votes`, `comments`, `social_posts`, `quotes`, `score_adjustments`, `audit_log`. ULID PKs, indices, FK cascades on votes/comments/posts/quotes; audit_log NOT cascading.
+- **Dependencies**: None.
+- **Files**: `migrations/d1/0001_init.sql` (new).
+- **Acceptance Criteria**: AC-49.1, AC-49.2, AC-49.5.
+- **Test Requirements**: `tests/unit/d1Schema.test.ts` — DDL parses against a sql.js fixture; FKs CASCADE on bill delete (votes + comments removed); audit_log row survives row-delete; ULID format `^[0-9A-HJKMNP-TV-Z]{26}$` for inserted PKs.
+- **Traces to**: FR-49, ADR-017, design.md §4.16.
+- **Status**: [ ] Pending.
+
+### T-108: ULID helper (`src/utils/ulid.ts`) (FR-49 AC-49.5)
+- **Description**: Tiny pure helper to emit ULIDs. No external dep — Crockford-base32 + `crypto.getRandomValues`. Exposed as `newUlid()` and `isUlid(s)`. Lives under `src/utils/` so both widget and worker (via cross-include) can consume it.
+- **Dependencies**: None.
+- **Files**: `src/utils/ulid.ts` (new), `tests/unit/ulid.test.ts`.
+- **Acceptance Criteria**: AC-49.5.
+- **Test Requirements**: 10 generated ULIDs match the regex; lexicographic order matches generation order; collision-resistance smoke (10k unique).
+- **Traces to**: FR-49.
+- **Status**: [ ] Pending.
+
+### T-109: `wrangler.toml` hardening (`workers_dev=false`, `preview_urls=false`, D1 binding, CF Access env vars) (FR-49 AC-49.1, FR-50 AC-50.1, AC-50.2)
+- **Description**: Set `workers_dev = false` and `preview_urls = false` at the top level so the Worker is unreachable outside the gated zone hostname. Add `[[d1_databases]]` block per env (dev/uat/stg/prod) for `D1_VOTER_INFO` (database name `viw_researcher_<env>`, `database_id` filled per env after `wrangler d1 create`, `migrations_dir = "migrations/d1"`). Add `CF_ACCESS_TEAM = ""` and `CF_ACCESS_AUD = ""` placeholders per env. Document the per-env database IDs and CF Access app IDs in `docs/deployment.md`.
+- **Dependencies**: T-107.
+- **Files**: `wrangler.toml`, `docs/deployment.md`.
+- **Acceptance Criteria**: AC-49.1, AC-49.6, AC-50.1, AC-50.2.
+- **Test Requirements**: Manual: `wrangler d1 list --env dev` shows the database; `wrangler deploy --env dev` succeeds with `workers_dev = false`. Smoke: a hand-crafted `curl` to the workers.dev URL returns 404 (or no response).
+- **Traces to**: FR-49, FR-50.
+- **Status**: [x] Done — workers_dev/preview_urls disabled; D1 + CF Access env vars wired per env. Database IDs + CF Access AUD tags need to be filled in by ops once provisioned.
+
+### T-110: Worker env types — `D1_VOTER_INFO` + `CF_ACCESS_TEAM` + `CF_ACCESS_AUD` (FR-49, FR-50)
+- **Description**: Extend `proxy/env.ts#ProxyEnv` with `D1_VOTER_INFO?: D1Like`, `CF_ACCESS_TEAM?: string`, `CF_ACCESS_AUD?: string`, and `D1Like` / `D1PreparedStatementLike` / `D1ResultLike` minimal interface types so tests can fake D1 without a heavy dep.
+- **Dependencies**: T-109.
+- **Files**: `proxy/env.ts`.
+- **Acceptance Criteria**: AC-49.1, AC-50.2.
+- **Test Requirements**: Existing `kvPrefixes.test.ts` + `proxyEnv` type-check passes.
+- **Traces to**: FR-49, FR-50.
+- **Status**: [x] Done — D1Like/D1PreparedStatementLike/D1ResultLike types added; CF_ACCESS_TEAM/AUD bindings wired.
+
+### T-111a: CF Access JWT verifier (`proxy/security/cf-access-jwt.ts`) (FR-50 AC-50.2)
+- **Description**: Pure-WebCrypto RS256 JWT verifier for Cloudflare Access tokens. Verifies signature against the team JWKS at `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` (cached in module-scope memo + KV `cache:v1:cf-access-jwks`, 1 h TTL). Checks `aud` matches `CF_ACCESS_AUD`, `iss` matches `https://<team>.cloudflareaccess.com`, `exp` future, `iat`/`nbf` not future (60 s clock skew).
+- **Dependencies**: T-110.
+- **Files**: `proxy/security/cf-access-jwt.ts` (new), `tests/unit/cfAccessJwt.test.ts`.
+- **Acceptance Criteria**: AC-50.2.
+- **Test Requirements**: 11 unit tests covering: valid signed token accepted; malformed token rejected; forged signature rejected; bad `aud` rejected; bad `iss` rejected; expired rejected; future-iat rejected; unknown `kid` rejected; non-RS256 rejected; jwks_unavailable on JWKS endpoint failure; `aud` array containing the configured value accepted.
+- **Traces to**: FR-50.
+- **Status**: [x] Done — 11/11 green. Real RS256 sign + verify, real forgery rejection.
+
+### T-111b: Admin actor extraction (`proxy/security/admin-actor.ts`) (FR-50 AC-50.2)
+- **Description**: Wraps the JWT verifier. Exports `extractAdminActor(request, env): Promise<{ email } | Response>`. Reads `Cf-Access-Jwt-Assertion`, calls `verifyCfAccessJwt`, extracts `email` from the **verified claims** (NOT from the loose `Cf-Access-Authenticated-User-Email` header). Returns FR-37-shape Response envelopes on every failure mode (`admin_misconfigured` / `admin_jwt_required` / `admin_jwt_invalid` / `admin_jwks_unavailable` / `admin_actor_missing`).
+- **Dependencies**: T-111a.
+- **Files**: `proxy/security/admin-actor.ts` (new), `tests/unit/adminActor.test.ts`.
+- **Acceptance Criteria**: AC-50.1, AC-50.2.
+- **Test Requirements**: 7 unit tests: returns email from verified JWT; IGNORES the plain email header (defense against spoofing); 401 on missing JWT; 401 on forged JWT; 500 on missing CF_ACCESS_TEAM/AUD; 500 on missing email claim; extraHeaders forwarded into error responses.
+- **Traces to**: FR-50.
+- **Status**: [x] Done — 7/7 green.
+
+### T-112: D1 access helpers (`proxy/d1/admin-store.ts`) (FR-50, FR-51)
+- **Description**: Thin typed wrappers over `D1_VOTER_INFO`. Per resource: `list`, `get`, `create`, `update`, `delete` with built-in `audit_log` insertion atomic with the mutation via `D1.batch()`. ULID assignment, timestamp population, FK validation. Each `create` / `update` / `delete` accepts the validated admin email + the inbound request's trace ID and writes the `audit_log` row carrying that trace ID (FR-50 AC-50.7).
+- **Dependencies**: T-107, T-108.
+- **Files**: `proxy/d1/admin-store.ts` (new), `tests/unit/adminStore.test.ts`.
+- **Acceptance Criteria**: AC-50.3, AC-50.7, AC-54.1, AC-54.5.
+- **Test Requirements**: in-memory D1 fixture (sql.js or hand-rolled); CRUD round-trips; audit row inserted on each write with `trace_id`; forced audit-insert failure rolls back the row write (assert no row visible after); ULID-shaped IDs.
+- **Traces to**: FR-50, FR-51, FR-54.
+- **Status**: [ ] Pending.
+
+### T-113: Worker route `proxy/routes/api-admin.ts` (FR-50, FR-58)
+- **Description**: Mount admin CRUD endpoints per api-contracts.md §7.3 + audit endpoints §7.4. Each route: parse path → `extractAdminActor` → validate body → `admin-store` call → emit one `logEvent` per write at `level: info` carrying `trace_id`, `actor_email`, `action`, `target_table`, `row_id`, outcome (FR-50 AC-50.6) → return `{ row, audit }` or FR-37 error envelope. `OPTIONS` returns 204.
+- **Dependencies**: T-111b, T-112.
+- **Files**: `proxy/routes/api-admin.ts` (new), `tests/integration/adminRoutes.test.ts`.
+- **Acceptance Criteria**: AC-50.1, AC-50.3, AC-50.4, AC-50.6, AC-58.1.
+- **Test Requirements**: full CRUD round-trip per resource (~25 tests); whoami; auth-failure shapes (401 admin_jwt_required, 401 admin_jwt_invalid); validation failures (invalid weight, invalid platform, unknown bill_id); structured log emitted per write with the trace ID.
+- **Traces to**: FR-50, FR-58, AC-54.1.
+- **Status**: [ ] Pending.
+
+### T-114: Worker read routes for embed (FR-53, FR-58)
+- **Description**: New routes `GET /api/comments/{billId}`, `GET /api/social-posts/{bioguideId}`, `GET /api/quotes/{bioguideId}`, `GET /api/audit/public` reading from KV records under `comment:v1:*`, `social-post:v1:*`, `quote:v1:*`, `audit-feed:v1:public`. 404 returns FR-37 envelope; embed-side hooks treat 404 as empty per AC-53.5.
+- **Dependencies**: T-110.
+- **Files**: `proxy/routes/api-comments.ts`, `proxy/routes/api-social-posts.ts`, `proxy/routes/api-quotes.ts`, `proxy/routes/api-audit-public.ts` (new), `tests/unit/embedReadRoutes.test.ts`.
+- **Acceptance Criteria**: AC-51.4..AC-51.6, AC-53.5, AC-58.2..AC-58.5.
+- **Test Requirements**: each route returns the canonical shape; 404 envelope shape; cache-control header; redaction on `audit/public` (no `before`/`after`/`reason`).
+- **Traces to**: FR-51, FR-53, FR-58.
+- **Status**: [ ] Pending.
+
+### T-115: Worker read route `/api/stats/v1/summary` (FR-56)
+- **Description**: New route reading `stats:v1:summary` from KV, returning verbatim or 503 with `Retry-After: 60` per AC-56.4. Rate-limited at 30/60s.
+- **Dependencies**: T-110.
+- **Files**: `proxy/routes/api-stats.ts` (new), `tests/unit/apiStats.test.ts`.
+- **Acceptance Criteria**: AC-56.1..AC-56.4.
+- **Test Requirements**: shape match against fixture; 503 path on missing record; rate-limit budget separate.
+- **Traces to**: FR-56.
+- **Status**: [ ] Pending.
+
+### T-116: Router wiring for V4 routes (FR-50, FR-53, FR-56, FR-58)
+- **Description**: Extend `proxy/router.ts#dispatch` with new path matches: `/api/admin/*`, `/api/comments/*`, `/api/social-posts/*`, `/api/quotes/*`, `/api/audit/public`, `/api/stats/*`, `/admin` (asset path). Update `classifyRoute` so analytics labels are correct (`admin`, `comments`, `social-posts`, `quotes`, `audit-public`, `stats`, `admin-spa`).
+- **Dependencies**: T-113, T-114, T-115.
+- **Files**: `proxy/router.ts`, `tests/unit/router.test.ts`.
+- **Acceptance Criteria**: AC-50.1, AC-50.4, AC-50.6.
+- **Test Requirements**: each new path is dispatched to the correct handler; classifyRoute returns the new labels.
+- **Traces to**: FR-50, FR-53, FR-56, FR-58.
+- **Status**: [ ] Pending.
+
+### T-117: `scripts/seed-d1-from-json.ts` (FR-49 AC-49.3)
+- **Description**: Read `src/data/ukraineBills.json`, INSERT bills + nested votes into D1. Idempotent (UPSERT by `bill_id` + `(chamber,congress,session,roll_call)`). Sets `audit_log.actor_email = 'seed'`, `reason = 'bootstrap from ukraineBills.json'`.
+- **Dependencies**: T-107, T-108.
+- **Files**: `scripts/seed-d1-from-json.ts`, `tests/unit/seedFromJson.test.ts`.
+- **Acceptance Criteria**: AC-49.3.
+- **Test Requirements**: against in-memory D1 fixture; first run inserts N bills + M votes; second run inserts 0; audit log has 1 row per inserted entity with actor='seed'.
+- **Traces to**: FR-49.
+- **Status**: [ ] Pending.
+
+### T-118: `scripts/publish-d1-to-kv.ts` (FR-51, FR-55, FR-56, FR-58)
+- **Description**: The full publish pipeline per design.md §4.17. Reads D1, projects per-prefix records, diff-skips no-ops, writes `bill:v1:*` (FR-32 shape), `comment:v1:*`, `social-post:v1:*`, `quote:v1:*`, `stats:v1:summary` (FR-56), `audit-feed:v1:full`, `audit-feed:v1:public` (FR-58). Computes party priors (FR-55 AC-55.6) and writes `partyPrior` into `member:v1:*`. Supports `--dry-run`.
+- **Dependencies**: T-107, T-112.
+- **Files**: `scripts/publish-d1-to-kv.ts`, `tests/integration/publishD1ToKv.test.ts`.
+- **Acceptance Criteria**: AC-51.1..AC-51.9, AC-54.3, AC-55.6, AC-56.5, AC-58.3.
+- **Test Requirements**: seed with 3 bills + 2 reps + 2 comments + 1 post + 1 quote → publish → assert KV records match expected JSON; second consecutive publish writes zero keys (determinism); dry-run prints diff but writes nothing; party priors computed correctly with N=2 full-confidence reps.
+- **Traces to**: FR-51, FR-55, FR-56, FR-58.
+- **Status**: [ ] Pending.
+
+### T-119: `.github/workflows/publish-d1.yml` cron (FR-51 AC-51.8)
+- **Description**: Schedule `*/15 * * * *` against dev + uat. Manual `workflow_dispatch` against stg + prod. Uses `wrangler d1 execute` for read; writes through the existing `KV_VOTER_INFO` binding via `wrangler kv:key put`. Logs the diff summary; non-zero on any error.
+- **Dependencies**: T-118.
+- **Files**: `.github/workflows/publish-d1.yml` (new), `tests/ops/cron.publish.test.ts`.
+- **Acceptance Criteria**: AC-51.8.
+- **Test Requirements**: workflow file syntax (yaml-lint via existing scaffolding); no inline secrets (NFR-7).
+- **Traces to**: FR-51.
+- **Status**: [ ] Pending.
+
+### T-120: Admin SPA — Vite config + entry (FR-52)
+- **Description**: New Vite config `vite.admin.config.ts` with separate entry `src/admin/main.tsx` and HTML shell `src/admin/index.html`. Output to `dist/admin/`. `package.json` scripts `dev:admin`, `build:admin`. Worker `ASSETS` binding serves it at `/admin`.
+- **Dependencies**: None.
+- **Files**: `vite.admin.config.ts`, `src/admin/main.tsx`, `src/admin/index.html`, `package.json`.
+- **Acceptance Criteria**: AC-52.1, AC-52.2.
+- **Test Requirements**: build succeeds; dist/admin contains index.html + IIFE bundle; smoke test loads at `/admin` against local Worker.
+- **Traces to**: FR-52.
+- **Status**: [ ] Pending.
+
+### T-121: Admin SPA — six tabs + drawer editor (FR-52, FR-58)
+- **Description**: Tabs: Bills, Votes, Comments, Social Posts, Quotes, Recent Activity. List-detail layout per design.md §4.20. Optimistic updates with revert + toast on non-2xx (AC-52.4). Whoami badge (AC-52.6).
+- **Dependencies**: T-113, T-120.
+- **Files**: `src/admin/components/*` (Tabs, BillEditor, VoteEditor, CommentEditor, SocialPostEditor, QuoteEditor, RecentActivity), `src/admin/hooks/useFetcher.ts`, `tests/unit/admin-spa.test.tsx`.
+- **Acceptance Criteria**: AC-52.3..AC-52.8, AC-54.4.
+- **Test Requirements**: each tab renders mocked data; editor saves PATCH; non-2xx surfaces toast + reverts optimistic update; weight slider clamps to [0,5] step 0.05.
+- **Traces to**: FR-52, FR-54, FR-58.
+- **Status**: [ ] Pending.
+
+### T-122: Embed VoteList CommentExpand (FR-53.1)
+- **Description**: New `src/components/CommentExpand.tsx` (presentational) + `src/hooks/useRepComments.ts` (fetcher). VoteList renders the expand affordance only on rows with comments per AC-53.1. Expanded state shows comment markdown + score-adjustment chip per AC-53.3.
+- **Dependencies**: T-114.
+- **Files**: `src/components/CommentExpand.tsx`, `src/components/VoteList.tsx` (modify), `src/hooks/useRepComments.ts`, `tests/integration/embed.commentExpand.test.ts`.
+- **Acceptance Criteria**: AC-53.1, AC-53.3, AC-53.5.
+- **Test Requirements**: row with comment renders chevron; row without comment does not; expanding shows markdown + chip; missing endpoint (404) renders no chevron and no error banner.
+- **Traces to**: FR-53.
+- **Status**: [ ] Pending.
+
+### T-123: Embed Statements + Quotes tabs (FR-53.2, FR-53.3)
+- **Description**: New `src/components/SocialPostsList.tsx` + `QuotesList.tsx` (presentational). `RepDetail.tsx` grows a tab strip per design.md §4.21. Default tab = Record. Tab state persists across rep-detail open/close; not in URL. Mobile horizontal-scroll tab strip.
+- **Dependencies**: T-114.
+- **Files**: `src/components/RepDetail.tsx` (modify), `src/components/SocialPostsList.tsx`, `src/components/QuotesList.tsx`, `src/hooks/useRepStatements.ts`, `src/hooks/useRepQuotes.ts`, `tests/integration/embed.tabs.test.ts`.
+- **Acceptance Criteria**: AC-53.2, AC-53.3, AC-53.6, AC-53.7.
+- **Test Requirements**: tabs render in order Record / Statements / Quotes; default = Record; clicking tab switches content; missing endpoints render empty states; mobile breakpoint applies stacked-card layout.
+- **Traces to**: FR-53.
+- **Status**: [ ] Pending.
+
+### T-124: Score — FR-55 Bayesian shrink + Insufficient-record badge (Tier B)
+- **Description**: Extend `src/services/ukraineScore.ts`: add `NEW_REP_THRESHOLD = 2`, extend `ConfidenceTier` with `'insufficient'`, add `priors?: { partyPrior }` parameter, return `rawScore` field. Update `UkraineScoreBadge.tsx` to render "Insufficient record" + neutral gray for the new tier.
+- **Dependencies**: T-118 (publish writes `partyPrior` into `member:v1:*`).
+- **Files**: `src/services/ukraineScore.ts`, `src/components/UkraineScoreBadge.tsx`, `tests/unit/score.bayesianShrink.test.ts`.
+- **Acceptance Criteria**: AC-55.1..AC-55.7.
+- **Test Requirements**: rep with 0 votes → null score; 1 vote → null + 'insufficient'; GOP rep with 1 pro vote + partyPrior=-0.4 → final score ≈ -0.16 (after shrink); GOP rep with 20 pro votes → +1.0 (no shrink at full); partyPrior=null → no shrink.
+- **Traces to**: FR-55, ADR-018.
+- **Status**: [ ] Pending.
+
+### T-125: Score — FR-54 per-vote weight regression test (DEFERRED)
+- **Description**: Snapshot test asserting score parity between pre-V4 baseline and post-V4 D1-driven path. **Deferred** — not in V4 cut, can be added later when the parity question is asked.
+- **Acceptance Criteria**: AC-54.3 (the AC remains in the spec; this task does not satisfy it in V4).
+- **Traces to**: FR-54.
+- **Status**: [ ] Deferred — add when needed.
+
+### T-126: About panel — Recent researcher updates feed (Tier B, FR-53.4)
+- **Description**: Extend `src/components/AboutSystemPanel.tsx` with a section that fetches `/api/audit/public?limit=20` and renders the redacted list (actor local-part, action verb, target, relative time). 401/403 → render nothing (no error banner).
+- **Dependencies**: T-114.
+- **Files**: `src/components/AboutSystemPanel.tsx`, `src/hooks/useResearcherAuditPublic.ts`, `tests/integration/aboutPanelFeed.test.ts`.
+- **Acceptance Criteria**: AC-53.4.
+- **Test Requirements**: feed renders 20 rows; 401 response renders nothing; redaction integrity (no email domains visible).
+- **Traces to**: FR-53, FR-58.
+- **Status**: [ ] Pending.
+
+### T-127: Stats endpoint smoke + cron-emission (Tier B, FR-56)
+- **Description**: The stats record is written by T-118 (publish pipeline). This task: smoke-test the read route end-to-end (fixture publish → fixture KV → fetch → assert shape) and document the public consumer contract.
+- **Dependencies**: T-115, T-118.
+- **Files**: `tests/integration/statsEndToEnd.test.ts`.
+- **Acceptance Criteria**: AC-56.1..AC-56.5.
+- **Test Requirements**: full pipeline integration test; rate-limit isolation from other public routes.
+- **Traces to**: FR-56.
+- **Status**: [ ] Pending.
+
+### T-128: `ukraineBills.json` frozen-file CI gate (Tier C, FR-49 AC-49.4)
+- **Description**: `scripts/json-frozen-check.mjs` — fail the PR check if `src/data/ukraineBills.json` content hash differs from a committed-known hash UNLESS the PR title contains `[seed-update]`. Documented escape hatch for the rare case the seed needs to change post-V4.
+- **Dependencies**: T-117 lands and the seed runs in dev/uat/stg/prod.
+- **Files**: `scripts/json-frozen-check.mjs`, `.github/workflows/pr.yml` (extend).
+- **Acceptance Criteria**: AC-49.4.
+- **Test Requirements**: a test PR that mutates the file fails CI; a `[seed-update]`-titled PR passes.
+- **Traces to**: FR-49.
+- **Status**: [ ] Pending — Tier C, may slip past Sunday.
+
+### T-129: Discord SSO migration plan (Tier C, FR-57)
+- **Description**: NOT IMPLEMENTED in V4. Captured as a placeholder task so future cycles have a starting point. The migration is documented in FR-57 and ADR-017's Migration Outline.
+- **Dependencies**: V4 lands and runs stably for ≥1 week.
+- **Files**: TBD when scheduled.
+- **Acceptance Criteria**: TBD (FR-57 has none in v2.7.0).
+- **Test Requirements**: TBD.
+- **Traces to**: FR-57.
+- **Status**: [ ] Deferred.
+
+### T-131: V4 D1→KV→embed round-trip integration test (RC gate, FR-44 AC-44.21)
+- **Description**: New `tests/integration/v4PublishRoundTrip.test.ts` composing admin store + publish projector + embed read routes against in-memory D1 + KV fakes. Locks the contract that admin writes flow correctly through publish projection into the shape the embed read routes return. Required for release-candidate confidence.
+- **Dependencies**: T-112, T-114, T-118.
+- **Files**: `tests/integration/v4PublishRoundTrip.test.ts` (new).
+- **Acceptance Criteria**: AC-44.21.
+- **Test Requirements**: Itself — 4 tests covering bill round-trip, comment round-trip, multi-cosponsorship projection, and delete + audit-feed redaction.
+- **Traces to**: FR-44, FR-50, FR-51, FR-58.
+- **Status**: [ ] In progress.
+
+### T-132: Router `/admin` SPA bootstrap unit test (RC gate, FR-44 AC-44.22)
+- **Description**: New `tests/unit/router.adminBootstrap.test.ts` exercising the FR-52 AC-52.2 admin-SPA-serving path through `proxy/router.ts#dispatch`. Locks the contract that `/admin` and `/admin/` rewrite to `/admin/index.html` via the ASSETS binding, with fail-closed 404 paths for misconfigured envs.
+- **Dependencies**: T-116.
+- **Files**: `tests/unit/router.adminBootstrap.test.ts` (new).
+- **Acceptance Criteria**: AC-44.22.
+- **Test Requirements**: Itself — 4 tests covering /admin, /admin/, missing ASSETS, ASSETS-throws.
+- **Traces to**: FR-44, FR-52.
+- **Status**: [ ] In progress.
+
+### T-130: Quote-modal video embedding polish (Tier C)
+- **Description**: V4 ships text rendering of quotes (`mediaKind: 'text'`) inline in the QuotesList. Video / audio / image rendering with proper iframe sizing and lazy-load is deferred. This task tracks that follow-on work.
+- **Dependencies**: T-123.
+- **Files**: `src/components/QuotesList.tsx` (extend), `src/components/QuoteMedia.tsx` (new).
+- **Acceptance Criteria**: TBD (extend FR-53 with sub-ACs when scheduled).
+- **Test Requirements**: TBD.
+- **Traces to**: FR-53.
+- **Status**: [ ] Deferred — Tier C, may slip past Sunday.
+
+### T-133: Edge-tier cache-key injectivity hotfix (2026-05-25 prod regression)
+- **Description**: Production bug: on `trackukraine.com`, a second address lookup returned the first lookup's reps. Root cause traced to the edge-tier `keyToUrl` adapter in `proxy/routes/api-upstream.ts` building its cache URL from the request pathname + `#${kind}` only, dropping `CacheKey.params`. Census-geocoder is the lone route whose identity lives in the query string, so every address lookup at a warm POP collided on one edge entry. Fix: encode `cacheKeyToDottedString(k)` as a `__ck` query parameter on the synthetic edge cache URL so structurally non-equal CacheKeys produce distinct edge addresses.
+- **Dependencies**: none.
+- **Files**: `proxy/routes/api-upstream.ts` (edit edge-tier `keyToUrl` lambda), `tests/unit/routes/query-and-cache.test.ts` (add dual-of-nonce-fuzz regression test).
+- **Acceptance Criteria**: AC-40.11.
+- **Test Requirements**: One regression test asserting two `/api/census/geocoder/geographies/onelineaddress` requests differing only in `address=` produce two upstream calls (not one). Test fails on pre-fix code; passes on post-fix code.
+- **Traces to**: FR-40 AC-40.11, ADR-019.
+- **Status**: [x] Done — 2026-05-25. Spec + ADR + failing-then-passing test + fix landed in one pass per AIDD. Full suite green (155 files, 2188 tests). `npm run typecheck` clean.
+
+
+### T-134: v4.1.0 — `lw` CLI foundation
+- **Description**: Build the legislation-watch CLI scaffolding so every future ingest job has one consistent surface. `scripts/cli.ts` (commander dispatcher), `scripts/lib/{runtime,d1-client,congress-client,audit-log,trace,logger}.ts` shared core, `scripts/{bills,kv}/*.ts` subcommand wrappers. Verbose/debug flags propagate via LW_VERBOSITY env var. `package.json#bin` registers `lw` so `npx lw …` works in CI.
+- **Dependencies**: none.
+- **Files**: `scripts/cli.ts` (new), `scripts/lib/*.ts` (6 files new), `scripts/bills/backfill.ts` (new), `scripts/kv/publish.ts` (new), `package.json` (bin + lw script + commander devDep).
+- **Acceptance Criteria**: Per memory `feedback_seeding_is_buildops_not_runtime` — CLI lives in scripts/, Worker + SPA never drive ingest.
+- **Test Requirements**: Smoke: `npm run lw -- --help`, `--version`, subcommand `--help` all render. Typecheck clean.
+- **Traces to**: FR-59 AC-59.1, AC-59.2.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-135: v4.1.0 — Extract `importBillCore`
+- **Description**: Pull orchestration body from proxy/services/import-bill.ts into scripts/lib/bills/import-core.ts as a pure fn over D1Like + CongressClient + AuditLogger interfaces. Worker adapter becomes 90 lines. Tests rewrite acceptable per D10.
+- **Files**: `scripts/lib/bills/import-core.ts` (new, ~600 lines), `proxy/services/import-bill.ts` (now adapter).
+- **Acceptance Criteria**: FR-59 AC-59.1, AC-59.6 (every recordedVote preserved).
+- **Test Requirements**: 19 existing importBill tests pass via the Worker adapter without change. Full suite green.
+- **Traces to**: FR-59.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-136: v4.1.0 — `lw bills backfill` driver
+- **Description**: Pure backfillBills() + CLI wrapper. Iterates bills ASC, 4-way concurrency, force=false default honors freshness gates. Per-bill error continuation, audit_log writes on failure, exit codes 0/1/2.
+- **Files**: `scripts/lib/bills/backfill.ts` (new), `scripts/bills/backfill.ts` (wrapper).
+- **Acceptance Criteria**: FR-59 AC-59.1, AC-59.3, AC-59.10.
+- **Test Requirements**: 5 tests in tests/unit/bills/backfill.test.ts cover process-all, per-bill errors, limit, cursor, filter.
+- **Traces to**: FR-59.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-137: v4.1.0 — Delete useAutoBackfill SPA hook + /api/admin/backfill-bills route
+- **Description**: Remove dead browser-driven ingest paths. Hook + localStorage cursor + the Worker route + their tests all deleted in one commit. Per memory `feedback_seeding_is_buildops_not_runtime`.
+- **Files**: `src/admin/App.tsx` (hook + useEffect removed), `proxy/routes/api-admin.ts` (route handler + dispatch removed), `tests/unit/useAutoBackfill.test.tsx` (deleted), `tests/unit/apiAdminRoutes.test.ts` (block removed).
+- **Acceptance Criteria**: FR-59 AC-59.9.
+- **Test Requirements**: full suite green after removals; no orphaned references.
+- **Traces to**: FR-59.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-138: v4.1.0 — Migration 0010 (direction corrections)
+- **Description**: 118-HR-2445 + 118-S-2552 direction='anti-ukraine' → 'neutral' with audit_log rows. Rollback in _rollbacks/.
+- **Files**: `migrations/d1/0010_v4_1_0_direction_corrections.up.sql`, `migrations/d1/_rollbacks/0010_v4_1_0_direction_corrections.sql`.
+- **Acceptance Criteria**: FR-59 AC-59.7.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-139: v4.1.0 — Data Freshness panel + endpoint
+- **Description**: Settings ▸ Data freshness — research-facing observation of bill corpus state. New /api/admin/data-freshness endpoint aggregates: total, by-congress, by-direction, became-law, freshness buckets (24h/7d/30d/stale), top-20 stale bills, last refresh attempt. SPA view renders read-only with research-relevant language only (no operator-state terms).
+- **Files**: `proxy/routes/api-admin.ts` (handleDataFreshness added), `src/admin/components/settings/DataFreshnessView.tsx` (new), `src/admin/components/settings/SettingsTab.tsx` (slot registered).
+- **Acceptance Criteria**: FR-59 AC-59.8.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-140: v4.1.0 — GitHub Actions backfill workflow
+- **Description**: .github/workflows/backfill-bills.yml — cron 6h dev/uat + 12h stg/prod, workflow_dispatch with env/force/limit/concurrency inputs, per-env matrix with gate. Invokes `npx tsx scripts/cli.ts bills backfill --env <env> --verbose`. Exit 0/2 → green, exit 1 → red.
+- **Files**: `.github/workflows/backfill-bills.yml` (new).
+- **Acceptance Criteria**: FR-59 AC-59.11.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-141: v4.1.0 — PeopleTab roster-driven enumeration
+- **Description**: PeopleTab in admin SPA now enumerates from KV name-index (mocMap) — every sitting member of Congress gets a card whether they have handle rows or not. Zero-handle members render with "no handles tracked" italic caption. Header coverage metric "N people · M handles · X/Y Congress with handles" makes the gap visible.
+- **Files**: `src/admin/components/PeopleTab.tsx`.
+- **Acceptance Criteria**: Resolves the UAT audit observation "306 of 535 visible" by including the missing members.
+- **Status**: [x] Done — 2026-05-25.

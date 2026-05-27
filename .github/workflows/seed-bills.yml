@@ -1,0 +1,119 @@
+name: Seed Bills (FR-59)
+
+on:
+  schedule:
+    # Every 6h dev/uat, every 12h stg/prod. Using one cron for both;
+    # the per-env matrix step short-circuits stg/prod when current
+    # hour % 12 != 0.
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      env:
+        description: 'Environment'
+        required: true
+        type: choice
+        options: [dev, uat, stg, prod]
+        default: dev
+      force:
+        description: 'Force re-pull every bill ignoring freshness cache (slow)'
+        required: false
+        type: boolean
+        default: false
+      limit:
+        description: 'Optional max bills (blank = no cap)'
+        required: false
+        type: string
+        default: ''
+      concurrency:
+        description: 'In-flight bills (default 4)'
+        required: false
+        type: string
+        default: '4'
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      # Run all four envs on the cron schedule. Manual runs use the
+      # `env` input and bypass the matrix via the `if`.
+      fail-fast: false
+      matrix:
+        env: [dev, uat, stg, prod]
+    steps:
+      - name: Decide whether to run this matrix slot
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ matrix.env }}" = "${{ inputs.env }}" ]; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            # Scheduled run. stg + prod only at the 12h cadence (hours 0 and 12).
+            hour=$(date -u +%H)
+            if [ "${{ matrix.env }}" = "stg" ] || [ "${{ matrix.env }}" = "prod" ]; then
+              if [ "$hour" = "00" ] || [ "$hour" = "12" ]; then
+                echo "run=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "run=false" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              # dev + uat: every 6h. Hours 0, 6, 12, 18.
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Skip
+        if: steps.gate.outputs.run != 'true'
+        run: echo "Skipping ${{ matrix.env }} for this trigger."
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: npm ci
+
+      - name: Run seed (${{ matrix.env }})
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CONGRESS_API_KEY: ${{ secrets.CONGRESS_API_KEY }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          ARGS="bills seed --env ${{ matrix.env }} --verbose"
+          if [ "${{ inputs.force }}" = "true" ]; then
+            ARGS="$ARGS --force"
+          fi
+          if [ -n "${{ inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ inputs.limit }}"
+          fi
+          if [ -n "${{ inputs.concurrency }}" ]; then
+            ARGS="$ARGS --concurrency ${{ inputs.concurrency }}"
+          fi
+          set +e
+          npx tsx scripts/cli.ts $ARGS
+          code=$?
+          set -e
+          # Exit 0 + 2 both green (2 = partial success, failures are in audit_log).
+          # Exit 1 = config error → red build.
+          if [ "$code" -eq 1 ]; then
+            echo "::error::seed failed with config error (exit 1)"
+            exit 1
+          elif [ "$code" -eq 2 ]; then
+            echo "::warning::seed completed with per-bill failures. See audit_log."
+            exit 0
+          else
+            echo "seed completed cleanly (exit 0)"
+            exit 0
+          fi

@@ -29,6 +29,7 @@
     "proxy/upstreams/**/*.ts",
     "proxy/security/**/*.ts",
     "proxy/kv/**/*.ts",
+    "proxy/d1/**/*.ts",
     "proxy/routes/**/*.ts",
     "proxy/router.ts"
   ],

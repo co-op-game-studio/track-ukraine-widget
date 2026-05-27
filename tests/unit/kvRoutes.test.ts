@@ -265,4 +265,50 @@ describe('/api/roll-calls', () => {
     const r = await handleFetch(new Request('https://vote.cogs.it.com/api/roll-calls/senate/abc/2/154', { headers: ORIGIN }), makeEnv(), makeFakeCache());
     expect(r.status).toBe(400);
   });
+  it('400 invalid_roll_call_key when path has wrong segment count (covers lines 24-28)', async () => {
+    // Only 3 path parts after /api/roll-calls/ — handler short-circuits with
+    // invalid_roll_call_key before the regex validators run.
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-calls/senate/118/2', { headers: ORIGIN }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as { error: string };
+    expect(body.error).toBe('invalid_roll_call_key');
+  });
+  it('400 invalid_roll_call_key when chamber is unknown', async () => {
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-calls/galaxy/118/2/154', { headers: ORIGIN }),
+      makeEnv(),
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(400);
+    const body = (await r.json()) as { error: string };
+    expect(body.error).toBe('invalid_roll_call_key');
+  });
+  it('404 roll_call_not_found when KV has no record (covers lines 46-50)', async () => {
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-calls/house/118/2/999', { headers: ORIGIN }),
+      makeEnv(), // empty store
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(404);
+    const body = (await r.json()) as { error: string };
+    expect(body.error).toBe('roll_call_not_found');
+  });
+  it('HEAD request on a hit returns headers without body', async () => {
+    const env = makeEnv({ 'roll-call:v1:house:118:2:65': JSON.stringify({ rollCall: 65 }) });
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-calls/house/118/2/65', {
+        method: 'HEAD',
+        headers: ORIGIN,
+      }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(200);
+    expect(r.headers.get('Cache-Control')).toContain('max-age=60');
+    expect(await r.text()).toBe('');
+  });
 });
