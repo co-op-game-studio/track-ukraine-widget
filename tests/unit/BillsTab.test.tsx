@@ -385,6 +385,122 @@ describe('BillsTab — bill_id derivation (FR-52 AC-52.12)', () => {
     expect(optionValues).toContain('anti-ukraine');
   });
 
+  // AC-52.46 — `+ New` opens BillImportPanel modal (replaces empty editor).
+  describe('AC-52.46: + New opens BillImportPanel', () => {
+    it('clicking + New renders the BillImportPanel modal overlay', async () => {
+      vi.restoreAllMocks();
+      installFetch();
+      render(<BillsTab />);
+      const newBtn = await screen.findByRole('button', { name: /\+ New/i });
+      fireEvent.click(newBtn);
+      // The modal dialog shows with a title and Direct/Paste tabs.
+      const dialog = await screen.findByRole('dialog', { name: /Import bill from Congress\.gov/i });
+      expect(dialog).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Direct \(Congress \/ Type \/ Number\)/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Paste Congress\.gov URL/i })).toBeInTheDocument();
+    });
+
+    it('Cancel button closes the panel (resolves null) without selecting a row', async () => {
+      vi.restoreAllMocks();
+      installFetch();
+      render(<BillsTab />);
+      const newBtn = await screen.findByRole('button', { name: /\+ New/i });
+      fireEvent.click(newBtn);
+      await screen.findByRole('dialog', { name: /Import bill from Congress\.gov/i });
+      // Cancel inside the Direct tab — the BillsTab's pendingResolve handler
+      // sets pendingResolve=null and resolves the outer Promise with null.
+      const cancelBtn = screen.getAllByRole('button', { name: /^Cancel$/i })[0]!;
+      fireEvent.click(cancelBtn);
+      await waitFor(
+        () => expect(screen.queryByRole('dialog', { name: /Import bill from Congress\.gov/i })).toBeNull(),
+        { timeout: 3000 },
+      );
+      // No row got auto-selected — placeholder is still visible.
+      expect(screen.getByText(/Select a row or click \+ New/i)).toBeInTheDocument();
+    });
+
+    it('on successful import, panel resolves and the new row is selected', async () => {
+      const newRow = {
+        id: '01HQXIMPORTED00000000000',
+        bill_id: '119-HR-2222',
+        congress: 119,
+        type: 'HR',
+        number: '2222',
+        featured: 0,
+        label: null,
+        title: 'Newly imported',
+        latest_action: null,
+        latest_action_date: null,
+        became_law: 0,
+        congress_gov_url: null,
+        direction: 'pro-ukraine',
+        direction_reason: null,
+        summary_json: null,
+        created_at: '2026-05-02T00:00:00Z',
+        updated_at: '2026-05-02T00:00:00Z',
+      };
+      // Two-stage fetch mock: empty list first, then list-with-newRow after import.
+      let listCallCount = 0;
+      vi.restoreAllMocks();
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = typeof input === 'string' ? input : (input as Request).url;
+        const method = (init?.method ?? 'GET') as string;
+        if (url.endsWith('/api/admin/bills') && method === 'GET') {
+          listCallCount++;
+          // First call: empty list. Subsequent (post-import re-fetch): row present.
+          const items = listCallCount === 1 ? [] : [newRow];
+          return new Response(JSON.stringify({ items }), { status: 200 });
+        }
+        if (url.includes('/api/admin/import-bill') && method === 'POST') {
+          return new Response(
+            JSON.stringify({
+              bill: { bill_id: '119-HR-2222', title: 'Newly imported' },
+              votes_imported: 0,
+              votes_updated: 0,
+              votes_skipped: 0,
+              cached: false,
+              duration_ms: 12,
+            }),
+            { status: 201 },
+          );
+        }
+        if (url.includes('/api/admin/votes') || url.includes('/api/admin/comments')
+            || url.includes('/api/admin/cosponsors') || url.includes('/api/admin/actions')) {
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }
+        return new Response('not found', { status: 404 });
+      });
+
+      render(<BillsTab />);
+      fireEvent.click(await screen.findByRole('button', { name: /\+ New/i }));
+      await screen.findByRole('dialog', { name: /Import bill from Congress\.gov/i });
+
+      // Fill in the Number field on the Direct tab and submit.
+      const numberInput = screen.getByPlaceholderText(/1601/);
+      fireEvent.change(numberInput, { target: { value: '2222' } });
+      const importBtn = screen.getByRole('button', { name: /^Import$/i });
+      fireEvent.click(importBtn);
+
+      // The panel waits ~600ms then calls onResolve('119-HR-2222').
+      // ResourceTab re-fetches and selects the newly-imported row.
+      await waitFor(
+        () => expect(screen.queryByRole('dialog', { name: /Import bill from Congress\.gov/i })).toBeNull(),
+        { timeout: 3000 },
+      );
+      // The newly-imported row was selected; the editor shows the bill_id
+      // input populated with the imported value (read-only).
+      await waitFor(
+        () => {
+          const input = [...document.querySelectorAll('input[readonly]')].find(
+            (el) => (el as HTMLInputElement).value === '119-HR-2222',
+          );
+          expect(input).toBeDefined();
+        },
+        { timeout: 3000 },
+      );
+    });
+  });
+
   // AC-52.36 — Direction rationale renders as single-line text input, not textarea.
   it('AC-52.36: Direction rationale is a single-line text input (not textarea)', async () => {
     await openSampleBillEditor();

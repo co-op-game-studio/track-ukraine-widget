@@ -5,8 +5,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { YouTubeAdapter } from '../../../src/ingest/adapters/youtube';
-import { PostNotFoundError } from '../../../src/ingest/types';
+import { PostNotFoundError, RateLimitError } from '../../../src/ingest/types';
 import type { Fetcher } from '../../../src/ingest/adapters/youtube';
+import type { AdapterLogger, AdapterLogEntry } from '../../../src/ingest/adapter-logger';
 
 /* ---------- Fixtures ---------- */
 
@@ -284,5 +285,205 @@ describe('YouTubeAdapter.fetchPostByUrl', () => {
     await expect(
       adapter.fetchPostByUrl('https://www.youtube.com/watch?v=nonexistent'),
     ).rejects.toThrow(PostNotFoundError);
+  });
+
+  it('throws PostNotFoundError when /videos returns non-OK', async () => {
+    const fetcher: Fetcher = async () => new Response('forbidden', { status: 403 });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(
+      adapter.fetchPostByUrl('https://www.youtube.com/watch?v=vid_aaa_xyz'),
+    ).rejects.toThrow(PostNotFoundError);
+  });
+});
+
+/* ---------- Additional coverage: setLogger, healthCheck, branches ---------- */
+
+describe('YouTubeAdapter.setLogger', () => {
+  it('attaches a logger after construction and emits adapter log entries', async () => {
+    const entries: AdapterLogEntry[] = [];
+    const logger: AdapterLogger = { log: (e) => entries.push(e) };
+    const fetcher = stubFetcher({ '/videos?': VIDEO_FIXTURE });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    adapter.setLogger(logger);
+    await adapter.fetchPostByUrl('https://www.youtube.com/watch?v=vid_zzz_abc');
+    // withAdapterLog emits start + success entries when a logger is attached.
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries.every((e) => e.platform === 'youtube')).toBe(true);
+  });
+});
+
+describe('YouTubeAdapter.healthCheck', () => {
+  it('resolves when the upstream channels endpoint returns 200', async () => {
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      calls.push(url);
+      return new Response(JSON.stringify({ items: [{ id: 'UCBR8-60-B28hp2BmDPdntcQ' }] }), {
+        status: 200,
+      });
+    };
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.healthCheck()).resolves.toBeUndefined();
+    expect(calls[0]).toMatch(/\/channels\?part=id&id=UCBR8/);
+    expect(calls[0]).toMatch(/key=test-key/);
+  });
+
+  it('throws with status + body snippet on non-OK', async () => {
+    const fetcher: Fetcher = async () =>
+      new Response('quota exhausted for the day', { status: 403 });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.healthCheck()).rejects.toThrow(/health check failed \(403\)/);
+  });
+});
+
+describe('YouTubeAdapter.resolveAccount — channel-id branch', () => {
+  it('resolves a raw UC... channel id via /channels?id=', async () => {
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      calls.push(url);
+      return new Response(JSON.stringify(CHANNEL_FIXTURE), { status: 200 });
+    };
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    const acct = await adapter.resolveAccount('UC_channel_123');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/[?&]id=UC_channel_123/);
+    expect(acct.platformId).toBe('UC_channel_123');
+    expect(acct.displayName).toBe('Sen. Durbin');
+  });
+
+  it('throws non-rate-limit upstream errors when looking up by channel id', async () => {
+    // 500 is not a rate-limit; checkResponse returns the body, then the
+    // adapter wraps it as a generic Error with the status.
+    const fetcher: Fetcher = async () => new Response('boom', { status: 500 });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.resolveAccount('UC_channel_500')).rejects.toThrow(/lookup failed \(500\)/);
+  });
+
+  it('short-circuits on 429 from forHandle (rate-limit)', async () => {
+    // forHandle returns 429 — must throw RateLimitError WITHOUT falling through
+    // to forUsername (the whole point of the rate-limit guard).
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      calls.push(url);
+      return new Response('rate limited', {
+        status: 429,
+        headers: { 'retry-after': '30' },
+      });
+    };
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.resolveAccount('senatorsanders')).rejects.toThrow(RateLimitError);
+    // Only one upstream call: forHandle. forUsername must NOT have been tried.
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatch(/forHandle=/);
+  });
+
+  it('short-circuits on 429 from forUsername after empty forHandle', async () => {
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      calls.push(url);
+      if (url.includes('forHandle=')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      // forUsername now returns 429.
+      return new Response('rate limited', {
+        status: 429,
+        headers: { 'retry-after': '60' },
+      });
+    };
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.resolveAccount('senatorsanders')).rejects.toThrow(RateLimitError);
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatch(/forUsername=/);
+  });
+
+  it('re-throws RateLimitError from the search fallback (last-resort path)', async () => {
+    const calls: string[] = [];
+    const fetcher: Fetcher = async (url) => {
+      calls.push(url);
+      if (url.includes('forHandle=')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      if (url.includes('forUsername=')) {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      // /search hits the daily quota.
+      return new Response('quota exhausted', { status: 403 });
+    };
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.resolveAccount('senatorsanders')).rejects.toThrow(RateLimitError);
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).toMatch(/\/search\?/);
+  });
+});
+
+describe('YouTubeAdapter.listAuthorPosts — error branches', () => {
+  it('wraps resolveAccount failures with a clear "cannot resolve" error', async () => {
+    // Handle-style platformId triggers the on-the-fly resolveAccount() call,
+    // which then fails because every /channels lookup returns 404.
+    const handleAccount = {
+      platformId: 'NotAChannelId',
+      handle: '@unknown',
+      displayName: 'Unknown',
+    };
+    const fetcher: Fetcher = async () =>
+      new Response(JSON.stringify({ items: [] }), { status: 200 });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.listAuthorPosts({ account: handleAccount })).rejects.toThrow(
+      /Cannot resolve YouTube channel/,
+    );
+  });
+
+  it('throws when /search returns non-OK (non-rate-limit)', async () => {
+    const account = { platformId: 'UC_channel_123', handle: '@SenDurbin', displayName: 'Sen. Durbin' };
+    const fetcher: Fetcher = async () => new Response('boom', { status: 500 });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.listAuthorPosts({ account })).rejects.toThrow(
+      /YouTube search failed \(500\)/,
+    );
+  });
+
+  it('short-circuits with RateLimitError when /search hits quota', async () => {
+    const account = { platformId: 'UC_channel_123', handle: '@SenDurbin', displayName: 'Sen. Durbin' };
+    const fetcher: Fetcher = async () =>
+      new Response('quota exhausted', { status: 403 });
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.listAuthorPosts({ account })).rejects.toThrow(RateLimitError);
+  });
+
+  it('throws "not a valid UC channel ID" when resolution returns a non-UC id', async () => {
+    // resolveAccount path returns success but with a non-UC platformId — the
+    // search-fallback branch returns the username verbatim as platformId when
+    // no UC id is found. The adapter must refuse to call /search with that.
+    const handleAccount = {
+      platformId: 'plainhandle',
+      handle: 'plainhandle',
+      displayName: 'Plain Handle',
+    };
+    const fetcher: Fetcher = async (url) => {
+      // forHandle empty, forUsername empty, /search returns a hit but the
+      // result has NO channelId in id, so adapter falls through to the
+      // generic "channel not found" — wait, that throws too. Need a path
+      // that returns success with non-UC id. Easiest: construct one
+      // through forUsername returning a channel whose id doesn't start
+      // with "UC".
+      if (url.includes('forUsername=')) {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'NotAUC123',
+                snippet: { title: 'Plain', customUrl: 'plain', thumbnails: {} },
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      // forHandle empty
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    };
+    const adapter = new YouTubeAdapter('test-key', fetcher);
+    await expect(adapter.listAuthorPosts({ account: handleAccount })).rejects.toThrow(
+      /is not a valid UC channel ID/,
+    );
   });
 });

@@ -9,10 +9,12 @@ import {
   getAdapter,
   adapterForUrl,
   listPlatforms,
+  setAdapterLoggers,
   _resetRegistry,
 } from '../../../src/ingest/factory';
 import type { SocialAdapter, IngestedPost } from '../../../src/ingest/types';
 import { UnknownPlatformError, UnsupportedUrlError } from '../../../src/ingest/types';
+import type { AdapterLogger } from '../../../src/ingest/adapter-logger';
 
 function fakeAdapter(platform: 'bluesky' | 'youtube', urlPattern: RegExp): SocialAdapter {
   return {
@@ -58,5 +60,50 @@ describe('adapter factory', () => {
     registerAdapter(fakeAdapter('bluesky', /bsky/));
     registerAdapter(fakeAdapter('youtube', /yt/));
     expect(listPlatforms()).toEqual(['bluesky', 'youtube']);
+  });
+
+  it('listPlatforms returns empty array when registry is empty', () => {
+    expect(listPlatforms()).toEqual([]);
+  });
+});
+
+describe('setAdapterLoggers', () => {
+  function makeNoopLogger(): AdapterLogger {
+    // Minimal AdapterLogger surface — `withAdapterLog` uses `wrap` only.
+    return {
+      wrap: <T>(_op: unknown, fn: () => Promise<T>) => fn(),
+    } as unknown as AdapterLogger;
+  }
+
+  it('attaches logger to adapters that implement setLogger', () => {
+    let received: AdapterLogger | null = null;
+    const a = fakeAdapter('bluesky', /bsky/);
+    (a as unknown as { setLogger: (l: AdapterLogger) => void }).setLogger = (l) => {
+      received = l;
+    };
+    registerAdapter(a);
+    const logger = makeNoopLogger();
+    setAdapterLoggers(logger);
+    expect(received).toBe(logger);
+  });
+
+  it('skips adapters that do NOT implement setLogger (no throw)', () => {
+    // fakeAdapter has no setLogger; setAdapterLoggers must not crash on it.
+    registerAdapter(fakeAdapter('bluesky', /bsky/));
+    expect(() => setAdapterLoggers(makeNoopLogger())).not.toThrow();
+  });
+
+  it('handles a mix of adapters with and without setLogger', () => {
+    let receivedFromYt: AdapterLogger | null = null;
+    const bsky = fakeAdapter('bluesky', /bsky/);
+    const yt = fakeAdapter('youtube', /yt/);
+    (yt as unknown as { setLogger: (l: AdapterLogger) => void }).setLogger = (l) => {
+      receivedFromYt = l;
+    };
+    registerAdapter(bsky);
+    registerAdapter(yt);
+    const logger = makeNoopLogger();
+    setAdapterLoggers(logger);
+    expect(receivedFromYt).toBe(logger);
   });
 });

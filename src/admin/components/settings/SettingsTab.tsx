@@ -10,8 +10,9 @@ import { TagsView } from './TagsView';
 import { PollStatusView } from './PollStatusView';
 import { AppConfigView } from './AppConfigView';
 import { CacheView } from './CacheView';
+import { DataFreshnessView } from './DataFreshnessView';
 
-export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'config';
+export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config';
 
 interface ViewSpec {
   id: SettingsView;
@@ -21,11 +22,12 @@ interface ViewSpec {
 }
 
 const VIEWS: ViewSpec[] = [
-  { id: 'keywords',    label: 'Keywords',    help: 'Match keywords for the social ingest pipeline', editable: true },
-  { id: 'tags',        label: 'Tags',        help: 'Color-coded labels applied to quotes', editable: true },
-  { id: 'cache',       label: 'Cache',       help: 'Inspect + purge KV cache records', editable: true },
-  { id: 'poll-status', label: 'Poll status', help: 'Per-handle health (read-only)', editable: false },
-  { id: 'config',      label: 'App config',  help: 'Deployment-time settings (read-only)', editable: false },
+  { id: 'keywords',    label: 'Keywords',     help: 'Match keywords for the social ingest pipeline', editable: true },
+  { id: 'tags',        label: 'Tags',         help: 'Color-coded labels applied to quotes', editable: true },
+  { id: 'cache',       label: 'Cache',        help: 'Inspect + purge KV cache records', editable: true },
+  { id: 'poll-status', label: 'Poll status',  help: 'Per-handle health (read-only)', editable: false },
+  { id: 'freshness',   label: 'Data freshness', help: 'Bill corpus state (read-only)', editable: false },
+  { id: 'config',      label: 'App config',   help: 'Deployment-time settings (read-only)', editable: false },
 ];
 
 const VALID: Set<string> = new Set(VIEWS.map((v) => v.id));
@@ -56,6 +58,7 @@ export function SettingsTab() {
         {view === 'tags'        && <TagsView />}
         {view === 'cache'       && <CacheView />}
         {view === 'poll-status' && <ReadOnlyWrap reason="Poll status is read-only — failures persist for engineering visibility."><PollStatusView /></ReadOnlyWrap>}
+        {view === 'freshness'   && <ReadOnlyWrap reason="Bill corpus state is updated by the `lw bills backfill` CLI in CI. This panel is read-only."><DataFreshnessView /></ReadOnlyWrap>}
         {view === 'config'      && <ReadOnlyWrap reason="Set per-env in wrangler.toml. Edit there and redeploy to change."><AppConfigView /></ReadOnlyWrap>}
       </div>
     </div>

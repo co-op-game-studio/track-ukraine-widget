@@ -1,0 +1,271 @@
+# v4.1.0 dev rollout log
+
+**Started:** 2026-05-26
+**Branch:** `chore/coverage-deep-pass`
+**Env scope:** dev only (UAT/stg/prod deferred per user direction)
+**Tracking RC:** `v4.1.0-rc1` initial; bumped per iteration
+
+This file tracks live execution of the v4.1.0 release plan against dev.
+Format: section per phase, with state markers (⬜/🟡/✅/❌/⚠️) and any
+findings. Edited live as work progresses.
+
+---
+
+## Phase 0 — Pre-flight
+
+| Item | State | Notes |
+|---|---|---|
+| Verify branch state | ✅ | clean (only coverage-tmp + this log file untracked); on chore/coverage-deep-pass |
+| Verify commit chain | ✅ | c7f6f9b → a82b2f8 → 95f62b4 confirmed |
+| Verify CI secrets present | ✅ | CONGRESS_API_KEY + CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID all in `gh secret list` |
+| Verify env vars locally | ⚠️ | CLOUDFLARE_API_TOKEN set in shell. CLOUDFLARE_ACCOUNT_ID not set but pulled from `wrangler whoami` → `ee328c1565b93d82df15c09698e715d3`. CONGRESS_API_KEY missing (only VITE_ prefix in .env); will need to set or source from .env for the smoke run. |
+
+## Phase 1 — Run full test suite + coverage
+
+| Item | State | Notes |
+|---|---|---|
+| `npm run typecheck` | ✅ | Clean both root + proxy tsconfig |
+| `npx vitest run` | ✅ | 156 files, 2186 passing, 5 skipped (~39s wall) |
+| `npm run test:coverage` | ✅ | 94.89/87.08/89.83/94.89 — comfortably above 80/80/80/80 floors |
+| Build (`npm run build:all`) | ✅ | All three Vite builds + SRI manifest. IIFE: 808kB (gzip 220kB). Admin SPA: 462kB (gzip 130kB). |
+
+## Phase 2 — Live dev smoke (Node CLI)
+
+| Item | State | Notes |
+|---|---|---|
+| `npx tsx scripts/cli.ts --version` | ✅ | rc1: `4.1.0-rc.1`; rc2 (after fix): `4.1.0-rc1` (renamed) |
+| `npx tsx scripts/cli.ts bills seed --help` | ✅ rc2 | `--local` removed in rc2 (no longer applicable with REST transport) |
+| `npx tsx scripts/cli.ts bills seed --env dev --limit 1 --verbose` | ❌ rc1 / ✅ rc2 | rc1: SQL-tokenization bug (Issue 1). rc2: 117-HR-2471 cached, 1.5s. |
+| `npx tsx scripts/cli.ts bills seed --env dev --limit 5 --verbose` | ✅ rc2 | 5/5 cached, 1.7s, concurrency 4 + rate-limit waits visible |
+| Idempotency: run again with same `--limit 5` | ✅ rc2 | 5/5 cached, 1.4s. Zero new rows. |
+| Full run: `--env dev` (no limit) | ✅ rc2 | **63/63 processed, 58 cached, 5 freshly pulled, 0 failures, 56.9s wall clock.** 5 newly fresh: 119-HR-4346, 119-HR-3104, 119-HR-2913, 119-SRES-111, 119-SRES-236. |
+| D1 post-state verified | ✅ rc2 | 117: 21 bills, 6 became law • 118: 21 bills, 2 became law • 119: 21 bills, 0 became law (live session). Cosponsors: 117: 17/21 bills, 381 rows • 118: 16/21 bills, 285 rows • **119: 18/21 bills, 525 rows** (was 0/21 before). |
+
+## Phase 3 — Apply migration 0010 to dev
+
+| Item | State | Notes |
+|---|---|---|
+| `wrangler d1 execute viw_researcher_dev --env dev --file ... --remote` | ✅ | DB name is `viw_researcher_dev`, not `voter-info-d1` (latter is binding name). Needed `--config=wrangler.toml` because a stray `wrangler.jsonc` in the parent dir was getting picked up first. 5 changes, 12 rows written, 4.8ms. |
+| Verify: `SELECT bill_id, direction FROM bills WHERE bill_id IN ('118-HR-2445','118-S-2552')` | ✅ | Both `neutral`, with AC-59.7 direction_reason. |
+| Verify audit rows | ✅ | Both `audit_v4_1_0_hr2445` and `audit_v4_1_0_s2552` present with `action='direction_corrected'`. |
+| Re-run migration | ✅ | Idempotent. 2 rows read, 0 rows written on the second pass — INSERT OR IGNORE prevented PK conflict. |
+
+## Phase 4 — Open dev PR
+
+| Item | State | Notes |
+|---|---|---|
+| Bump version to v4.1.0-rcN | ✅ rc2 | rc1 → 4.1.0-rc.1; rc2 → 4.1.0-rc1 (renamed). Bumped on transport rewrite. |
+| Push branch to origin | ✅ | rc2 pushed at 3717a91; merge-from-main pushed at 4d77a5c |
+| Open PR chore/coverage-deep-pass → main | ✅ | [PR #120](https://github.com/co-op-game-studio/track-ukraine-widget/pull/120) |
+| Merge from origin/main | ✅ | Two conflict files (docs/spec.md, proxy/routes/api-upstream.ts); both were "main also fixed edge-tier bug independently". Took their `edgeKeyToUrl(target, upstreamPath, key)` helper (cleaner extraction), kept my detailed AC-40.11 (with regression-test forbidden case + ADR-019 reference). 157 files / 2189 tests after merge (+3 new tests from their edge-key-to-url.test.ts). |
+| Verify CI on PR | ✅ | `lint-typecheck-test` passed in 3m16s. |
+| Merge to main (dev-env scope only) | ✅ | Merge commit `9ca48fad` on main at 2026-05-26T20:19:39Z. Branch preserved for any rollback. |
+
+## Phase 5 — Trigger seed workflow on dev
+
+| Item | State | Notes |
+|---|---|---|
+| `gh workflow run seed-bills.yml --field env=dev` | ✅ | Run 26472884297 triggered at 2026-05-26T20:20:34Z. |
+| Watch run | ✅ | Dev seed step ran in 46s. UAT/stg/prod matrix slots correctly skipped per the env-input gate. |
+| Verify: `became_law=1` count | ✅ | **8 bills** marked law (exceeds AC-59.5 minimum of 4): 117-HR-2471, 117-HR-6833, 117-HR-6968, 117-HR-7108, 117-HR-7691, 117-S-3522, 118-HR-2670, 118-HR-815. |
+| Verify: 119th cosponsors present | ✅ | 18/21 119th bills with cosponsors, 525 cosponsor rows total. Was 0/21 pre-v4.1.0. |
+| CI idempotency check | ✅ | CI run was steady-state (`63/63 cached, 0 fresh`) — the 5 freshly-pulled bills from my local run had been written to D1; CI immediately observed them as already-current via the bill-level freshness gate. AC-59.10 byte-identical idempotency verified end-to-end. |
+
+## Phase 6 — Frontend smoke
+
+| Item | State | Notes |
+|---|---|---|
+| Boot dev admin SPA via Claude-in-Chrome | ✅ | Home Chrome browser selected. User completed CF Access SSO manually. |
+| First SPA observation | ⚠️ Issue 3 | PeopleTab showed "510 people · 1276 handles" — no coverage metric. v4.1.0 frontend NOT yet deployed to dev. |
+| Trigger Deploy workflow on dev | ⚠️ Issue 4 | First `workflow_dispatch` rejected (branch protection: main not allowed → dev). Resolution: fast-forward develop to main, push triggers Deploy. |
+| Deploy workflow first attempt | ❌ Issue 5 | Run 26474749521 failed at "Deploy Worker" step: `node:crypto` import bleeding from CLI lib into Worker bundle. Fix in rc3 (PR #121, commit c510374). |
+| Deploy workflow retry (rc3) | ✅ | Run 26475379122 succeeded after merging rc3 + re-forwarding develop. |
+| Settings ▸ Data freshness loads | ✅ | After hard-reload (stale bundle caching). Shows: Total bills 63, Became law 8 of 63, By congress (117th/118th/119th rows), By direction. Last refresh attempted: timestamp. |
+| PeopleTab shows roster-enumerated members | ✅ | "538 people · 1782 handles · **522/538 Congress with handles**" (was "510 people · 1276 handles" with no coverage metric pre-rc3). |
+| Megamenu has "Data freshness" link | ✅ | Confirmed via DOM query. |
+
+## Phase 7 — Final RC tag + report
+
+| Item | State | Notes |
+|---|---|---|
+| All phases above ✅ | ✅ | |
+| Tag `v4.1.0-rc3` (final) | ✅ | Tagged `4e6903c` on develop. Pushed `v4.1.0-rc3` to origin. |
+| Update changelog with RC trail | ✅ | See "RC bumps" section below + this row. |
+| Write end-of-rollout summary | ✅ | See "Dev rollout summary (2026-05-26)" below. |
+
+---
+
+## Issues found
+
+### Issue 1 — `wrangler d1 execute --command=…` fails when SQL contains commas/spaces (2026-05-26, rc1)
+
+**Symptom:** First real seed call against dev errored with `wrangler d1 execute exit 3221226505: Unknown arguments: bill_id,, congress,, type,, number, FROM, bills, WHERE, bill_id, ORDER, BY, bill_id, ASC, LIMIT, 1`.
+
+**Root cause:** `scripts/lib/d1-client.ts` shells out via `spawn('npx', [..., '--command=<SQL>'], { shell: true })`. On Windows (and probably POSIX too) the shell tokenizes the `--command=` value on whitespace + commas, splitting one SQL statement into many positional args wrangler refuses.
+
+**Severity:** BLOCKER for the seed CLI. The unit tests all use the in-memory `FakeD1`, so this never surfaced.
+
+**Fix in flight (rc2):** rewrite `makeWranglerD1` → `makeRestD1` using the Cloudflare D1 REST API directly (`POST /accounts/{acct}/d1/database/{db_id}/query`). Same auth as `kvInvalidate`. Adds a D1-database-ID map (already discovered from `wrangler.toml`).
+
+**v4.1.0 punch-list addition:** the unit tests for `d1-client.ts` need to grow to cover *real* SQL parsing — a fake that mirrors wrangler's argv tokenization would have caught this. Tracked for v4.1.1.
+
+### Issue 2 — main had its own edge-tier cache fix already (2026-05-26)
+
+**Symptom:** PR #120 opened with `mergeStateStatus: DIRTY` / `mergeable: CONFLICTING`. Conflict files: `docs/spec.md`, `proxy/routes/api-upstream.ts`.
+
+**Root cause:** Between the time I branched off `46ea5bd` and now, `main` landed PR #101 ("Fixed caching bug") which independently fixed the same edge-tier defect with a different but equivalent shape:
+- **Main's fix (kept):** extracted helper `edgeKeyToUrl(target, upstreamPath, key)` that appends `cacheKeyToDottedString(key)` to URL pathname with `#` separator. Has its own test file `tests/unit/routes/edge-key-to-url.test.ts` (3 tests).
+- **My fix (dropped):** inline lambda setting `searchParams.set('__ck', cacheKeyToDottedString(k))`.
+
+Both encode the full dotted form into the URL; both make the URL injective over CacheKey. Main's is cleaner (extracted helper, dedicated test file).
+
+**Resolution:**
+- Took main's `proxy/routes/api-upstream.ts` (`edgeKeyToUrl` helper).
+- Kept my more detailed AC-40.11 in `docs/spec.md` (includes forbidden-case test requirement + ADR-019 reference). Updated the AC body to reference the new helper by name.
+- My regression test in `tests/unit/routes/query-and-cache.test.ts` survives unchanged — it asserts upstream-call separation regardless of whether the helper uses `#` or `__ck=` to differentiate URLs. Still passes.
+
+**Net:** 157 test files / 2189 tests after the merge (was 156/2186 pre-merge). Typecheck clean. Both AC-40.11 implementations coexist (mine in docs, main's in code) and converge on identical behavior.
+
+**Lesson:** check `gh pr list --state merged --base main` BEFORE branching long-lived release branches — this merge was avoidable. Tracked for v4.1.0 retrospective.
+
+### Issue 3 — dev SPA showed old v4.0.0 build at Phase 6 first attempt (2026-05-26)
+
+**Symptom:** Navigated to `https://dev.vote.cogs.it.com/admin` post-CF-Access-login. PeopleTab header showed "510 people · 1276 handles" — no coverage metric. No "no handles tracked" caption visible.
+
+**Root cause:** Merging PR #120 to main does NOT auto-deploy. The branch model is `main → develop → uat → stg → prod`; Deploy workflow only triggers on push to develop/uat/stg/prod (or `workflow_dispatch`). Last Deploy run was 2026-05-06 (v4.0.0 hotfixes). The dev SPA + Worker still ran the v4.0.0 code; only D1 had been mutated (because the seed CLI talks to D1 directly, bypassing the Worker entirely).
+
+**Resolution:** Triggered `Deploy` workflow with `env=dev` via `workflow_dispatch`. Will re-verify SPA after deploy completes.
+
+**v4.1.0 punch-list addition (consider for v4.1.1):** the rollout-log Phase ordering needs a "Deploy to dev" step BEFORE the SPA smoke step. The current ordering assumed PR merge → deploy, which is wrong for this repo's ladder. Documented for future releases.
+
+### Issue 4 — `workflow_dispatch` on Deploy rejected: "Branch 'main' not allowed to deploy to dev" (2026-05-26)
+
+**Symptom:** Triggered `Deploy` workflow with `env=dev` via `gh workflow run deploy.yml --field env=dev`. Run failed at the `deploy` job: "Branch 'main' is not allowed to deploy to dev due to environment protection rules."
+
+**Root cause:** GitHub environment protection rules on the `dev` environment restrict pushes to specific branches (`develop`, NOT `main`). The branch model is `main → develop → uat → stg → prod` per [memory project_branch_model](memory/project_branch_model.md): main is trunk; promotion to dev requires fast-forwarding `develop` to `main`.
+
+**Resolution:** Switched to `develop` locally (stashed rollout-log edit first), `git merge --ff-only origin/main` (80 commits fast-forwarded clean), `git push origin develop`. Deploy workflow triggered on `push:branches:[develop]` rule (run 26474749521). Switched back to `chore/coverage-deep-pass` and restored stash.
+
+**Pattern for future v4.x rollouts:**
+1. Merge PR to main.
+2. `git checkout develop && git merge --ff-only origin/main && git push origin develop` (auto-triggers Deploy to dev).
+3. Verify dev SPA + endpoints.
+4. Promote develop → uat → stg → prod via PRs at each ladder step.
+
+### Issue 5 — Worker deploy failed: `node:crypto` import bleeding from CLI lib (2026-05-26)
+
+**Symptom:** Deploy run 26474749521 cleared typecheck, tests, build, KV publish, D1 migrations — failed at `Deploy Worker` (wrangler) with: `Uncaught Error: No such module "node:crypto". imported from "worker.js"`.
+
+**Root cause:** `scripts/lib/trace.ts` (CLI lib) imported `randomBytes` from `node:crypto`. The Worker adapter `proxy/services/import-bill.ts` imports `makeD1AuditLogger` from `scripts/lib/audit-log.ts`, which transitively imports `scripts/lib/trace.ts`. Vite bundled the whole graph into the Worker; the Cloudflare runtime rejects `node:` imports because nodejs_compat isn't enabled on this Worker.
+
+**Resolution:**
+- Rewrote `scripts/lib/trace.ts` to use Web Crypto (`globalThis.crypto.getRandomValues`) instead of `node:crypto`. Web Crypto is native in both Node 19+ and Cloudflare Workers — same code, both runtimes.
+- Removed the now-unnecessary `/// <reference types="node" />` directive from `scripts/lib/d1-client.ts` (the REST transport doesn't use any Node builtins).
+- Typed `globalThis.crypto` narrowly via a `CryptoLike` interface so we don't pull in `@cloudflare/workers-types` or `lib.dom.d.ts` into the CLI tsconfig.
+
+**v4.1.0 punch-list addition (consider for v4.1.1):**
+- Add a CI check that imports `proxy/worker.ts` into a Cloudflare-Worker-shaped vitest environment and asserts no `node:*` imports leak through the dependency graph. Would have caught this at the typecheck step instead of the deploy step.
+
+**rc bump:** v4.1.0-rc2 → v4.1.0-rc3 after the trace.ts rewrite.
+
+
+## RC bumps
+
+- v4.1.0-rc1: initial cut
+- v4.1.0-rc2: switch D1 transport wrangler-shell → REST API (Issue 1)
+- v4.1.0-rc3: rewrite scripts/lib/trace.ts to use Web Crypto, removing the node:crypto leak into the Worker bundle (Issue 5)
+
+---
+
+## Decisions made during rollout
+
+- **Worker rate-limit reverted (rc2 review):** the per-Worker-instance bucket can't enforce a global Congress.gov ceiling anyway, and adding `ratePerHour: 2500` to the Worker path broke 19 existing tests. CLI keeps `ratePerHour: 5000` as the actual ingest path; Worker stays at 0 (pre-v4.1.0 fail-fast behavior preserved).
+- **`--local` flag removed in rc2:** the wrangler-shell D1 transport that backed `--local` had a fatal SQL-tokenization bug. REST transport is always remote; for ad-hoc local D1 work, operators use `npx wrangler d1 execute --local …` directly.
+- **AC-40.11 wording kept mine (post-merge):** when merging origin/main, both branches had independent fixes for the edge-tier cache bug. Kept the more detailed spec language (forbidden-case + ADR-019 reference) but took main's cleaner `edgeKeyToUrl(target, upstreamPath, key)` helper extraction.
+- **Develop forwarded twice during rollout:** rc2 deploy revealed `node:crypto` bleed (Issue 5); rc3 hotfix landed via PR #121 → main → fast-forward develop → redeploy. The pattern `main → ff develop → push triggers Deploy` is now the documented v4.x deploy path.
+
+---
+
+## Dev rollout summary (2026-05-26)
+
+### What landed on dev
+
+- **Edge-tier cache key fix** (AC-40.11, ADR-019) — query-keyed routes (census-geocoder) no longer collide on one edge entry per POP.
+- **FR-59 standalone seed CLI** (`lw bills seed`) — replaces the browser-tab-gated `useAutoBackfill` SPA hook with CI-driven seeding. 4-way concurrency, force=false default honors freshness gates.
+- **D1 corpus state restored:** 119th Congress went from **0/21 bills with cosponsors → 18/21 with cosponsors (525 cosponsor rows)**. became_law correctly set on 8 known Public Laws.
+- **PeopleTab roster enumeration:** shows **538 members** (was 510 with no coverage metric); coverage metric "**522/538 Congress with handles**" visible in header.
+- **Settings ▸ Data freshness panel:** Total/became-law/by-congress/by-direction stats, freshness buckets, stale-bills list, last-refresh-attempted timestamp. Megamenu link present.
+- **Migration 0010:** 118-HR-2445 + 118-S-2552 reclassified anti-ukraine → neutral.
+- **GitHub Actions workflow** (`.github/workflows/seed-bills.yml`): cron 6h dev/uat, 12h stg/prod, workflow_dispatch with env/force/limit/concurrency. First CI seed run on dev: 63/63 cached (steady state), 0 failures, 45s.
+
+### RC iteration trail
+
+| RC | What broke | What fixed it |
+|---|---|---|
+| rc1 → rc2 | `wrangler d1 execute --command=<SQL>` tokenized SQL on whitespace/commas (Issue 1) | Switched D1 transport to CF REST API (`makeRestD1`) with native parameter binding |
+| rc2 → rc3 | Worker deploy failed: `node:crypto` bleeding from CLI lib into Worker bundle (Issue 5) | Rewrote `scripts/lib/trace.ts` to use Web Crypto (`globalThis.crypto.getRandomValues`) — works in both Node 19+ and Workers |
+
+### Final RC: v4.1.0-rc3
+
+- **Tag:** `v4.1.0-rc3` on develop, commit `4e6903c`.
+- **Tests:** 157 files, 2189 passing, 5 skipped.
+- **Coverage:** 94.89% lines / 87.08% branches / 89.83% functions / 94.89% statements (all above 80% floors).
+- **Build:** SPA + IIFE + admin all green, SRI manifest emitted.
+- **Deploy:** dev Worker live at `dev.vote.cogs.it.com`, bundle `index-DUHuALSR.js` (rc3).
+- **D1 state:** verified via REST API queries — 63 bills, 8 became_law, 119th 18/21 cosponsors (was 0/21).
+- **CI seed run:** clean steady-state (`63/63 cached, 0 fresh, 0 failed`) — proves AC-59.10 byte-identical idempotency end-to-end.
+
+### Known issues for v4.1.1 punch-list
+
+1. **Worker bundle imports node:* detection** — would have caught Issue 5 at typecheck instead of deploy. Add a CI check that grep the bundled `worker.js` for `node:` imports.
+2. **`wrangler.toml` config precedence** — wrangler discovered a stray `wrangler.jsonc` in the parent directory before `wrangler.toml`. Migration step needed `--config=wrangler.toml` explicitly. Future fix: `.wranglerignore` or just delete the parent-dir config.
+3. **DB-name vs binding-name confusion** — wrangler `--config=… d1 execute X` wants the `database_name` (`viw_researcher_dev`), not the binding name (`voter-info-d1`). Documented in this log; consider a README pointer.
+4. **CLI's `D1.batch` runs sequentially, not atomically** — known tradeoff (acceptable given idempotent re-runs + freshness gate + audit_log). Could be promoted to a proper batch via D1's `/raw` endpoint or by chunking statements via the `--command=BEGIN; ... ; COMMIT;` route.
+5. **Branch-model docs for the deploy ladder** — the `main → ff develop → push triggers Deploy` pattern took two attempts to get right during this rollout (one wrong workflow_dispatch from main; one correct ff). Worth a short section in CLAUDE.md or `docs/deployment.md`.
+
+### What's next
+
+1. **UAT promotion** — when ready, repeat the ladder: cut a PR `develop → uat`, merge, watch Deploy. Apply migration 0010 to uat D1. Trigger seed-bills.yml with env=uat. Verify SPA.
+2. **stg + prod promotion** — reviewer-gated, normal release cadence.
+3. **PR #118** — the original prod→main CI sync that prompted this whole effort. Either close (the work it carried is now in PR #120 / rc3) or rebase + re-resolve.
+4. **v4.1.1 punch list above** — small follow-ups; none blocking.
+
+---
+
+## Deep front-end verification (2026-05-26, post-rc3 deploy)
+
+Three user flows exercised against the deployed dev SPA + widget, beyond the structural smoke from Phase 6.
+
+### (a) PeopleTab zero-handle card flow ✅
+
+- 32 instances of "no handles tracked" caption rendered in the list (16 distinct MoCs × duplicate DOM nodes from list rendering).
+- Opened Abraham Hamadeh (R-AZ-8, no handles): profile loads cleanly. Social handles section shows "No social handles linked to this person." Quotes (0), Ingested Posts (0) sections all render with graceful empty states.
+- **Result:** PeopleTab roster enumeration + empty-state UX works as designed.
+
+### (b) 119th bill detail flow ✅
+
+- Opened `119-HR-2913 — Ukraine Support Act` in BillsTab.
+- Sponsorship section: **"Sponsorship (41 cosponsors, 4 original)"** — matches seed run output exactly (`cos=41`).
+- Action history section: **"Action history (11)"** — matches seed output (`act=11`).
+- Expanded cosponsor list: all 41 names render with party, state, district, sponsorship date. Format example: `Rep. Connolly, Gerald E. [D-VA-11] (D-VA)-11`. First 4 marked "original cosponsor"; the remaining 37 with their `2025-04-21 / 2025-04-29 / 2025-06-03 / 2025-06-04` dates from upstream.
+- **Result:** D1 → API → SPA read path renders newly-populated 119th data correctly.
+
+### (c) Public widget — edge-tier cache fix end-to-end reverify ✅
+
+The original bug that started v4.1.0. Pre-fix: census-geocoder edge cache collapsed all addresses onto one bucket per POP, so the second lookup at a warm POP returned the first's response.
+
+- Address 1: `1100 Congress Ave, Austin, TX 78701` → **Cornyn, Cruz, Doggett** (Texas CD-37) ✅
+- Address 2: `1315 10th St, Sacramento, CA 95814` → **Padilla, Schiff, Matsui** (California CD-7) ✅
+- **Distinct results.** Pre-rc3 (and on the v4.0.0 prod widget) the second lookup would have returned Cornyn/Cruz/Doggett or whatever the POP had cached. The `cacheKeyToDottedString` URL parameterization (per `edgeKeyToUrl` helper in api-upstream.ts) routes each address to its own edge entry.
+- **Result:** AC-40.11 verified live. The bug fix that motivated this whole release works in production-shaped conditions on dev.
+
+### Cosmetic find (non-blocking)
+
+- "Widget Preview — **legislation.watch**" string leaked into the admin SPA's PersonProfile view. Forward-domain reference (the not-yet-launched legislation.watch). Tracking on the v4.1.1 punch list as a one-line copy fix.
+
+### Net assessment
+
+v4.1.0 dev rollout is verified end-to-end. All three primary deliverables work in the deployed environment:
+1. Edge-tier cache key fix (the original incident motivator)
+2. 119th Congress data restored (seeded via the new CLI)
+3. PeopleTab + Data Freshness panel improvements visible in the admin SPA

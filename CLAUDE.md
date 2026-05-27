@@ -289,6 +289,27 @@ npm run typecheck    # Type check without emitting
 npm run lint         # Lint source and tests
 ```
 
+## `lw` CLI (legislation-watch ops, v4.1.0+)
+
+All ingest + projection work that runs outside the Worker lives under the
+`lw` CLI:
+
+```bash
+npm run lw -- bills seed --env dev               # Ensure every bill matches Congress.gov truth (FR-59)
+npm run lw -- bills seed --env dev --force       # Force re-pull, ignoring freshness cache
+npm run lw -- bills seed --env dev --verbose     # Per-bill timing + counters
+npm run lw -- bills seed --env dev --debug       # Verbose + raw upstream URLs (key-redacted)
+npm run lw -- bills seed --env dev --local       # Use local wrangler binding (dev iteration only)
+npm run lw -- kv publish --env dev              # Project curated data to KV (alias of legacy publish:kv)
+```
+
+Invoke via `npm run lw -- <cmd>` from inside this repo (or `tsx scripts/cli.ts
+<cmd>` directly). The CLI is not published as a standalone binary — it's
+internal tooling, not a consumer-facing package. Per memory
+`feedback_seeding_is_buildops_not_runtime`: ingest is build/ops, never
+runtime — the Worker + admin SPA observe state via `audit_log` but never
+drive ingest.
+
 ## Key Algorithms
 
 - **Census Geocoding + FIPS Map**: See `design.md §4.1` — extracts state FIPS + district from Census geocoder, maps FIPS to state code

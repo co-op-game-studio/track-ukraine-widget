@@ -1216,3 +1216,69 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Traces to**: FR-53.
 - **Status**: [ ] Deferred — Tier C, may slip past Sunday.
 
+### T-133: Edge-tier cache-key injectivity hotfix (2026-05-25 prod regression)
+- **Description**: Production bug: on `trackukraine.com`, a second address lookup returned the first lookup's reps. Root cause traced to the edge-tier `keyToUrl` adapter in `proxy/routes/api-upstream.ts` building its cache URL from the request pathname + `#${kind}` only, dropping `CacheKey.params`. Census-geocoder is the lone route whose identity lives in the query string, so every address lookup at a warm POP collided on one edge entry. Fix: encode `cacheKeyToDottedString(k)` as a `__ck` query parameter on the synthetic edge cache URL so structurally non-equal CacheKeys produce distinct edge addresses.
+- **Dependencies**: none.
+- **Files**: `proxy/routes/api-upstream.ts` (edit edge-tier `keyToUrl` lambda), `tests/unit/routes/query-and-cache.test.ts` (add dual-of-nonce-fuzz regression test).
+- **Acceptance Criteria**: AC-40.11.
+- **Test Requirements**: One regression test asserting two `/api/census/geocoder/geographies/onelineaddress` requests differing only in `address=` produce two upstream calls (not one). Test fails on pre-fix code; passes on post-fix code.
+- **Traces to**: FR-40 AC-40.11, ADR-019.
+- **Status**: [x] Done — 2026-05-25. Spec + ADR + failing-then-passing test + fix landed in one pass per AIDD. Full suite green (155 files, 2188 tests). `npm run typecheck` clean.
+
+
+### T-134: v4.1.0 — `lw` CLI foundation
+- **Description**: Build the legislation-watch CLI scaffolding so every future ingest job has one consistent surface. `scripts/cli.ts` (commander dispatcher), `scripts/lib/{runtime,d1-client,congress-client,audit-log,trace,logger}.ts` shared core, `scripts/{bills,kv}/*.ts` subcommand wrappers. Verbose/debug flags propagate via LW_VERBOSITY env var. `package.json#bin` registers `lw` so `npx lw …` works in CI.
+- **Dependencies**: none.
+- **Files**: `scripts/cli.ts` (new), `scripts/lib/*.ts` (6 files new), `scripts/bills/backfill.ts` (new), `scripts/kv/publish.ts` (new), `package.json` (bin + lw script + commander devDep).
+- **Acceptance Criteria**: Per memory `feedback_seeding_is_buildops_not_runtime` — CLI lives in scripts/, Worker + SPA never drive ingest.
+- **Test Requirements**: Smoke: `npm run lw -- --help`, `--version`, subcommand `--help` all render. Typecheck clean.
+- **Traces to**: FR-59 AC-59.1, AC-59.2.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-135: v4.1.0 — Extract `importBillCore`
+- **Description**: Pull orchestration body from proxy/services/import-bill.ts into scripts/lib/bills/import-core.ts as a pure fn over D1Like + CongressClient + AuditLogger interfaces. Worker adapter becomes 90 lines. Tests rewrite acceptable per D10.
+- **Files**: `scripts/lib/bills/import-core.ts` (new, ~600 lines), `proxy/services/import-bill.ts` (now adapter).
+- **Acceptance Criteria**: FR-59 AC-59.1, AC-59.6 (every recordedVote preserved).
+- **Test Requirements**: 19 existing importBill tests pass via the Worker adapter without change. Full suite green.
+- **Traces to**: FR-59.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-136: v4.1.0 — `lw bills backfill` driver
+- **Description**: Pure backfillBills() + CLI wrapper. Iterates bills ASC, 4-way concurrency, force=false default honors freshness gates. Per-bill error continuation, audit_log writes on failure, exit codes 0/1/2.
+- **Files**: `scripts/lib/bills/backfill.ts` (new), `scripts/bills/backfill.ts` (wrapper).
+- **Acceptance Criteria**: FR-59 AC-59.1, AC-59.3, AC-59.10.
+- **Test Requirements**: 5 tests in tests/unit/bills/backfill.test.ts cover process-all, per-bill errors, limit, cursor, filter.
+- **Traces to**: FR-59.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-137: v4.1.0 — Delete useAutoBackfill SPA hook + /api/admin/backfill-bills route
+- **Description**: Remove dead browser-driven ingest paths. Hook + localStorage cursor + the Worker route + their tests all deleted in one commit. Per memory `feedback_seeding_is_buildops_not_runtime`.
+- **Files**: `src/admin/App.tsx` (hook + useEffect removed), `proxy/routes/api-admin.ts` (route handler + dispatch removed), `tests/unit/useAutoBackfill.test.tsx` (deleted), `tests/unit/apiAdminRoutes.test.ts` (block removed).
+- **Acceptance Criteria**: FR-59 AC-59.9.
+- **Test Requirements**: full suite green after removals; no orphaned references.
+- **Traces to**: FR-59.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-138: v4.1.0 — Migration 0010 (direction corrections)
+- **Description**: 118-HR-2445 + 118-S-2552 direction='anti-ukraine' → 'neutral' with audit_log rows. Rollback in _rollbacks/.
+- **Files**: `migrations/d1/0010_v4_1_0_direction_corrections.up.sql`, `migrations/d1/_rollbacks/0010_v4_1_0_direction_corrections.sql`.
+- **Acceptance Criteria**: FR-59 AC-59.7.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-139: v4.1.0 — Data Freshness panel + endpoint
+- **Description**: Settings ▸ Data freshness — research-facing observation of bill corpus state. New /api/admin/data-freshness endpoint aggregates: total, by-congress, by-direction, became-law, freshness buckets (24h/7d/30d/stale), top-20 stale bills, last refresh attempt. SPA view renders read-only with research-relevant language only (no operator-state terms).
+- **Files**: `proxy/routes/api-admin.ts` (handleDataFreshness added), `src/admin/components/settings/DataFreshnessView.tsx` (new), `src/admin/components/settings/SettingsTab.tsx` (slot registered).
+- **Acceptance Criteria**: FR-59 AC-59.8.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-140: v4.1.0 — GitHub Actions backfill workflow
+- **Description**: .github/workflows/backfill-bills.yml — cron 6h dev/uat + 12h stg/prod, workflow_dispatch with env/force/limit/concurrency inputs, per-env matrix with gate. Invokes `npx tsx scripts/cli.ts bills backfill --env <env> --verbose`. Exit 0/2 → green, exit 1 → red.
+- **Files**: `.github/workflows/backfill-bills.yml` (new).
+- **Acceptance Criteria**: FR-59 AC-59.11.
+- **Status**: [x] Done — 2026-05-25.
+
+### T-141: v4.1.0 — PeopleTab roster-driven enumeration
+- **Description**: PeopleTab in admin SPA now enumerates from KV name-index (mocMap) — every sitting member of Congress gets a card whether they have handle rows or not. Zero-handle members render with "no handles tracked" italic caption. Header coverage metric "N people · M handles · X/Y Congress with handles" makes the gap visible.
+- **Files**: `src/admin/components/PeopleTab.tsx`.
+- **Acceptance Criteria**: Resolves the UAT audit observation "306 of 535 visible" by including the missing members.
+- **Status**: [x] Done — 2026-05-25.
