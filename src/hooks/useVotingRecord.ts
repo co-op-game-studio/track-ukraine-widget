@@ -17,32 +17,18 @@
  */
 import { useCallback, useRef, useState } from 'react';
 import {
-  getCuratedVotesForChamber,
   type CuratedBill,
 } from '../services/ukraineFilter';
-import { mapWithConcurrency } from '../utils/limitConcurrency';
 import { computeValence, type Valence } from '../services/valence';
 import { computeUkraineScore, type UkraineScore } from '../services/ukraineScore';
 import { isObstructionVote } from '../services/obstruction';
-import {
-  fetchRollCallRoster,
-  normalizeVoteCast,
-  type HouseRollCallRoster,
-  type SenateRollCallRoster,
-} from '../services/rollCallRosters';
+import { fetchRollCallRoster } from '../services/rollCallRosters';
+import { resolveMemberVotes } from '../services/memberVotes';
 import {
   clusterMemberVotes,
   type VoteForMember,
 } from '../services/voteClustering';
 import type { Representative } from '../types/domain';
-
-/**
- * Concurrency cap for roster fetches. These are KV reads served from
- * the edge (~5-50 ms each) so higher concurrency is fine — 8 keeps us
- * well below the per-IP rate limit (AC-27.21) and parallelizes the
- * worst-case ~27 fetches into a couple of network round-trips.
- */
-const MAX_CONCURRENCY = 8;
 
 export type RecordStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -93,96 +79,35 @@ interface RawRow {
   inRoster: boolean;
 }
 
-// ─── House path ───
+// ─── Record loading ───
 //
-// FR-24: try the bundled roster FIRST. Only fall back to network if the roster
-// isn't bundled for this vote (brand-new override pointing at a vote the last
-// curator run didn't fetch, or a curator bug). Typical happy-path is zero
-// network calls.
-
-async function loadHouseRecord(
-  member: Representative,
-  apiBase: string,
-): Promise<RawRow[]> {
-  const curated = getCuratedVotesForChamber('House');
-
-  const rows = await mapWithConcurrency(curated, MAX_CONCURRENCY, async ({ bill, vote }) => {
-    let roster;
-    try {
-      roster = (await fetchRollCallRoster(
-        'House',
-        vote.congress,
-        vote.session,
-        vote.rollCall,
-        apiBase,
-      )) as HouseRollCallRoster | null;
-    } catch {
-      // Transient network/roster error: surface as Did Not Vote rather
-      // than failing the whole record; the UI still renders other bills.
-      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
-    }
-    if (!roster) {
-      // Curator has not (yet) written this roster: treat as Did Not Serve
-      // so the row renders neutrally. Observed in practice only when a
-      // curated vote is added without re-running the curator.
-      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
-    }
-    const cast = roster.casts[member.bioguideId];
-    if (cast === undefined) {
-      // Member was not in this roll-call roster — either Did Not Serve
-      // (not in Congress at all) or Not Voting (in office but absent).
-      // The roster only surfaces the latter; widget callers can cross-
-      // reference `state-members:v1:{state}` if finer distinction is
-      // required. Default to Did Not Serve to match prior behavior.
-      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
-    }
-    const memberVote = normalizeVoteCast(cast) as VoteForMember['memberVote'];
-    return { bill, vote, memberVote, inRoster: true };
-  });
-
-  return rows;
-}
-
-// ─── Senate path ───
-//
-// Senate rosters are keyed by (lastName, state) — Senate XML carries no
-// bioguide IDs, so the curator preserves the same lookup key (see
-// design.md §4.3 for the matching algorithm). Widget does the lookup here.
-
-async function loadSenateRecord(
+// FR-32 AC-32.30: delegate to the shared `resolveMemberVotes` resolver so the
+// widget and the admin Bills matrix resolve casts identically (House by
+// bioguideId, Senate by lastName+state; design.md §4.3). The hook then layers
+// its widget-only post-processing (valence/cluster/score/abstention) on top.
+async function loadRecord(
   member: Representative,
   apiBase: string,
 ): Promise<RawRow[]> {
   const lastName = member.name.split(',')[0]?.trim() ?? member.name;
-  const curated = getCuratedVotesForChamber('Senate');
-
-  const rows = await mapWithConcurrency(curated, MAX_CONCURRENCY, async ({ bill, vote }) => {
-    let roster;
-    try {
-      roster = (await fetchRollCallRoster(
-        'Senate',
-        vote.congress,
-        vote.session,
-        vote.rollCall,
-        apiBase,
-      )) as SenateRollCallRoster | null;
-    } catch {
-      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
-    }
-    if (!roster) {
-      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
-    }
-    const mine = roster.casts.find(
-      (c) => c.lastName === lastName && c.state === member.state,
-    );
-    if (!mine) {
-      return { bill, vote, memberVote: 'Did Not Serve' as const, inRoster: false };
-    }
-    const memberVote = normalizeVoteCast(mine.cast) as VoteForMember['memberVote'];
-    return { bill, vote, memberVote, inRoster: true };
-  });
-
-  return rows;
+  const positions = await resolveMemberVotes(
+    {
+      bioguideId: member.bioguideId,
+      chamber: member.chamber,
+      lastName,
+      state: member.state,
+    },
+    {
+      fetchRoster: (chamber, congress, session, rollCall) =>
+        fetchRollCallRoster(chamber, congress, session, rollCall, apiBase),
+    },
+  );
+  return positions.map((p) => ({
+    bill: p.bill,
+    vote: p.vote,
+    memberVote: p.cast as VoteForMember['memberVote'] | 'Did Not Serve',
+    inRoster: p.inRoster,
+  }));
 }
 
 // ─── Action → valence ───
@@ -225,10 +150,7 @@ export function useVotingRecord(
     setData(null);
 
     try {
-      const rawWithStatus: RawRow[] =
-        member.chamber === 'house'
-          ? await loadHouseRecord(member, apiBase)
-          : await loadSenateRecord(member, apiBase);
+      const rawWithStatus: RawRow[] = await loadRecord(member, apiBase);
       if (thisReq !== reqIdRef.current) return;
 
       // FR-23 AC-23.3: drop Did-Not-Serve rows before any UI or scoring step.

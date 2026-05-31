@@ -638,10 +638,11 @@ describe('ingest-store: deactivateHandle', () => {
 /* -------------------------------------------------------------------------- */
 
 describe('ingest-store: enqueuePost', () => {
-  it('inserts a pending row with stamped ingested_at', async () => {
+  it('inserts a row with stamped ingested_at (AC-59.21: no keywords → unrelated)', async () => {
     const row = await enqueuePost(d1, baseQueueInput());
     expect(row).not.toBeNull();
-    expect(row!.status).toBe('pending');
+    // No keyword match and no explicit override → classified unrelated.
+    expect(row!.status).toBe('unrelated');
     expect(row!.ingested_at).toMatch(/T/);
     expect(row!.reviewed_by).toBeNull();
     expect(row!.reviewed_at).toBeNull();
@@ -657,6 +658,25 @@ describe('ingest-store: enqueuePost', () => {
 
   it('writes null matched_keywords when array is empty', async () => {
     const row = await enqueuePost(d1, baseQueueInput({ matchedKeywords: [] }));
+    expect(row!.matched_keywords).toBeNull();
+  });
+
+  it('AC-59.20 — stamps pending when ≥1 keyword matched', async () => {
+    const row = await enqueuePost(d1, baseQueueInput({ matchedKeywords: ['ukraine'] }));
+    expect(row!.status).toBe('pending');
+  });
+
+  it('AC-59.21 — stamps unrelated when no keyword matched (empty/undefined)', async () => {
+    const empty = await enqueuePost(d1, baseQueueInput({ platformPostId: 'p-empty', matchedKeywords: [] }));
+    expect(empty!.status).toBe('unrelated');
+    const undef = await enqueuePost(d1, baseQueueInput({ platformPostId: 'p-undef' }));
+    expect(undef!.status).toBe('unrelated');
+  });
+
+  it('AC-59.22 — honors an explicit status override (manual add stays pending)', async () => {
+    const row = await enqueuePost(d1, baseQueueInput({ status: 'pending' }));
+    // No keywords, but the explicit override wins over auto-classification.
+    expect(row!.status).toBe('pending');
     expect(row!.matched_keywords).toBeNull();
   });
 

@@ -62,10 +62,18 @@ describe('router /embed HTML branch (lines 384-401)', () => {
     expect(result.response.headers.get('Cache-Control')).toBe('public, max-age=600');
     const csp = result.response.headers.get('Content-Security-Policy');
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("script-src 'self' https://static.cloudflareinsights.com");
     expect(csp).toContain("base-uri 'none'");
+    // FR-60 AC-60.9 — script-src carries 'self', a per-response nonce, and
+    // the cloudflareinsights origin (no 'unsafe-inline'). The same nonce is
+    // stamped on the embed's inline <script> so it survives the policy.
+    const scriptSrc = csp!.match(/script-src [^;]*/)![0];
+    expect(scriptSrc).not.toContain("'unsafe-inline'");
+    const m = scriptSrc.match(/script-src 'self' 'nonce-([a-f0-9-]+)' https:\/\/static\.cloudflareinsights\.com/);
+    expect(m).not.toBeNull();
+    const nonce = m![1]!;
     const body = await result.response.text();
     expect(body.toLowerCase()).toContain('<!doctype html>');
+    expect(body).toContain(`<script nonce="${nonce}">`);
   });
 
   it('GET /embed/ (trailing slash) is treated identically', async () => {

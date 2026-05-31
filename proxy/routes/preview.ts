@@ -11,13 +11,35 @@
  * Traces: FR-26 AC-26.1..AC-26.12. FR-42.
  */
 
+/** Canonical bioguide shape: one uppercase letter + six digits. */
+const BIOGUIDE_RE = /^[A-Z][0-9]{6}$/;
+
 /**
  * Embed-friendly HTML served at /embed on any env. Designed for iframe
  * embedding on third-party sites (e.g. trackukraine.com, Discord link
  * previews, WordPress). Notifies the parent frame of its content height
  * via postMessage so the host can auto-size the iframe.
+ *
+ * FR-60 AC-60.1: an optional `bioguide` deep-links the embed straight onto
+ * one member's RepDetail (used by the admin profile preview). The value is
+ * validated against BIOGUIDE_RE before it is written into the markup; an
+ * absent/invalid value mounts the bare widget unchanged (AC-60.7). Because
+ * a valid bioguide can only ever be `[A-Z][0-9]{6}`, it is injection-safe by
+ * construction — no untrusted text reaches the HTML.
+ *
+ * FR-60 AC-60.9: the inline mount/resize script carries a per-response CSP
+ * nonce so it survives the route's strict `script-src` (no `'unsafe-inline'`).
+ * The router passes the same nonce into the `script-src` directive. The nonce
+ * is rendered into a `nonce="…"` attribute; the value is provided by the
+ * Worker (`crypto.randomUUID()`) and is therefore trusted.
  */
-export function buildEmbedHtml(envName: string): string {
+export function buildEmbedHtml(envName: string, bioguide?: string, nonce?: string): string {
+  const validBioguide = bioguide && BIOGUIDE_RE.test(bioguide) ? bioguide : null;
+  // Only emitted when the id passed the shape check above.
+  const bioguideLine = validBioguide
+    ? `\n        el.setAttribute('bioguide', ${JSON.stringify(validBioguide)});`
+    : '';
+  const nonceAttr = nonce ? ` nonce="${nonce}"` : '';
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -34,13 +56,13 @@ export function buildEmbedHtml(envName: string): string {
   <body>
     <div id="viw-mount"></div>
     <script src="/voter-info-widget.iife.js" defer></script>
-    <script>
+    <script${nonceAttr}>
       // Mount the widget with api-base = this page's origin. This forces
       // fetch() calls to be cross-origin (vs. same-origin with no Origin
       // header) so the Worker's ALLOWED_ORIGINS check sees a real Origin.
       window.addEventListener('load', function () {
         var el = document.createElement('voter-info-widget');
-        el.setAttribute('api-base', window.location.origin);
+        el.setAttribute('api-base', window.location.origin);${bioguideLine}
         document.getElementById('viw-mount').appendChild(el);
       });
       // Auto-size iframe: on content-height changes, postMessage to parent.

@@ -298,10 +298,21 @@ export async function enqueuePost(
     mediaRefsJson: string;
     rawPayloadJson: string;
     matchedKeywords?: string[];
+    /**
+     * FR-59 AC-59.22 — override the keyword-derived status. The poll loop
+     * omits this so the store classifies the post: ≥1 matched keyword →
+     * 'pending' (enters the curation feed), none → 'unrelated' (stored,
+     * persistent, but outside the default feed). Manual/direct adds pass
+     * 'pending' explicitly so human intent is never auto-reclassified.
+     */
+    status?: 'pending' | 'unrelated';
   },
 ): Promise<QueueRow | null> {
   const now = new Date().toISOString();
   const id = newUlid();
+  // AC-59.20 / AC-59.21 — derive from keyword matches unless overridden.
+  const status: 'pending' | 'unrelated' =
+    input.status ?? (input.matchedKeywords?.length ? 'pending' : 'unrelated');
   const row: QueueRow = {
     id,
     bioguide_id: input.bioguideId,
@@ -314,7 +325,7 @@ export async function enqueuePost(
     media_refs_json: input.mediaRefsJson,
     raw_payload_json: input.rawPayloadJson,
     ingested_at: now,
-    status: 'pending',
+    status,
     matched_keywords: input.matchedKeywords?.length
       ? JSON.stringify(input.matchedKeywords)
       : null,
