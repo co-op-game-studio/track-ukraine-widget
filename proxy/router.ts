@@ -381,14 +381,21 @@ export async function dispatch(
       };
     }
     if (url.pathname === '/embed' || url.pathname === '/embed/') {
+      // FR-60 AC-60.1 — optional ?bioguide deep-links the embed onto one
+      // member. buildEmbedHtml validates the shape; we pass the raw param.
+      const bioguide = url.searchParams.get('bioguide') ?? undefined;
+      // FR-60 AC-60.9 — per-response nonce so the embed's inline mount/resize
+      // script survives the strict script-src (no 'unsafe-inline'). The same
+      // value goes into both the markup and the CSP header.
+      const embedNonce = crypto.randomUUID();
       return {
-        response: new Response(buildEmbedHtml(env.ENV_NAME ?? 'prod'), {
+        response: new Response(buildEmbedHtml(env.ENV_NAME ?? 'prod', bioguide, embedNonce), {
           status: 200,
           headers: {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'public, max-age=600',
             'Content-Security-Policy':
-              "default-src 'self'; script-src 'self' https://static.cloudflareinsights.com; " +
+              `default-src 'self'; script-src 'self' 'nonce-${embedNonce}' https://static.cloudflareinsights.com; ` +
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
               "font-src 'self' https://fonts.gstatic.com; " +
               "img-src 'self' data: https:; " +

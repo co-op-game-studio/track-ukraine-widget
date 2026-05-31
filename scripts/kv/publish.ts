@@ -1,16 +1,17 @@
 /**
  * `lw kv publish` — CLI wrapper.
  *
- * Thin shim over the existing scripts/publish-to-kv.ts. The 719-line
- * publishing pipeline stays intact for v4.1.0; we add the unified CLI
- * surface without touching the orchestration. A future PR (post-v4.1.0)
- * can pull the body into scripts/lib/kv/publish.ts as a pure function with
- * the D1Like / AuditLogger interfaces, mirroring the bills/backfill shape.
+ * Projects ALL KV records from D1 via scripts/publish-d1-to-kv.ts (FR-32
+ * AC-32.40): bill / comment / quote / social-post / stats / audit-feed AND the
+ * formerly-upstream-only member / state-members / name-index / roll-call-roster
+ * / roll-call prefixes — now sourced from the durable `members` + `vote_casts`
+ * tables. KV is a pure cache; re-running publish fully restores it from D1 with
+ * no upstream fetch. (The legacy upstream-fetch publisher `publish-to-kv.ts` is
+ * retired from this path.)
  *
- * Why a subprocess and not an import: the legacy script is an IIFE with
- * top-level argv parsing and process.exit() calls. Importing it would
- * run the IIFE at import time with our parent argv, which breaks. Shelling
- * it out preserves its existing behavior exactly.
+ * Why a subprocess and not an import: the script is an IIFE with top-level argv
+ * parsing + process.exit(); importing would run it at import time with the
+ * parent argv. Shelling out preserves behavior exactly.
  */
 
 import type { Command } from 'commander';
@@ -23,17 +24,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export function attach(parent: Command): void {
   parent
     .command('publish')
-    .description('Project D1 + curated data into KV (replaces npm run publish:kv)')
+    .description('Project all KV records from D1 (member/state/name-index/roster/bill/etc.)')
     .requiredOption('--env <env>', 'Environment: dev | uat | stg | prod')
     .option('--dry-run', 'Show what would be written without writing')
-    .option('--skip-rosters', 'Skip roll-call roster publish phase')
-    .option('--skip-state-members', 'Skip state-members publish phase')
-    .action(async (opts: { env: string; dryRun?: boolean; skipRosters?: boolean; skipStateMembers?: boolean }) => {
-      const script = resolve(__dirname, '..', 'publish-to-kv.ts');
+    .action(async (opts: { env: string; dryRun?: boolean }) => {
+      const script = resolve(__dirname, '..', 'publish-d1-to-kv.ts');
       const args: string[] = ['--env', opts.env];
       if (opts.dryRun) args.push('--dry-run');
-      if (opts.skipRosters) args.push('--skip-rosters');
-      if (opts.skipStateMembers) args.push('--skip-state-members');
 
       // shell: true is required so this works on Windows where `npx`
       // resolves to a .cmd shim. DEP0190 warns about shell injection — not

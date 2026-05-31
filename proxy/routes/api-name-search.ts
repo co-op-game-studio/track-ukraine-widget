@@ -15,6 +15,7 @@ import {
   type NameIndexEntry,
 } from '../kv/name-index';
 import { KV_PREFIXES } from '../kv/prefixes';
+import { projectNameIndex, type MemberRow } from '../services/member-projector';
 
 export async function handleNameSearch(
   request: Request,
@@ -30,7 +31,27 @@ export async function handleNameSearch(
       shape: 'worker-emitted',
     };
   }
-  const meta = await env.KV_VOTER_INFO.get(KV_PREFIXES.nameIndex + 'meta', 'text');
+  let meta = await env.KV_VOTER_INFO.get(KV_PREFIXES.nameIndex + 'meta', 'text');
+
+  // FR-32 AC-32.41 — index missing: self-heal by rebuilding the whole
+  // name-index from the durable D1 `members` table and write-through caching
+  // every shard + meta, then continue serving this query from those shards.
+  if (!meta && env.D1_VOTER_INFO) {
+    try {
+      const res = await env.D1_VOTER_INFO.prepare('SELECT * FROM members').all<MemberRow>();
+      const rows = res.results ?? [];
+      if (rows.length > 0) {
+        const { shards, meta: metaRec } = projectNameIndex(rows, new Date().toISOString());
+        for (const [letter, shard] of shards) {
+          try { await env.KV_VOTER_INFO.put(KV_PREFIXES.nameIndex + letter, JSON.stringify(shard)); } catch { /* best-effort */ }
+        }
+        const metaJson = JSON.stringify(metaRec);
+        meta = metaJson;
+        try { await env.KV_VOTER_INFO.put(KV_PREFIXES.nameIndex + 'meta', metaJson); } catch { /* best-effort */ }
+      }
+    } catch { /* fall through to 503 */ }
+  }
+
   if (!meta) {
     return {
       response: jsonResponse(503, { error: 'index_not_ready' }, corsHeaders(origin)),
