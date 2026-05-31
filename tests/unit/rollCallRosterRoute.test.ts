@@ -33,12 +33,29 @@ function makeCache(): CacheLike {
   return { async match() { return undefined; }, async put() {} };
 }
 
-function makeEnv(store: Record<string, string>): ProxyEnv {
+function makeEnv(store: Record<string, string>, d1?: unknown): ProxyEnv {
   return {
     CONGRESS_API_KEY: 'TEST',
     ALLOWED_ORIGINS: 'https://trackukraine.com',
     ALLOW_LOCALHOST: undefined,
     KV_VOTER_INFO: makeKV(store),
+    D1_VOTER_INFO: d1,
+  } as unknown as ProxyEnv;
+}
+
+/** Minimal fake D1 returning preset vote_casts rows for a SELECT. */
+function makeCastsD1(rows: Array<Record<string, unknown>>) {
+  return {
+    prepare() {
+      const stmt = {
+        bind() { return stmt; },
+        async first() { return null; },
+        async all() { return { results: rows }; },
+        async run() { return { success: true }; },
+      };
+      return stmt;
+    },
+    async batch() { return []; },
   };
 }
 
@@ -182,6 +199,52 @@ describe('AC-32.15 — /api/roll-call-rosters/ route', () => {
       makeCache(),
     );
     expect(r.status).toBe(403);
+  });
+
+  it('AC-32.41 — KV miss + D1 vote_casts → assembles House roster + caches to KV', async () => {
+    const store: Record<string, string> = {}; // KV empty
+    const d1 = makeCastsD1([
+      { bioguide_id: 'J000289', last_name: null, state: null, first_name: null, party: null, cast: 'Nay' },
+      { bioguide_id: 'D000096', last_name: null, state: null, first_name: null, party: null, cast: 'Yea' },
+    ]);
+    const env = makeEnv(store, d1);
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-call-rosters/house/118/2/151', { headers: ORIGIN }),
+      env,
+      makeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { chamber: string; casts: Record<string, string> };
+    expect(body.chamber).toBe('house');
+    expect(body.casts.J000289).toBe('Nay');
+    expect(body.casts.D000096).toBe('Yea');
+    // Write-through: the assembled record is now cached in KV.
+    expect(store['roll-call-roster:v1:house:118:2:151']).toBeTruthy();
+  });
+
+  it('AC-32.41 — KV miss + D1 vote_casts → assembles Senate roster (array)', async () => {
+    const d1 = makeCastsD1([
+      { bioguide_id: null, last_name: 'Durbin', state: 'IL', first_name: 'Richard', party: 'D', cast: 'Yea' },
+    ]);
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-call-rosters/senate/118/2/154', { headers: ORIGIN }),
+      makeEnv({}, d1),
+      makeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { chamber: string; casts: Array<{ lastName: string; cast: string }> };
+    expect(body.chamber).toBe('senate');
+    expect(Array.isArray(body.casts)).toBe(true);
+    expect(body.casts.find((c) => c.lastName === 'Durbin')?.cast).toBe('Yea');
+  });
+
+  it('AC-32.41 — 404 when both KV and D1 are empty', async () => {
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/roll-call-rosters/house/118/2/999', { headers: ORIGIN }),
+      makeEnv({}, makeCastsD1([])),
+      makeCache(),
+    );
+    expect(r.status).toBe(404);
   });
 
   it('AC-32.15 — 405 on POST', async () => {

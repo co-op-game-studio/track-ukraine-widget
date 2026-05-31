@@ -1282,3 +1282,137 @@ Tasks are ordered by dependency. Each task must have its required tests passing 
 - **Files**: `src/admin/components/PeopleTab.tsx`.
 - **Acceptance Criteria**: Resolves the UAT audit observation "306 of 535 visible" by including the missing members.
 - **Status**: [x] Done — 2026-05-25.
+
+---
+
+## Phase 15: V4.1.1 — Profile Widget-Preview Deep Link (FR-60)
+
+### T-142: v4.1.1 — Embed `?bioguide` pass-through
+- **Description**: `buildEmbedHtml` reads `?bioguide=<id>` from the request URL, validates it against `^[A-Z][0-9]{6}$`, and (only when valid) sets a `bioguide` attribute on the mounted `<voter-info-widget>`. Absent/invalid → no attribute (unchanged embed). Router passes the request URL/parsed bioguide through. No raw interpolation of the query value into HTML.
+- **Dependencies**: None.
+- **Files**: `proxy/routes/preview.ts`, `proxy/router.ts`.
+- **Acceptance Criteria**: FR-60 AC-60.1, AC-60.7.
+- **Test Requirements**: unit tests in `tests/unit/preview-embed.test.ts` — valid bioguide sets attribute; missing param omits it; malformed param (lowercase, wrong length, injection payload `"><script>`) omits it and emits no extra markup; no-param HTML behaviorally identical to pre-FR-60.
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-143: v4.1.1 — Widget `bioguide` attribute → `initialBioguide` prop
+- **Description**: `<voter-info-widget>` adds `bioguide` to `observedAttributes` and threads it to `VoterInfoWidget` as `initialBioguide`. Attribute change after mount re-renders.
+- **Dependencies**: T-142 (contract), can proceed in parallel.
+- **Files**: `src/embed.tsx`.
+- **Acceptance Criteria**: FR-60 AC-60.2.
+- **Test Requirements**: covered via the VoterInfoWidget integration test (T-144) plus an embed.tsx attribute-wiring assertion.
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-144: v4.1.1 — `VoterInfoWidget` direct-member render path
+- **Description**: When `initialBioguide` is a non-empty shape-valid id, fetch `/api/members/{id}`, build a `Representative` (name `"Last, First"`, party expansion, `partyAbbreviation`, state, district, chamber lowercased, sanitized photo/website, yearEntered) and render `RepDetail` open on load — no `/api/name-search`, no NameSearchResultsPanel. Loading affordance while in flight; abort/ignore stale fetch on `initialBioguide` change; 404/non-OK/error degrades to the normal entry screen without throwing.
+- **Dependencies**: T-143.
+- **Files**: `src/VoterInfoWidget.tsx`, possibly a small `src/hooks/useMemberById.ts`.
+- **Acceptance Criteria**: FR-60 AC-60.3, AC-60.4, AC-60.5.
+- **Test Requirements**: integration tests in `tests/integration/widget-deeplink.test.tsx` — happy path renders RepDetail for the member and issues no name-search; 404 falls back to entry screen; stale fetch ignored on bioguide change; no `initialBioguide` renders the unchanged entry screen.
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-145: v4.1.1 — Admin PersonProfileView preview wiring + copy fix
+- **Description**: PersonProfileView builds iframe `src` = `${window.location.origin}/embed?bioguide=${encodeURIComponent(bioguideId)}`; heading no longer hard-codes "trackukraine.com" (reads "Widget Preview"); the "search for {name}" instruction removed in favor of an env-data caption.
+- **Dependencies**: T-142, T-144.
+- **Files**: `src/admin/components/PeopleTab.tsx`.
+- **Acceptance Criteria**: FR-60 AC-60.6.
+- **Test Requirements**: unit/render assertion that the iframe `src` carries `?bioguide=<id>` and the stale domain string is gone.
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-146: v4.1.1 — Hide entry controls in single-member deep-link mode
+- **Description**: When a deep-link bioguide is loading/resolved (and the user hasn't started their own lookup/search), VoterInfoWidget hides AddressInput + NameSearchInput so the embed shows only that member's profile. 404/error falls back to the full entry screen.
+- **Files**: `src/VoterInfoWidget.tsx`.
+- **Acceptance Criteria**: FR-60 AC-60.8.
+- **Test Requirements**: widgetDeepLink.test.tsx asserts `.viw-address-form`/`.viw-name-search-form` absent on success, present on 404 fallback.
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-147: v4.1.1 — Per-response CSP nonce for embed inline script
+- **Description**: Pre-existing bug surfaced by FR-60: the /embed route's `script-src` (no 'unsafe-inline') blocked the embed's own inline mount/resize script, so the widget never mounted. Router now generates `crypto.randomUUID()` per response, stamps it on the inline `<script>` via buildEmbedHtml, and adds `'nonce-<v>'` to script-src. Verified live in Chrome.
+- **Files**: `proxy/router.ts`, `proxy/routes/preview.ts`.
+- **Acceptance Criteria**: FR-60 AC-60.9.
+- **Test Requirements**: previewEmbedDeepLink.test.ts (nonce stamped/omitted); routerExtended.test.ts (CSP carries nonce, no script 'unsafe-inline', body script nonce matches header).
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-148: v4.1.1 — Profile two-column layout + collapsible monitoring
+- **Description**: PersonProfileView restructured to a responsive CSS-grid. Desktop (≥900px): left column = Social monitoring + Quotes + Live Feed; right column = sticky Widget Preview; Recent Ingested Posts full-width below. Mobile: single column ordered preview → social → quotes → feed → posts. Social monitoring is a collapsible panel (collapsed by default) whose header keeps the FreshnessBadge issue summary visible. New `useMediaQuery` hook (admin uses inline styles, no @media).
+- **Files**: `src/admin/components/PeopleTab.tsx`, `src/admin/useMediaQuery.ts` (new).
+- **Acceptance Criteria**: FR-60 AC-60.10.
+- **Test Requirements**: PeopleTab.test.tsx — existing social/re-poll tests expand the panel first; new test asserts collapsed-by-default + issue summary visible on header.
+- **Traces to**: FR-60.
+- **Status**: [x] Done — 2026-05-30. Verified live on dev (desktop 2-col + sticky + collapsed monitoring).
+
+### T-149: v4.1.1 — Re-poll refreshes posts feed (bug)
+- **Description**: PeopleTab queue `useEffect` deps add `reloadHandles` so a completed re-poll refetches the ingested-posts feed.
+- **Files**: `src/admin/components/PeopleTab.tsx`.
+- **Acceptance Criteria**: FR-60 AC-60.22.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-150: v4.1.1 — Stored "unrelated" post status + migration 0011
+- **Description**: `enqueuePost` derives `status` from `matchedKeywords` (matched→pending, none→unrelated) with an explicit override; `/queue` POST passes `pending`. Migration 0011 idempotent backfill of pre-existing keyword-less unreviewed rows.
+- **Files**: `proxy/d1/ingest-store.ts`, `proxy/routes/api-admin-ingest.ts`, `migrations/d1/0011_social_queue_unrelated_status.up.sql` (+ rollback).
+- **Acceptance Criteria**: FR-59 AC-59.20..59.23.
+- **Test Requirements**: ingestStore.test.ts (derivation + override); apiAdminIngest.test.ts (poll-handle pending/unrelated).
+- **Status**: [x] Done — 2026-05-30.
+
+### T-151: v4.1.1 — resolveMemberVotes shared resolver
+- **Description**: New `src/services/memberVotes.ts` pure resolver (House by bioguide / Senate by lastName+state; for/against = valence sign; degrades missing roster to Did Not Serve). `useVotingRecord` delegates to it.
+- **Files**: `src/services/memberVotes.ts` (new), `src/hooks/useVotingRecord.ts`.
+- **Acceptance Criteria**: FR-32 AC-32.30..32.33.
+- **Test Requirements**: memberVotes.test.ts; votingRecord.test.ts unchanged (extraction guard).
+- **Status**: [x] Done — 2026-05-30.
+
+### T-152: v4.1.1 — Tabbed left column + Social Feed (related/unrelated)
+- **Description**: Left column tabs (Quotes default | Social Feed | Bills); header/cards/Social-monitoring above tabs. Social Feed = stored posts with related-by-default + "Show unrelated" checkbox; ephemeral Live Feed Search UI deleted (re-pull via existing poll-handle). Bills tab hidden for non-Congress people.
+- **Files**: `src/admin/components/PeopleTab.tsx`.
+- **Acceptance Criteria**: FR-60 AC-60.14/15/16.
+- **Test Requirements**: PeopleTab.test.tsx tab-switch, related/unrelated filter, Live-Feed-Search-removed; old live-feed tests deleted.
+- **Status**: [x] Done — 2026-05-30.
+
+### T-153: v4.1.1 — Resizable/collapsible/full-height preview + Bills matrix
+- **Description**: `useProfileLayout` (localStorage previewPct/collapsed) + `DraggableDivider` + full-height scroll-boundary grid + collapse-to-strip. `MemberVotesMatrix` + `useMemberVotes` Bills tab matrix (live roster fetches via resolveMemberVotes).
+- **Files**: `src/admin/useProfileLayout.ts` (new), `src/admin/components/DraggableDivider.tsx` (new), `src/admin/components/MemberVotesMatrix.tsx` (new), `src/admin/components/PeopleTab.tsx`.
+- **Acceptance Criteria**: FR-60 AC-60.17/18/19/20/21.
+- **Test Requirements**: PeopleTab.test.tsx collapse toggle, divider keyboard persistence, Bills matrix render/empty.
+- **Status**: [x] Done — 2026-05-30.
+
+---
+
+## Phase 16: V4.1.2 — Full D1 durability (members, casts, state-members, name-index) + cross-chamber
+
+### T-154: v4.1.2 — Cross-chamber resolveMemberVotes
+- **Description**: resolveMemberVotes gathers BOTH chambers' curated votes; House matched by bioguideId, Senate by lastName+state, regardless of current chamber. Fixes chamber-switchers (e.g. Schiff S001150) showing an empty/insufficient record.
+- **Files**: `src/services/memberVotes.ts`, `tests/unit/memberVotes.test.ts`.
+- **Acceptance Criteria**: FR-32 AC-32.34, AC-32.35.
+- **Status**: [x] Done — 2026-05-31.
+
+### T-155: v4.1.2 — vote_casts table + lw rosters seed + route D1 self-heal
+- **Description**: Migration 0012 `vote_casts` (durable per-member casts). `lw rosters seed` enumerates curated roll-calls from D1 `votes`, fetches casts upstream (House JSON / Senate XML, extracted to `scripts/lib/rosters/fetch-casts.ts`), upserts idempotently, audit on failure, exit 0/1/2. `/api/roll-call-rosters` keeps KV read + on miss assembles from D1 `vote_casts` and write-through caches (self-heal).
+- **Files**: `migrations/d1/0012_vote_casts.up.sql` (+ rollback), `scripts/rosters/seed.ts`, `scripts/lib/rosters/{seed,fetch-casts}.ts`, `scripts/cli.ts`, `proxy/routes/api-roll-call-rosters.ts`.
+- **Acceptance Criteria**: FR-32 AC-32.36, AC-32.37, AC-32.38, AC-32.41 (roster).
+- **Test Requirements**: rosters/seed.test.ts; rollCallRosterRoute.test.ts (KV-miss→D1 assemble + write-through; both-empty→404).
+- **Status**: [x] Done — 2026-05-31.
+
+### T-156: v4.1.2 — members table + lw members seed
+- **Description**: Migration 0013 `members` (durable identity + sponsored/cosponsored + socials + searchKey). `lw members seed` enumerates current members, fetches detail + sponsored/cosponsored + socials, upserts, freshness-gated, audit, exit 0/1/2.
+- **Files**: `migrations/d1/0013_members.up.sql` (+ rollback), `scripts/members/seed.ts`, `scripts/lib/members/{seed,normalize}.ts`, `scripts/cli.ts`.
+- **Acceptance Criteria**: FR-32 AC-32.39.
+- **Test Requirements**: members/seed.test.ts (enumerate→fetch→upsert; freshness gate; per-member error→audit+continue).
+- **Status**: [x] Done — 2026-05-31.
+
+### T-157: v4.1.2 — D1→KV projections + route fallbacks
+- **Description**: Pure projector `proxy/services/member-projector.ts` (member:v1:/state-members:v1:/name-index:v1:+meta/roll-call-roster:v1: from members+vote_casts), re-exported by `scripts/lib/members/project.ts`. Wired into `publish-d1-to-kv.ts` (now also projects roll-call:v1:); `lw kv publish` repointed from `publish-to-kv.ts` → `publish-d1-to-kv.ts` (D1 is source of truth, no upstream fetch). D1-fallback (self-heal on KV miss + write-through) added to api-members/api-state-members/api-name-search/api-roll-call-rosters.
+- **Files**: `proxy/services/member-projector.ts` (new), `scripts/lib/members/project.ts`, `scripts/publish-d1-to-kv.ts`, `scripts/kv/publish.ts`, `proxy/routes/{api-members,api-state-members,api-name-search,api-roll-call-rosters}.ts`.
+- **Acceptance Criteria**: FR-32 AC-32.40, AC-32.41.
+- **Test Requirements**: members/project.test.ts; publishD1ToKv.test.ts (member/state/name-index/roster + roll-call keys); kvRoutes.test.ts + stateMembersRoute.test.ts + rollCallRosterRoute.test.ts (D1 self-heal fallback).
+- **Status**: [x] Done — 2026-05-31.
+
+### T-158: v4.1.2 — party-priors source (deferred) + dev rollout
+- **Description**: party-priors stays curated-JSON-sourced (documented exception, AC-32.42). Dev rollout: migrate 0012+0013, lw members seed, lw rosters seed, lw kv publish, deploy; verify Schiff cross-chamber + KV-flush self-heal in Chrome.
+- **Acceptance Criteria**: FR-32 AC-32.42 (exception), AC-32.35/41 verification.
+- **Status**: [ ] Pending dev rollout (outward-facing — awaiting go-ahead).

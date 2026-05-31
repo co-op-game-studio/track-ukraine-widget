@@ -15,6 +15,7 @@ import { sanitizeHttpUrl } from '../security/url-validator';
 import { normalizeSearchKey } from '../kv/name-index';
 import { KV_PREFIXES } from '../kv/prefixes';
 import { PROFILE_TTL_SECONDS, type MemberProfile } from '../kv/member-profile';
+import { projectMemberProfile, type MemberRow } from '../services/member-projector';
 
 /* ─── Party-prior stamping (FR-55 AC-55.6 / ADR-018 §6) ─────────────────── */
 
@@ -252,6 +253,34 @@ export async function handleMemberProfile(
       }),
       shape: 'api-proxied',
     };
+  }
+
+  // FR-32 AC-32.41 — KV miss: self-heal from the durable D1 `members` row
+  // (write-through caches it) before falling back to the upstream read-through.
+  if (env.D1_VOTER_INFO) {
+    try {
+      const row = await env.D1_VOTER_INFO
+        .prepare('SELECT * FROM members WHERE bioguide_id = ?')
+        .bind(bioguideId)
+        .first<MemberRow>();
+      if (row) {
+        const d1Profile = projectMemberProfile(row, new Date().toISOString());
+        const priors = await loadPartyPriors(env);
+        stampPartyPrior(d1Profile, priors);
+        const body = JSON.stringify(d1Profile);
+        ctx.waitUntil(env.KV_VOTER_INFO.put(KV_PREFIXES.member + bioguideId, body, { expirationTtl: PROFILE_TTL_SECONDS }));
+        const headers = new Headers(corsHeaders(origin));
+        headers.set('Content-Type', 'application/json; charset=utf-8');
+        headers.set('Cache-Control', 'public, max-age=60, s-maxage=300');
+        headers.set('X-Cache', 'D1');
+        return {
+          response: new Response(request.method === 'HEAD' ? null : body, { status: 200, headers }),
+          shape: 'api-proxied',
+        };
+      }
+    } catch {
+      // D1 unavailable / table missing → fall through to upstream read-through.
+    }
   }
 
   let profile: MemberProfile | null;

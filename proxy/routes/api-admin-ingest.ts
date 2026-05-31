@@ -261,6 +261,9 @@ export async function handleIngest(
         bodyText: body['body_text'] as string,
         mediaRefsJson: (body['media_refs_json'] as string) ?? '[]',
         rawPayloadJson: JSON.stringify(body),
+        // FR-59 AC-59.22 — a human added this post directly; never let the
+        // keyword classifier mark it 'unrelated'.
+        status: 'pending',
       });
       // Dedupe path: enqueuePost returned null because (platform, platform_post_id)
       // already exists. Look up the existing row so the caller still gets an id
