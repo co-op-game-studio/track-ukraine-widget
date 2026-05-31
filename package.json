@@ -1,7 +1,7 @@
 {
   "name": "voter-info-widget",
   "private": true,
-  "version": "4.1.0-rc4",
+  "version": "4.1.2-rc1",
   "type": "module",
   "scripts": {
     "lw": "tsx scripts/cli.ts",

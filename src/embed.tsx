@@ -42,7 +42,8 @@ class VoterInfoElement extends HTMLElement {
   private root: Root | null = null;
 
   static get observedAttributes() {
-    return ['api-base', 'assets-base'];
+    // FR-60 AC-60.2 — `bioguide` deep-links the widget onto one member.
+    return ['api-base', 'assets-base', 'bioguide'];
   }
 
   connectedCallback() {
@@ -75,9 +76,12 @@ class VoterInfoElement extends HTMLElement {
 
   private render() {
     const apiBase = this.getAttribute('api-base') ?? '';
+    // FR-60 AC-60.2 — pass the deep-link target through as initialBioguide.
+    // Absent attribute → undefined → ordinary entry screen.
+    const initialBioguide = this.getAttribute('bioguide') ?? undefined;
     this.root?.render(
       <StrictMode>
-        <VoterInfoWidget apiBase={apiBase} />
+        <VoterInfoWidget apiBase={apiBase} initialBioguide={initialBioguide} />
       </StrictMode>,
     );
   }

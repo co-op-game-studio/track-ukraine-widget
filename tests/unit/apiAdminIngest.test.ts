@@ -829,6 +829,36 @@ describe('handleIngest: /poll-handle', () => {
     const r = await call(env, 'POST', 'poll-handle', { handle_id: 'h1' });
     expect(r.status).toBe(200);
     expect(r.json).toMatchObject({ skipped: false, newPosts: 1, keywordMatches: 1 });
+    // AC-59.20 — a keyword-matched post is stored 'pending' (enters the feed).
+    const stored = d1.tables.social_post_queue!.find((p) => p['platform_post_id'] === 'newp');
+    expect(stored?.['status']).toBe('pending');
+    expect(stored?.['matched_keywords']).toBe(JSON.stringify(['Ukraine']));
+  });
+
+  it('AC-59.21 — a poll-ingested post matching no keyword is stored unrelated', async () => {
+    const d1 = new FakeD1();
+    seedHandleRow(d1, { id: 'h1', platform: 'bluesky' });
+    d1.tables.social_keyword_watches!.push({
+      id: 'k1', watch_name: 'Ukraine', pattern: 'ukraine', is_regex: 0, active: 1,
+      notify: 1, created_by: 'x', created_at: 'now',
+    });
+    registerAdapter(makeAdapter('bluesky', {
+      posts: [
+        {
+          platform: 'bluesky', platformPostId: 'offtopic',
+          authorHandle: 'durbin.bsky.social', authorPlatformId: 'did:plc:abc',
+          postedAt: '2026-05-01T00:00:00Z', url: 'https://x',
+          bodyText: 'happy national donut day', mediaRefs: [], rawPayload: {},
+        },
+      ],
+    }));
+    const env = makeEnv({ d1 });
+    const r = await call(env, 'POST', 'poll-handle', { handle_id: 'h1' });
+    expect(r.status).toBe(200);
+    expect(r.json).toMatchObject({ skipped: false, newPosts: 1, keywordMatches: 0 });
+    const stored = d1.tables.social_post_queue!.find((p) => p['platform_post_id'] === 'offtopic');
+    expect(stored?.['status']).toBe('unrelated');
+    expect(stored?.['matched_keywords']).toBeNull();
   });
 
   it('counts duplicates when enqueuePost returns null (UNIQUE collision)', async () => {

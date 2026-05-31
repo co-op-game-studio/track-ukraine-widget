@@ -12,6 +12,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev:admin"],
       "port": 5174
+    },
+    {
+      "name": "embed-deeplink",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "--config", "wrangler.toml", "--env", "dev", "--port", "8788", "--local"],
+      "port": 8788
     }
   ]
 }

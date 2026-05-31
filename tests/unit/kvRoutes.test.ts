@@ -312,3 +312,79 @@ describe('/api/roll-calls', () => {
     expect(await r.text()).toBe('');
   });
 });
+
+/* ====================================================================== */
+/*       FR-32 AC-32.41 — D1 self-heal fallback on KV miss                */
+/* ====================================================================== */
+
+function makeMembersD1(rows: Array<Record<string, unknown>>) {
+  return {
+    prepare() {
+      const stmt = {
+        bind() { return stmt; },
+        async first() { return rows[0] ?? null; },
+        async all() { return { results: rows }; },
+        async run() { return { success: true }; },
+      };
+      return stmt;
+    },
+    async batch() { return []; },
+  };
+}
+
+function memberRow(o: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    bioguide_id: 'D000563', first: 'Richard', last: 'Durbin', official_name: 'Richard J. Durbin',
+    state: 'IL', chamber: 'Senate', district: null, party: 'D',
+    photo_url: null, website: null, search_key: 'richard durbin', year_entered: 1997, is_non_voting: 0,
+    socials_json: null, sponsored_json: '[]', cosponsored_json: '[]',
+    congress_update_date: '2026-05-01', last_freshness_check_at: '2026-05-01', ...o,
+  };
+}
+
+function envWithD1(store: Record<string, string>, d1: unknown): ProxyEnv {
+  return {
+    CONGRESS_API_KEY: 'TEST',
+    ALLOWED_ORIGINS: 'https://trackukraine.com',
+    ALLOW_LOCALHOST: undefined,
+    KV_VOTER_INFO: makeFakeKV(store),
+    D1_VOTER_INFO: d1,
+  } as unknown as ProxyEnv;
+}
+
+describe('AC-32.41 — /api/members D1 self-heal', () => {
+  it('KV miss + D1 row → serves projected MemberProfile and write-through caches', async () => {
+    const store: Record<string, string> = {};
+    const env = envWithD1(store, makeMembersD1([memberRow()]));
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/members/D000563', { headers: ORIGIN }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { bioguideId: string; chamber: string; state: string };
+    expect(body.bioguideId).toBe('D000563');
+    expect(body.chamber).toBe('Senate');
+    expect(body.state).toBe('IL');
+    expect(store['member:v1:D000563']).toBeTruthy();
+  });
+});
+
+describe('AC-32.41 — /api/name-search D1 self-heal', () => {
+  it('KV index missing + D1 members → rebuilds shards+meta and returns matches', async () => {
+    const store: Record<string, string> = {}; // no name-index in KV
+    const env = envWithD1(store, makeMembersD1([
+      memberRow({ bioguide_id: 'D000563', first: 'Richard', last: 'Durbin', search_key: 'richard durbin' }),
+    ]));
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/name-search?q=durbin', { headers: ORIGIN }),
+      env,
+      makeFakeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { results: Array<{ bioguideId: string }> };
+    expect(body.results.some((e) => e.bioguideId === 'D000563')).toBe(true);
+    // Write-through rebuilt the index.
+    expect(store['name-index:v1:meta']).toBeTruthy();
+  });
+});

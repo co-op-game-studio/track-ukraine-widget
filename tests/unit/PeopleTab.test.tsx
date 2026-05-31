@@ -268,11 +268,24 @@ function installFetch(opts: InstallOpts = {}): InstallReturn {
   };
 }
 
+/** JSDOM lacks matchMedia; stub it so the two-column branch (≥1100px) renders.
+ *  `wide=false` simulates the mobile single-column branch. */
+function stubMatchMedia(wide: boolean) {
+  window.matchMedia = ((q: string) => ({
+    matches: q.includes('1100') ? wide : false,
+    media: q, onchange: null,
+    addEventListener() {}, removeEventListener() {},
+    addListener() {}, removeListener() {}, dispatchEvent() { return false; },
+  })) as unknown as typeof window.matchMedia;
+}
+
 beforeEach(() => {
   // Each test installs its own fetch stub. Reset platforms cache so the
   // hook re-fetches against the per-test stub instead of returning stale
   // data left over from another test.
   invalidatePlatformsCache();
+  try { window.localStorage.removeItem('tk-admin-profile-layout'); } catch { /* noop */ }
+  stubMatchMedia(true); // default: wide / two-column for profile tests
 });
 
 afterEach(() => {
@@ -285,7 +298,7 @@ afterEach(() => {
 /* ====================================================================== */
 
 describe('PeopleTab — list view load', () => {
-  it('shows "Loading roster…" until the handles fetch resolves', async () => {
+  it('shows "Loading roster—¦" until the handles fetch resolves', async () => {
     installFetch({ handles: [] });
     render(<PeopleTab />);
     expect(screen.getByText(/Loading roster/i)).toBeInTheDocument();
@@ -592,7 +605,9 @@ describe('PeopleTab — profile sections', () => {
       platforms: [makePlatform('bluesky')],
     });
     render(<PeopleTab initialBioguide="B001" />);
-    expect(await screen.findByText(/Social monitoring/i)).toBeInTheDocument();
+    // AC-60.10: the Social monitoring panel is collapsed by default — expand it.
+    const toggle = await screen.findByRole('button', { name: /Social monitoring/i });
+    fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByText('@jane.bsky.social')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: /Re-poll/ })).toBeInTheDocument();
   });
@@ -607,9 +622,33 @@ describe('PeopleTab — profile sections', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
+    // AC-60.10: expand the collapsed Social monitoring panel first.
+    fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
     await waitFor(() =>
       expect(screen.getByText(/No social handles linked to this person/)).toBeInTheDocument(),
     );
+  });
+
+  it('AC-60.10 — Social monitoring is collapsed by default but its issue summary stays visible', async () => {
+    installFetch({
+      // One handle that has never been polled ←’ FreshnessBadge shows "never polled".
+      handles: [
+        makeHandle({ id: 'h-1', bioguide_id: 'B001', platform: 'bluesky', handle: 'jane.bsky.social', last_poll_status: 'error', last_polled_at: null }),
+      ],
+      members: [makeMoc({ bioguideId: 'B001', displayName: 'Jane Doe' })],
+      quotes: [],
+      queue: [],
+      platforms: [makePlatform('bluesky')],
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    const toggle = await screen.findByRole('button', { name: /Social monitoring/i });
+    // Collapsed by default ←’ handle row NOT rendered—¦
+    expect(screen.queryByText('@jane.bsky.social')).not.toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    // —¦but the issue summary (failing / never-polled counts) is still on the
+    // header so monitoring problems stay visible while collapsed.
+    expect(within(toggle).getByText(/\d+ failing/i)).toBeInTheDocument();
+    expect(within(toggle).getByText(/\d+ never polled/i)).toBeInTheDocument();
   });
 
   it('renders a quote row with weight + direction badges', async () => {
@@ -659,41 +698,37 @@ describe('PeopleTab — profile sections', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
+    // AC-60.14/16 — ingested posts now live in the Social Feed tab.
+    fireEvent.click(await screen.findByRole('tab', { name: /Social Feed/i }));
     await waitFor(() => expect(screen.getByText(/Pending text here/)).toBeInTheDocument());
     expect(screen.getByText('pending')).toBeInTheDocument();
     expect(screen.getByText('curated')).toBeInTheDocument();
     expect(screen.getByText('dismissed')).toBeInTheDocument();
   });
 
-  it('shows the live feed search section when linked platforms exist', async () => {
+  it('AC-60.16 — Social Feed shows related by default; the ephemeral Live Feed Search is gone', async () => {
     installFetch({
       handles: [makeHandle({ bioguide_id: 'B001', platform: 'bluesky' })],
       members: [makeMoc({ bioguideId: 'B001' })],
       quotes: [],
-      queue: [],
+      queue: [
+        makeQueue({ id: 'p-rel', status: 'pending', matched_keywords: '["Ukraine"]', body_text: 'related post body' }),
+        makeQueue({ id: 'p-unrel', status: 'unrelated', matched_keywords: null, body_text: 'unrelated post body' }),
+      ],
       platforms: [makePlatform('bluesky')],
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
-    await waitFor(() => expect(screen.getByText(/Live Feed Search/i)).toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByRole('button', { name: /Fetch latest/ })).toBeInTheDocument();
-  });
-
-  it('hides the live feed section when no linked platforms are configured', async () => {
-    installFetch({
-      handles: [makeHandle({ bioguide_id: 'B001', platform: 'twitter' })],
-      members: [makeMoc({ bioguideId: 'B001' })],
-      quotes: [],
-      queue: [],
-      // Twitter is not in the available list.
-      platforms: [makePlatform('bluesky'), makePlatform('mastodon')],
-    });
-    render(<PeopleTab initialBioguide="B001" />);
-    await screen.findByRole('button', { name: /← Back to People/ });
-    // Wait for platforms to settle, then assert section is hidden.
-    await waitFor(() => {
-      expect(screen.queryByText(/Live Feed Search/i)).not.toBeInTheDocument();
-    });
+    fireEvent.click(await screen.findByRole('tab', { name: /Social Feed/i }));
+    // Related shown, unrelated hidden by default.
+    await waitFor(() => expect(screen.getByText(/related post body/)).toBeInTheDocument());
+    expect(screen.queryByText(/unrelated post body/)).not.toBeInTheDocument();
+    // The deleted ephemeral search UI is gone.
+    expect(screen.queryByText(/Live Feed Search/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Fetch latest/i })).not.toBeInTheDocument();
+    // Checking "Show unrelated" reveals the unrelated post.
+    fireEvent.click(screen.getByRole('checkbox', { name: /Show unrelated/i }));
+    await waitFor(() => expect(screen.getByText(/unrelated post body/)).toBeInTheDocument());
   });
 });
 
@@ -716,6 +751,8 @@ describe('PeopleTab — stat cards', () => {
       queue: [
         makeQueue({ id: 'p-1', status: 'pending' }),
         makeQueue({ id: 'p-2', status: 'curated' }),
+        makeQueue({ id: 'p-3', status: 'unrelated', matched_keywords: null }),
+        makeQueue({ id: 'p-4', status: 'unrelated', matched_keywords: null }),
       ],
       platforms: [makePlatform('bluesky'), makePlatform('mastodon')],
     });
@@ -725,6 +762,8 @@ describe('PeopleTab — stat cards', () => {
     expect(screen.getByText('Quotes')).toBeInTheDocument();
     expect(screen.getByText('Ingested posts')).toBeInTheDocument();
     expect(screen.getByText('Quote score impact')).toBeInTheDocument();
+    // The Ingested Posts card breaks down by status, including Unrelated.
+    expect(screen.getByText('Unrelated: 2')).toBeInTheDocument();
   });
 });
 
@@ -744,6 +783,7 @@ describe('PeopleTab — re-poll handle', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
     const repollBtn = await screen.findByRole('button', { name: /Re-poll/ });
     fireEvent.click(repollBtn);
     await waitFor(
@@ -751,6 +791,37 @@ describe('PeopleTab — re-poll handle', () => {
       { timeout: 3000 },
     );
     await waitFor(() => expect(screen.getByText(/\+3 new/)).toBeInTheDocument(), { timeout: 3000 });
+  });
+
+  it('AC-60.22 — refetches the posts feed after a re-poll completes', async () => {
+    // Queue is empty at first load; the re-poll "ingests" a post (we swap the
+    // stub's queue) and the feed must refetch and show it without a reload.
+    const stub = installFetch({
+      handles: [makeHandle({ id: 'h-1', bioguide_id: 'B001', platform: 'bluesky', handle: 'jane.bsky.social' })],
+      members: [makeMoc({ bioguideId: 'B001' })],
+      quotes: [],
+      queue: [],
+      platforms: [makePlatform('bluesky')],
+      onPoll: () => {
+        // Simulate the poll persisting a new post to the queue.
+        stub.setQueue([
+          makeQueue({ id: 'q-new-1', bioguide_id: 'B001', body_text: 'freshly ingested post' }),
+        ]);
+        return jsonResponse({ skipped: false, error: null, newPosts: 1 });
+      },
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Re-poll/ }));
+    // The newly-ingested post appears because the queue effect refetches when
+    // the reload trigger bumps after the poll's onDone/onRepoll. View it in the
+    // Social Feed tab (AC-60.14).
+    fireEvent.click(await screen.findByRole('tab', { name: /Social Feed/i }));
+    await waitFor(
+      () => expect(screen.getByText(/freshly ingested post/i)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
   });
 
   it('shows the error message when poll returns an error', async () => {
@@ -764,6 +835,7 @@ describe('PeopleTab — re-poll handle', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
     const repollBtn = await screen.findByRole('button', { name: /Re-poll/ });
     fireEvent.click(repollBtn);
     await waitFor(() => expect(screen.getByText(/rate_limited/)).toBeInTheDocument(), { timeout: 3000 });
@@ -787,6 +859,7 @@ describe('PeopleTab — re-poll handle', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
     await waitFor(() => expect(screen.getByText(/Auth failed/)).toBeInTheDocument());
     expect(screen.getByText(/trace-xyz-456/)).toBeInTheDocument();
   });
@@ -801,113 +874,10 @@ describe('PeopleTab — re-poll handle', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
     await waitFor(() => expect(screen.getByText(/display only/i)).toBeInTheDocument(), { timeout: 3000 });
     // No re-poll button for unsupported platforms.
     expect(screen.queryByRole('button', { name: /Re-poll/ })).not.toBeInTheDocument();
-  });
-});
-
-/* ====================================================================== */
-/*                Profile view — Live feed search                         */
-/* ====================================================================== */
-
-describe('PeopleTab — live feed search', () => {
-  it('POSTs the search and renders per-platform results', async () => {
-    const stub = installFetch({
-      handles: [makeHandle({ bioguide_id: 'B001', platform: 'bluesky' })],
-      members: [makeMoc({ bioguideId: 'B001' })],
-      quotes: [],
-      queue: [],
-      platforms: [makePlatform('bluesky')],
-      onSearch: () => jsonResponse({
-        bioguideId: 'B001',
-        results: {
-          bluesky: {
-            handle: 'jane.bsky.social',
-            posts: [{
-              platform: 'bluesky',
-              platformPostId: 'x',
-              authorHandle: 'jane.bsky.social',
-              authorPlatformId: 'p',
-              postedAt: '2026-04-01T00:00:00Z',
-              url: 'https://bsky.app/foo',
-              bodyText: 'Post body',
-              mediaRefs: [],
-            }],
-          },
-        },
-      }),
-    });
-    render(<PeopleTab initialBioguide="B001" />);
-    await screen.findByRole('button', { name: /← Back to People/ });
-    const fetchBtn = await screen.findByRole('button', { name: /Fetch latest/ });
-    fireEvent.click(fetchBtn);
-    await waitFor(
-      () => expect(stub.calls.some((c) => c.url.includes('/ingest/search'))).toBe(true),
-      { timeout: 3000 },
-    );
-    await waitFor(() => expect(screen.getByText(/Post body/)).toBeInTheDocument(), { timeout: 3000 });
-    // Per-platform header with count.
-    expect(screen.getByText(/Bluesky.*@jane.bsky.social.*\(1\)/)).toBeInTheDocument();
-  });
-
-  it('shows the "no_handle" hint when the search reports it', async () => {
-    installFetch({
-      handles: [makeHandle({ bioguide_id: 'B001', platform: 'bluesky' })],
-      members: [makeMoc({ bioguideId: 'B001' })],
-      quotes: [],
-      queue: [],
-      platforms: [makePlatform('bluesky')],
-      onSearch: () => jsonResponse({
-        bioguideId: 'B001',
-        results: {
-          bluesky: { handle: null, posts: [], error: 'no_handle' },
-        },
-      }),
-    });
-    render(<PeopleTab initialBioguide="B001" />);
-    await screen.findByRole('button', { name: /← Back to People/ });
-    const fetchBtn = await screen.findByRole('button', { name: /Fetch latest/ });
-    fireEvent.click(fetchBtn);
-    await waitFor(() => expect(screen.getByText(/No Bluesky handle linked/)).toBeInTheDocument(), { timeout: 3000 });
-  });
-
-  it('shows the error banner when the search throws', async () => {
-    installFetch({
-      handles: [makeHandle({ bioguide_id: 'B001', platform: 'bluesky' })],
-      members: [makeMoc({ bioguideId: 'B001' })],
-      quotes: [],
-      queue: [],
-      platforms: [makePlatform('bluesky')],
-      onSearch: () => jsonResponse({ error: 'server_error', detail: 'Search backend down' }, 500),
-    });
-    render(<PeopleTab initialBioguide="B001" />);
-    await screen.findByRole('button', { name: /← Back to People/ });
-    const fetchBtn = await screen.findByRole('button', { name: /Fetch latest/ });
-    fireEvent.click(fetchBtn);
-    await waitFor(() => expect(screen.getByText(/Search backend down/)).toBeInTheDocument(), { timeout: 3000 });
-  });
-
-  it('toggling a platform pill toggles its active state', async () => {
-    installFetch({
-      handles: [
-        makeHandle({ id: 'h-1', bioguide_id: 'B001', platform: 'bluesky' }),
-        makeHandle({ id: 'h-2', bioguide_id: 'B001', platform: 'mastodon' }),
-      ],
-      members: [makeMoc({ bioguideId: 'B001' })],
-      quotes: [],
-      queue: [],
-      platforms: [makePlatform('bluesky'), makePlatform('mastodon')],
-    });
-    render(<PeopleTab initialBioguide="B001" />);
-    await screen.findByRole('button', { name: /← Back to People/ });
-    await screen.findByRole('button', { name: /Fetch latest/ });
-    // Find platform toggle pills (Bluesky / Mastodon shown as buttons in the
-    // Live Feed Search toolbar; just click them to exercise the toggle path).
-    const blueskyToggles = screen.getAllByRole('button', { name: /Bluesky/i });
-    expect(blueskyToggles.length).toBeGreaterThanOrEqual(1);
-    fireEvent.click(blueskyToggles[blueskyToggles.length - 1]!);
-    // No assertion on visual state — just ensure the click path doesn't throw.
   });
 });
 
@@ -930,7 +900,7 @@ describe('PeopleTab — refresh all', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
-    const refreshBtn = await screen.findByRole('button', { name: /↻ Refresh all/ });
+    const refreshBtn = await screen.findByRole('button', { name: /Refresh all/ });
     fireEvent.click(refreshBtn);
     // The fan-out is sequential with a 200ms delay between each — wait for
     // both polls to land.
@@ -1158,5 +1128,146 @@ describe('PeopleTab — freshness badge', () => {
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
     await waitFor(() => expect(screen.getByText(/1 failing/i)).toBeInTheDocument());
+  });
+});
+
+/* ====================================================================== */
+/*              Profile view — tabs (AC-60.14 / AC-60.15 / AC-60.21)      */
+/* ====================================================================== */
+
+describe('PeopleTab — left-column tabs', () => {
+  it('AC-60.14 — renders Quotes/Social Feed/Bills tabs; Quotes selected on load', async () => {
+    installFetch({
+      handles: [makeHandle({ bioguide_id: 'B001' })],
+      members: [makeMoc({ bioguideId: 'B001' })],
+      quotes: [makeQuote({ id: 'q-1', body_text: 'a quoted statement' })],
+      queue: [],
+      platforms: [makePlatform('bluesky')],
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    const quotesTab = await screen.findByRole('tab', { name: /Quotes/i });
+    expect(quotesTab).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /Social Feed/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Bills/i })).toBeInTheDocument();
+    // Quotes body visible by default.
+    await waitFor(() => expect(screen.getByText(/a quoted statement/)).toBeInTheDocument());
+  });
+
+  it('AC-60.15 — switching to Social Feed hides the quotes body', async () => {
+    installFetch({
+      handles: [makeHandle({ bioguide_id: 'B001' })],
+      members: [makeMoc({ bioguideId: 'B001' })],
+      quotes: [makeQuote({ id: 'q-1', body_text: 'a quoted statement' })],
+      queue: [makeQueue({ id: 'p-1', status: 'pending', matched_keywords: '["Ukraine"]', body_text: 'feed post body' })],
+      platforms: [makePlatform('bluesky')],
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    await waitFor(() => expect(screen.getByText(/a quoted statement/)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('tab', { name: /Social Feed/i }));
+    await waitFor(() => expect(screen.getByText(/feed post body/)).toBeInTheDocument());
+    expect(screen.queryByText(/a quoted statement/)).not.toBeInTheDocument();
+  });
+
+  it('AC-60.14 — Bills tab is hidden for people without a Congress identity', async () => {
+    installFetch({
+      handles: [makeHandle({ bioguide_id: 'B001', entity_name: 'Some Influencer' })],
+      members: [], // no MoC record → not a Congress member
+      quotes: [],
+      queue: [],
+      platforms: [makePlatform('bluesky')],
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    await screen.findByRole('tab', { name: /Quotes/i });
+    expect(screen.queryByRole('tab', { name: /Bills/i })).not.toBeInTheDocument();
+  });
+
+  it('AC-60.18 — preview collapses to a re-open strip and back', async () => {
+    installFetch({
+      handles: [makeHandle({ bioguide_id: 'B001' })],
+      members: [makeMoc({ bioguideId: 'B001' })],
+      quotes: [], queue: [], platforms: [makePlatform('bluesky')],
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    // Expanded: the preview iframe is present.
+    expect(await screen.findByTitle(/Widget preview for/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Collapse preview/i }));
+    // Collapsed: iframe gone, re-open strip present.
+    await waitFor(() => expect(screen.queryByTitle(/Widget preview for/i)).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /Show preview/i }));
+    await waitFor(() => expect(screen.getByTitle(/Widget preview for/i)).toBeInTheDocument());
+  });
+
+  it('AC-60.17 — divider keyboard nudge updates persisted previewPct', async () => {
+    installFetch({
+      handles: [makeHandle({ bioguide_id: 'B001' })],
+      members: [makeMoc({ bioguideId: 'B001' })],
+      quotes: [], queue: [], platforms: [makePlatform('bluesky')],
+    });
+    render(<PeopleTab initialBioguide="B001" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    const divider = await screen.findByRole('separator', { name: /Resize preview pane/i });
+    fireEvent.keyDown(divider, { key: 'ArrowRight' });
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem('tk-admin-profile-layout') ?? '{}');
+      expect(stored.previewPct).toBeGreaterThan(60);
+      expect(stored.previewPct).toBeLessThanOrEqual(75);
+    });
+  });
+});
+
+/* ====================================================================== */
+/*                  Bills matrix tab (AC-60.21)                           */
+/* ====================================================================== */
+
+describe('PeopleTab — Bills matrix', () => {
+  function installBillsFetch(memberJson: unknown, rosterCast: string | null) {
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'GET' && url.includes('/api/admin/ingest/handles')) return jsonResponse({ items: [makeHandle({ bioguide_id: 'D000563' })] });
+      if (method === 'GET' && url.includes('/api/admin/ingest/roster-meta')) return jsonResponse({ members: [makeMoc({ bioguideId: 'D000563', displayName: 'Richard Durbin', chamber: 'Senate', state: 'IL' })] });
+      if (method === 'GET' && url.includes('/api/admin/ingest/platforms')) return jsonResponse({ platforms: [makePlatform('bluesky')] });
+      if (method === 'GET' && url.includes('/api/admin/ingest/queue')) return jsonResponse({ items: [], total: 0 });
+      if (method === 'GET' && url.includes('/api/admin/quotes')) return jsonResponse({ items: [] });
+      if (method === 'GET' && url.includes('/api/members/')) return memberJson === null ? jsonResponse({ error: 'member_not_found' }, 404) : jsonResponse(memberJson);
+      if (method === 'GET' && url.includes('/api/roll-call-rosters/senate/')) {
+        return rosterCast === null
+          ? new Response('not found', { status: 404 })
+          : jsonResponse({ rollCallId: 'x', chamber: 'senate', congress: 0, session: 0, rollCall: 0, generatedAt: '2026-01-01T00:00:00Z', schemaVersion: 1, casts: [{ lastName: 'Durbin', state: 'IL', cast: rosterCast }] });
+      }
+      if (method === 'GET' && url.includes('/api/roll-call-rosters/house/')) {
+        return rosterCast === null ? new Response('not found', { status: 404 }) : jsonResponse({ rollCallId: 'x', chamber: 'house', congress: 0, session: 0, rollCall: 0, generatedAt: '2026-01-01T00:00:00Z', schemaVersion: 1, casts: { D000563: rosterCast } });
+      }
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+  }
+
+  const DURBIN_MEMBER = {
+    bioguideId: 'D000563', first: 'Richard', last: 'Durbin', officialName: 'Richard J. Durbin',
+    state: 'Illinois', district: null, chamber: 'Senate', party: 'D',
+    photoUrl: null, website: null, yearEntered: 1997, sponsored: [], cosponsored: [],
+    generatedAt: '2026-05-30T00:00:00Z', schemaVersion: 1,
+  };
+
+  it('AC-60.21 — renders the matrix with the member position and summary', async () => {
+    installBillsFetch(DURBIN_MEMBER, 'Yea');
+    render(<PeopleTab initialBioguide="D000563" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('tab', { name: /Bills/i }));
+    // Summary chips + at least one Aye position cell rendered.
+    await waitFor(() => expect(screen.getByText(/tracked/i)).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getAllByText('Aye').length).toBeGreaterThan(0);
+  });
+
+  it('AC-60.21 — shows empty state when the member 404s', async () => {
+    installBillsFetch(null, null);
+    render(<PeopleTab initialBioguide="D000563" />);
+    await screen.findByRole('button', { name: /← Back to People/ });
+    fireEvent.click(await screen.findByRole('tab', { name: /Bills/i }));
+    await waitFor(() => expect(screen.getByText(/No member record found/i)).toBeInTheDocument(), { timeout: 3000 });
   });
 });

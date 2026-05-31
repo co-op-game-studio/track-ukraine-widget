@@ -14,6 +14,19 @@ import { partyStyle } from './MocPicker';
 import type { MocEntry } from './MocPicker';
 import { useAvailablePlatforms } from '../hooks/useAvailablePlatforms';
 import { parseHandleUrl } from '../utils/parseHandleUrl';
+import { useMediaQuery } from '../useMediaQuery';
+import { useProfileLayout } from '../useProfileLayout';
+import { DraggableDivider } from './DraggableDivider';
+import { MemberVotesMatrix } from './MemberVotesMatrix';
+
+/**
+ * FR-60 AC-60.6 — build the profile widget-preview iframe src. Deep-links the
+ * same-origin `/embed` onto this member so the preview opens directly on their
+ * public profile (no manual search), reflecting the current environment's data.
+ */
+export function embedPreviewSrc(origin: string, bioguideId: string): string {
+  return `${origin}/embed?bioguide=${encodeURIComponent(bioguideId)}`;
+}
 
 /* ========================================================================== */
 /*                                 Types                                      */
@@ -68,17 +81,6 @@ interface QuoteRow {
   created_at: string;
 }
 
-interface FetchedPost {
-  platform: string;
-  platformPostId: string;
-  authorHandle: string;
-  authorPlatformId: string;
-  postedAt: string;
-  url: string;
-  bodyText: string;
-  mediaRefs: Array<{ kind: string; url: string; alt?: string }>;
-}
-
 interface AccountCategory {
   id: string;
   label: string;
@@ -94,12 +96,6 @@ interface PersonCard {
   moc?: MocEntry;
 }
 
-interface SearchPlatformResult {
-  posts: FetchedPost[];
-  handle: string | null;
-  error?: string;
-}
-
 const PLATFORM_LABELS: Record<string, string> = {
   bluesky: 'Bluesky',
   youtube: 'YouTube',
@@ -107,9 +103,6 @@ const PLATFORM_LABELS: Record<string, string> = {
   twitter: 'Twitter / X',
 };
 
-/** Fallback when the platforms endpoint hasn't loaded yet. Real list comes
- *  from `useAvailablePlatforms()` so unconfigured platforms are hidden. */
-const SUPPORTED_PLATFORMS_FALLBACK = new Set(['bluesky', 'mastodon']);
 
 const ACCOUNT_CATEGORIES: AccountCategory[] = [
   { id: 'congress', label: 'Member of Congress' },
@@ -587,13 +580,31 @@ function PersonProfileView({
   const [quotes, setQuotes] = useState<QuoteRow[]>([]);
   const [loadingQuotes, setLoadingQuotes] = useState(true);
 
-  const [feedPlatformOverrides, setFeedPlatformOverrides] = useState<Set<string> | null>(null);
-  const [feedResults, setFeedResults] = useState<Record<string, SearchPlatformResult> | null>(null);
-  const [feedLoading, setFeedLoading] = useState(false);
-  const [feedError, setFeedError] = useState<string | null>(null);
-
   const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
   const [loadingQueue, setLoadingQueue] = useState(true);
+
+  // FR-60 layout (AC-60.10): two-column on wide screens (≥1100px) — the LEFT
+  // column holds everything bio/work (back, header, stat cards, social, quotes,
+  // live feed) at ~70% width; the RIGHT column (~30%) is the sticky widget
+  // preview spanning full height. Recent posts span full width below. Below
+  // 1100px (tablets portrait + phones) it collapses to one column, reordered so
+  // the preview sits right after the stat cards. Social monitoring is a
+  // collapsible panel (collapsed by default); its issue summary stays visible
+  // on the collapsed header.
+  const twoColumn = useMediaQuery('(min-width: 1100px)');
+  const [socialOpen, setSocialOpen] = useState(false);
+
+  // FR-60 AC-60.14 — tabbed left column (Quotes default; reset on member switch).
+  type ProfileTab = 'quotes' | 'feed' | 'bills';
+  const [tab, setTab] = useState<ProfileTab>('quotes');
+  // AC-60.16 — feed shows related posts by default; checkbox reveals unrelated.
+  const [showUnrelated, setShowUnrelated] = useState(false);
+  // AC-60.17/18 — persisted preview width % + collapsed state; container ref
+  // for the divider's percentage math.
+  const { layout, setPreviewPct, toggleCollapsed } = useProfileLayout();
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  // Bills tab only applies to Congress members (need a bioguide + roster identity).
+  const hasCongressIdentity = Boolean(moc);
 
   // Which platforms have a registered + healthy adapter? Drives whether we
   // render the Re-poll button on each handle row — there's no point offering
@@ -642,59 +653,17 @@ function PersonProfileView({
       .then((r) => setQueueItems(r.items))
       .catch(() => {})
       .finally(() => setLoadingQueue(false));
-  }, [bioguideId]);
+    // AC-60.22: reloadHandles is bumped by a completed re-poll (RefreshAllButton
+    // onDone / per-handle onRepoll). Depending on it here makes the posts feed
+    // refetch after a poll persists new rows — not just the handle list.
+  }, [bioguideId, reloadHandles]);
+
+  // AC-60.14 — default back to the Quotes tab whenever the viewed member changes.
+  useEffect(() => { setTab('quotes'); }, [bioguideId]);
 
   // Profile-level "what platforms can we actually pull from?" derived from
   // live availability + the rep's linked handles. Falls back to the
   // hardcoded set while the platforms endpoint is in flight.
-  const availablePlatforms = useAvailablePlatforms();
-  const availableSet = useMemo(() => {
-    if (availablePlatforms.length === 0) return SUPPORTED_PLATFORMS_FALLBACK;
-    return new Set(availablePlatforms.filter((p) => p.available).map((p) => p.slug));
-  }, [availablePlatforms]);
-  const linkedPlatforms = useMemo(() => {
-    const set = new Set<string>();
-    for (const h of handles) {
-      if (availableSet.has(h.platform)) set.add(h.platform);
-    }
-    return [...set];
-  }, [handles, availableSet]);
-
-  const feedPlatforms = useMemo(() => {
-    if (feedPlatformOverrides) return [...feedPlatformOverrides];
-    return linkedPlatforms;
-  }, [feedPlatformOverrides, linkedPlatforms]);
-
-  async function fetchFeed() {
-    setFeedLoading(true);
-    setFeedResults(null);
-    setFeedError(null);
-    try {
-      const r = await post<{ bioguideId: string; results: Record<string, SearchPlatformResult> }>(
-        '/api/admin/ingest/search',
-        {
-          bioguide_id: bioguideId,
-          platforms: feedPlatforms,
-          max_posts: 25,
-        },
-      );
-      setFeedResults(r.results);
-    } catch (e) {
-      setFeedError(errorMsg(e));
-    } finally {
-      setFeedLoading(false);
-    }
-  }
-
-  function toggleFeedPlatform(p: string) {
-    setFeedPlatformOverrides((prev) => {
-      const current = prev ?? new Set(linkedPlatforms);
-      const next = new Set(current);
-      if (next.has(p)) next.delete(p); else next.add(p);
-      return next;
-    });
-  }
-
   const personCard = useMemo<PersonCard | null>(() => {
     if (handles.length === 0 && !moc) return null;
     const first = handles[0];
@@ -725,6 +694,7 @@ function PersonProfileView({
     const postsPending = queueItems.filter((i) => i.status === 'pending').length;
     const postsCurated = queueItems.filter((i) => i.status === 'curated').length;
     const postsDismissed = queueItems.filter((i) => i.status === 'dismissed').length;
+    const postsUnrelated = queueItems.filter((i) => i.status === 'unrelated').length;
 
     const platformCounts: Record<string, number> = {};
     for (const h of handles) {
@@ -733,15 +703,64 @@ function PersonProfileView({
 
     return {
       quotePro, quoteAnti, quoteUnstated, quoteAvgWeight,
-      postsPending, postsCurated, postsDismissed,
+      postsPending, postsCurated, postsDismissed, postsUnrelated,
       platformCounts,
     };
   }, [quotes, queueItems, handles]);
 
+  // AC-60.16 — Social Feed list: related posts (status !== 'unrelated') by
+  // default; the "Show unrelated" checkbox includes the rest.
+  const feedPosts = useMemo(
+    () => (showUnrelated ? queueItems : queueItems.filter((i) => i.status !== 'unrelated')),
+    [queueItems, showUnrelated],
+  );
+
   return (
     <div style={styles.section}>
+      {/* ── Profile grid (AC-60.14..60.20). Desktop: LEFT column (bio/work +
+          tabs) | draggable divider | RIGHT preview (full height, sticky-ish via
+          the grid being the scroll boundary). Collapsed: left fills, a slim
+          re-open strip on the right. Mobile (<1100px): single column,
+          back→header→cards→preview→tabs; no divider/collapse/resize. ── */}
+      <div
+        ref={gridRef}
+        style={
+          !twoColumn
+            ? {
+                display: 'grid',
+                gridTemplateColumns: '1fr',
+                gridTemplateAreas: '"back" "header" "cards" "preview" "left"',
+                gap: 10,
+              }
+            : layout.previewCollapsed
+              ? {
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 28px',
+                  gridTemplateAreas: '"left strip"',
+                  columnGap: 12,
+                  height: 'calc(100vh - 96px)',
+                  overflow: 'hidden',
+                  alignItems: 'stretch',
+                }
+              : {
+                  display: 'grid',
+                  gridTemplateColumns: `minmax(0, ${100 - layout.previewPct}fr) 6px minmax(0, ${layout.previewPct}fr)`,
+                  gridTemplateAreas: '"left divider preview"',
+                  columnGap: 12,
+                  height: 'calc(100vh - 96px)',
+                  overflow: 'hidden',
+                  alignItems: 'stretch',
+                }
+        }
+      >
+      {/* LEFT column wrapper. Two-column: a flex column owning its own vertical
+          scroll (the grid is the scroll boundary). Single-column: `display:
+          contents` so each child joins the outer grid via its gridArea. */}
+      <div style={twoColumn
+        ? { gridArea: 'left', display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, minHeight: 0, overflowY: 'auto' }
+        : { display: 'contents' }}>
       {/* Back button */}
-      <div>
+      <div style={{ gridArea: 'back' }}>
         <button
           type="button"
           onClick={onBack}
@@ -759,6 +778,7 @@ function PersonProfileView({
 
       {/* Profile header */}
       <div style={{
+        gridArea: 'header',
         display: 'flex',
         alignItems: 'center',
         gap: 16,
@@ -801,6 +821,7 @@ function PersonProfileView({
       {/* ── Stats summary ── */}
       {(!loadingQuotes || !loadingQueue) && (
         <div style={{
+          gridArea: 'cards',
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
           gap: 8,
@@ -831,6 +852,7 @@ function PersonProfileView({
                 <span style={{ ...statDetailStyle, color: '#eab308' }}>Pending: {stats.postsPending}</span>
                 <span style={{ ...statDetailStyle, color: '#22c55e' }}>Curated: {stats.postsCurated}</span>
                 <span style={{ ...statDetailStyle, color: '#ef4444' }}>Dismissed: {stats.postsDismissed}</span>
+                <span style={statDetailStyle}>Unrelated: {stats.postsUnrelated}</span>
               </>
             )}
           </StatCard>
@@ -850,13 +872,27 @@ function PersonProfileView({
         </div>
       )}
 
-      {/* ── Social monitoring section ── */}
-      <div style={profileSectionStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 10, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div style={profileSectionTitle}>Social monitoring ({handles.length})</div>
+      {/* ── Social monitoring section (collapsible — AC-60.10) ── */}
+      <div style={{ ...profileSectionStyle, gridArea: 'social' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: socialOpen ? 8 : 0 }}>
+          {/* Toggle: title + caret + ALWAYS-visible freshness/issue summary so
+              problems are obvious even while the panel is collapsed. */}
+          <button
+            type="button"
+            onClick={() => setSocialOpen((o) => !o)}
+            aria-expanded={socialOpen}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+              background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+              color: 'var(--tk-fg)', textAlign: 'left',
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', width: 12, display: 'inline-block' }}>
+              {socialOpen ? '▾' : '▸'}
+            </span>
+            <span style={profileSectionTitle}>Social monitoring ({handles.length})</span>
             <FreshnessBadge handles={handles} />
-          </div>
+          </button>
           <div style={{ display: 'flex', gap: 6 }}>
             <RefreshAllButton
               handles={handles}
@@ -873,224 +909,195 @@ function PersonProfileView({
             )}
           </div>
         </div>
-        {loading ? (
-          <div style={styles.muted}>Loading…</div>
-        ) : handles.length === 0 ? (
-          <div style={styles.muted}>No social handles linked to this person.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {handles.map((h) => (
-              <HandleStatusRow
-                key={h.id}
-                handle={h}
-                pollable={pollablePlatforms.has(h.platform)}
-                onRepoll={() => setReloadHandles((n) => n + 1)}
-              />
-            ))}
-          </div>
+        {socialOpen && (
+          loading ? (
+            <div style={styles.muted}>Loading…</div>
+          ) : handles.length === 0 ? (
+            <div style={styles.muted}>No social handles linked to this person.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {handles.map((h) => (
+                <HandleStatusRow
+                  key={h.id}
+                  handle={h}
+                  pollable={pollablePlatforms.has(h.platform)}
+                  onRepoll={() => setReloadHandles((n) => n + 1)}
+                />
+              ))}
+            </div>
+          )
         )}
       </div>
 
-      {/* ── Quotes section ── */}
-      <div style={profileSectionStyle}>
-        <div style={profileSectionTitle}>Quotes ({quotes.length})</div>
-        {loadingQuotes ? (
-          <div style={styles.muted}>Loading quotes…</div>
-        ) : quotes.length === 0 ? (
-          <div style={styles.muted}>No quotes yet. Use the Quotes tab or "Add by URL" to add scored quotes.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {quotes.map((q) => {
-              const dirColor = q.direction > 0 ? '#22c55e' : q.direction < 0 ? '#ef4444' : '#888';
-              return (
-                <div key={q.id} style={{
-                  ...styles.queueCard,
-                  borderLeftWidth: 4,
-                  borderLeftColor: dirColor,
-                }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--tk-fs-xs)', flexWrap: 'wrap' }}>
-                    <span style={{
-                      fontWeight: 700,
-                      color: dirColor,
-                      textTransform: 'uppercase',
-                    }}>
-                      {q.direction > 0 ? 'PRO' : q.direction < 0 ? 'ANTI' : 'UNSTATED'}
-                    </span>
-                    <span style={{ fontFamily: 'var(--tk-font-mono)', fontWeight: 700 }}>
-                      w={q.weight.toFixed(2)}
-                    </span>
-                    <span style={{
-                      padding: '1px 5px',
-                      background: 'var(--tk-surface)',
-                      border: '1px solid var(--tk-border-soft)',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                    }}>
-                      {q.media_kind}
-                    </span>
-                    {q.quoted_at && (
-                      <span style={{ color: 'var(--tk-muted)' }}>
-                        {new Date(q.quoted_at).toLocaleDateString()}
-                      </span>
-                    )}
-                    <span style={{ color: 'var(--tk-muted)', marginLeft: 'auto' }}>
-                      {new Date(q.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                  <div style={styles.bodyText}>
-                    {q.body_text.slice(0, 300)}{q.body_text.length > 300 ? '…' : ''}
-                  </div>
-                  {q.comment && (
-                    <div style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', fontStyle: 'italic' }}>
-                      Note: {q.comment}
-                    </div>
-                  )}
-                  <div style={styles.cardActions}>
-                    {q.source_url && (
-                      <a href={q.source_url} target="_blank" rel="noopener noreferrer" style={styles.link}>
-                        {q.source_label ?? 'Source'}
-                      </a>
-                    )}
-                    <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', fontFamily: 'var(--tk-font-mono)' }}>
-                      {q.id.slice(0, 8)}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ── Recent queue items ── */}
-      <div style={profileSectionStyle}>
-        <div style={profileSectionTitle}>Recent Ingested Posts ({queueItems.length})</div>
-        {loadingQueue ? (
-          <div style={styles.muted}>Loading…</div>
-        ) : queueItems.length === 0 ? (
-          <div style={styles.muted}>No ingested posts for this person yet.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {queueItems.map((item) => (
-              <div key={item.id} style={styles.queueCard}>
-                <div style={styles.queueHeader}>
-                  <span style={styles.platformBadge}>
-                    {PLATFORM_LABELS[item.platform] ?? item.platform}
-                  </span>
-                  <span style={styles.handle}>@{item.author_handle}</span>
-                  <span style={{
-                    padding: '1px 5px',
-                    fontSize: 'var(--tk-fs-xs)',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    background: item.status === 'curated' ? '#22c55e' : item.status === 'dismissed' ? '#ef4444' : 'var(--tk-surface)',
-                    color: item.status === 'pending' ? 'var(--tk-fg)' : '#fff',
-                    border: item.status === 'pending' ? '1px solid var(--tk-border-soft)' : 'none',
-                  }}>
-                    {item.status}
-                  </span>
-                  <span style={styles.date}>
-                    {new Date(item.posted_at).toLocaleDateString()}
-                  </span>
-                </div>
-                <div style={styles.bodyText}>
-                  {item.body_text.slice(0, 200)}{item.body_text.length > 200 ? '…' : ''}
-                </div>
-                <div style={styles.cardActions}>
-                  <a href={item.url} target="_blank" rel="noopener noreferrer" style={styles.link}>
-                    View original
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Live feed search — only for platforms they have ── */}
-      {linkedPlatforms.length > 0 && (
-      <div style={profileSectionStyle}>
-        <div style={profileSectionTitle}>Live Feed Search</div>
-        <div style={styles.toolRow}>
-          {linkedPlatforms.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => toggleFeedPlatform(p)}
-              style={{
-                ...styles.platformToggle,
-                ...(feedPlatforms.includes(p) ? styles.platformToggleActive : {}),
-              }}
-            >
-              {PLATFORM_LABELS[p] ?? p}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={fetchFeed}
-            disabled={feedLoading}
-            style={styles.actionBtn}
-          >
-            {feedLoading ? 'Fetching…' : 'Fetch latest'}
+      {/* ── Tab bar (AC-60.14): Quotes | Social Feed | Bills ── */}
+      <div role="tablist" aria-label="Profile sections" style={tabNavStyle}>
+        <button type="button" role="tab" aria-selected={tab === 'quotes'} onClick={() => setTab('quotes')}
+          style={tab === 'quotes' ? tabBtnActiveStyle : tabBtnStyle}>
+          Quotes ({quotes.length})
+        </button>
+        <button type="button" role="tab" aria-selected={tab === 'feed'} onClick={() => setTab('feed')}
+          style={tab === 'feed' ? tabBtnActiveStyle : tabBtnStyle}>
+          Social Feed ({queueItems.length})
+        </button>
+        {hasCongressIdentity && (
+          <button type="button" role="tab" aria-selected={tab === 'bills'} onClick={() => setTab('bills')}
+            style={tab === 'bills' ? tabBtnActiveStyle : tabBtnStyle}>
+            Bills
           </button>
-        </div>
-
-        {feedError && <div style={styles.error}>{feedError}</div>}
-
-        {feedResults && Object.entries(feedResults).map(([platform, pr]) => (
-          <div key={platform}>
-            <h4 style={styles.sectionHead}>
-              {PLATFORM_LABELS[platform] ?? platform}
-              {pr.handle ? ` — @${pr.handle}` : ''}
-              {pr.posts.length > 0 ? ` (${pr.posts.length})` : ''}
-            </h4>
-            {pr.error === 'no_handle' && (
-              <div style={styles.noHandle}>
-                No {PLATFORM_LABELS[platform] ?? platform} handle linked.
-                <span style={{ color: 'var(--tk-muted)' }}> Edit handles above to add one.</span>
-              </div>
-            )}
-            {pr.error && pr.error !== 'no_handle' && (
-              <div style={styles.error}>Error: {pr.error}</div>
-            )}
-            {!pr.error && pr.posts.length === 0 && (
-              <div style={styles.muted}>No posts found</div>
-            )}
-            {pr.posts.map((p, i) => (
-              <div key={i} style={styles.queueCard}>
-                <div style={styles.bodyText}>{p.bodyText.slice(0, 300)}{p.bodyText.length > 300 ? '…' : ''}</div>
-                <div style={styles.cardActions}>
-                  <span style={styles.date}>{new Date(p.postedAt).toLocaleDateString()}</span>
-                  <a href={p.url} target="_blank" rel="noopener noreferrer" style={styles.link}>
-                    View
-                  </a>
-                </div>
-              </div>
-            ))}
-          </div>
-        ))}
+        )}
       </div>
+
+      {/* ── Tab body — fills the rest of the left column; scrolls internally ── */}
+      <div style={{ ...profileSectionStyle, flex: twoColumn ? 1 : undefined, minHeight: twoColumn ? 0 : undefined, display: 'flex', flexDirection: 'column' }}>
+        {tab === 'quotes' && (
+          loadingQuotes ? (
+            <div style={styles.muted}>Loading quotes…</div>
+          ) : quotes.length === 0 ? (
+            <div style={styles.muted}>No quotes yet. Use the Quotes tab or "Add by URL" to add scored quotes.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: twoColumn ? 1 : undefined, minHeight: 0, overflowY: 'auto' }}>
+              {quotes.map((q) => {
+                const dirColor = q.direction > 0 ? '#22c55e' : q.direction < 0 ? '#ef4444' : '#888';
+                return (
+                  <div key={q.id} style={{ ...styles.queueCard, borderLeftWidth: 4, borderLeftColor: dirColor }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 'var(--tk-fs-xs)', flexWrap: 'wrap' }}>
+                      <span style={{ fontWeight: 700, color: dirColor, textTransform: 'uppercase' }}>
+                        {q.direction > 0 ? 'PRO' : q.direction < 0 ? 'ANTI' : 'UNSTATED'}
+                      </span>
+                      <span style={{ fontFamily: 'var(--tk-font-mono)', fontWeight: 700 }}>w={q.weight.toFixed(2)}</span>
+                      <span style={{ padding: '1px 5px', background: 'var(--tk-surface)', border: '1px solid var(--tk-border-soft)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        {q.media_kind}
+                      </span>
+                      {q.quoted_at && <span style={{ color: 'var(--tk-muted)' }}>{new Date(q.quoted_at).toLocaleDateString()}</span>}
+                      <span style={{ color: 'var(--tk-muted)', marginLeft: 'auto' }}>{new Date(q.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <div style={styles.bodyText}>{q.body_text.slice(0, 300)}{q.body_text.length > 300 ? '…' : ''}</div>
+                    {q.comment && <div style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', fontStyle: 'italic' }}>Note: {q.comment}</div>}
+                    <div style={styles.cardActions}>
+                      {q.source_url && <a href={q.source_url} target="_blank" rel="noopener noreferrer" style={styles.link}>{q.source_label ?? 'Source'}</a>}
+                      <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', fontFamily: 'var(--tk-font-mono)' }}>{q.id.slice(0, 8)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {tab === 'feed' && (
+          <>
+            {/* AC-60.16 — related by default; checkbox reveals unrelated. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', cursor: 'pointer' }}>
+                <input type="checkbox" checked={showUnrelated} onChange={(e) => setShowUnrelated(e.target.checked)} />
+                Show unrelated
+              </label>
+              <span style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)' }}>
+                Use <strong>Refresh all</strong> above to re-pull the feed.
+              </span>
+            </div>
+            {loadingQueue ? (
+              <div style={styles.muted}>Loading…</div>
+            ) : feedPosts.length === 0 ? (
+              <div style={styles.muted}>
+                {showUnrelated ? 'No ingested posts for this person yet.' : 'No related posts — re-pull or "Show unrelated".'}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: twoColumn ? 1 : undefined, minHeight: 0, overflowY: 'auto' }}>
+                {feedPosts.map((item) => (
+                  <div key={item.id} style={styles.queueCard}>
+                    <div style={styles.queueHeader}>
+                      <span style={styles.platformBadge}>{PLATFORM_LABELS[item.platform] ?? item.platform}</span>
+                      <span style={styles.handle}>@{item.author_handle}</span>
+                      <span style={{
+                        padding: '1px 5px', fontSize: 'var(--tk-fs-xs)', fontWeight: 700, textTransform: 'uppercase',
+                        background: item.status === 'curated' ? '#22c55e' : item.status === 'dismissed' ? '#ef4444' : item.status === 'unrelated' ? 'var(--tk-bg)' : 'var(--tk-surface)',
+                        color: item.status === 'pending' || item.status === 'unrelated' ? 'var(--tk-muted)' : '#fff',
+                        border: item.status === 'pending' || item.status === 'unrelated' ? '1px solid var(--tk-border-soft)' : 'none',
+                      }}>
+                        {item.status}
+                      </span>
+                      <span style={styles.date}>{new Date(item.posted_at).toLocaleDateString()}</span>
+                    </div>
+                    <div style={styles.bodyText}>{item.body_text.slice(0, 200)}{item.body_text.length > 200 ? '…' : ''}</div>
+                    <div style={styles.cardActions}>
+                      <a href={item.url} target="_blank" rel="noopener noreferrer" style={styles.link}>View original</a>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'bills' && hasCongressIdentity && (
+          <div style={{ flex: twoColumn ? 1 : undefined, minHeight: 0, overflowY: 'auto' }}>
+            <MemberVotesMatrix bioguideId={bioguideId} />
+          </div>
+        )}
+      </div>
+
+      </div>{/* end LEFT column flex wrapper */}
+
+      {/* ── Resize divider (AC-60.17) — only when two-column and not collapsed ── */}
+      {twoColumn && !layout.previewCollapsed && (
+        <DraggableDivider containerRef={gridRef} previewPct={layout.previewPct} onChange={setPreviewPct} />
       )}
 
-      {/* ── Widget preview ── */}
-      <div style={profileSectionStyle}>
-        <div style={profileSectionTitle}>Widget Preview — trackukraine.com</div>
-        <div style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', marginBottom: 4 }}>
-          Search for "{personName}" in the widget below to see their current profile.
-        </div>
-        <iframe
-          src={`${window.location.origin}/embed`}
-          title="Widget preview"
+      {/* ── Widget preview (FR-60). Full pane height; collapsible to a strip. ── */}
+      {twoColumn && layout.previewCollapsed ? (
+        <button
+          type="button"
+          aria-label="Show preview"
+          aria-expanded={false}
+          onClick={toggleCollapsed}
           style={{
-            width: '100%',
-            minHeight: 600,
-            border: '2px solid var(--tk-border-soft)',
-            background: '#0d1117',
-            borderRadius: 0,
+            gridArea: 'strip', cursor: 'pointer', writingMode: 'vertical-rl',
+            border: '2px solid var(--tk-border-soft)', background: 'var(--tk-surface)',
+            color: 'var(--tk-fg)', fontWeight: 700, fontSize: 'var(--tk-fs-xs)',
+            textTransform: 'uppercase', letterSpacing: '0.04em', height: '100%',
           }}
-        />
-      </div>
+        >
+          ▸ Widget Preview
+        </button>
+      ) : (
+        <div
+          style={{
+            ...profileSectionStyle,
+            gridArea: 'preview',
+            ...(twoColumn ? { height: '100%', minHeight: 0 } : {}),
+            display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={profileSectionTitle}>Widget Preview</div>
+            {twoColumn && (
+              <button type="button" aria-label="Collapse preview" onClick={toggleCollapsed}
+                style={{ ...styles.actionBtn, padding: '2px 8px', fontSize: 'var(--tk-fs-xs)' }}>
+                ✕ Hide
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', marginBottom: 4 }}>
+            The public widget for {personName}, rendered against this environment&rsquo;s data.
+          </div>
+          <iframe
+            src={embedPreviewSrc(window.location.origin, bioguideId)}
+            title={`Widget preview for ${personName}`}
+            style={{
+              width: '100%',
+              flex: twoColumn ? 1 : undefined,
+              minHeight: twoColumn ? 0 : 480,
+              height: twoColumn ? '100%' : undefined,
+              border: '2px solid var(--tk-border-soft)',
+              background: '#0d1117',
+              borderRadius: 0,
+            }}
+          />
+        </div>
+      )}
+
+      </div>{/* end two-column grid */}
 
       {/* Edit modal */}
       {editCard && (
@@ -1662,6 +1669,30 @@ const profileSectionTitle: React.CSSProperties = {
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   color: 'var(--tk-muted)',
+};
+
+const tabNavStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: 4,
+  borderBottom: '2px solid var(--tk-border-soft)',
+};
+
+const tabBtnStyle: React.CSSProperties = {
+  background: 'none',
+  border: 'none',
+  borderBottom: '2px solid transparent',
+  marginBottom: -2,
+  padding: '8px 14px',
+  cursor: 'pointer',
+  color: 'var(--tk-muted)',
+  fontWeight: 700,
+  fontSize: 'var(--tk-fs-sm)',
+};
+
+const tabBtnActiveStyle: React.CSSProperties = {
+  ...tabBtnStyle,
+  color: 'var(--tk-fg)',
+  borderBottom: '2px solid var(--tk-accent)',
 };
 
 const INPUT_BASE: React.CSSProperties = {
