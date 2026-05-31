@@ -14,6 +14,8 @@ import {
   projectAuditFeedFull,
   buildPublishPlan,
   diffPlan,
+  safeD1Query,
+  isMissingTableError,
   type D1Bill,
   type D1Vote,
   type D1Comment,
@@ -356,6 +358,45 @@ describe('projectAuditFeedFull (FR-58 AC-58.1)', () => {
 /*                              buildPublishPlan + diffPlan                   */
 /* -------------------------------------------------------------------------- */
 
+describe('safeD1Query fail-loud (AC-32.44)', () => {
+  /** Build a fake D1Like whose .all() throws the given error. */
+  function throwingD1(err: Error) {
+    return {
+      prepare() {
+        return {
+          bind() { return this; },
+          async first() { throw err; },
+          async all() { throw err; },
+          async run() { throw err; },
+        };
+      },
+      async batch() { return []; },
+    } as never;
+  }
+
+  it('swallows ONLY a missing-table error → empty set', async () => {
+    const d1 = throwingD1(new Error('D1_ERROR: no such table: members'));
+    expect(await safeD1Query(d1, 'SELECT * FROM members')).toEqual([]);
+  });
+
+  it('re-throws a network error instead of returning []', async () => {
+    const d1 = throwingD1(new Error('fetch failed: ECONNRESET'));
+    await expect(safeD1Query(d1, 'SELECT * FROM vote_casts')).rejects.toThrow(/ECONNRESET/);
+  });
+
+  it('re-throws auth / 5xx / parse errors', async () => {
+    await expect(safeD1Query(throwingD1(new Error('D1 REST 401 Unauthorized')), 'SELECT 1')).rejects.toThrow(/401/);
+    await expect(safeD1Query(throwingD1(new SyntaxError('Unexpected end of JSON input')), 'SELECT 1')).rejects.toThrow(/JSON/);
+  });
+
+  it('isMissingTableError classifies correctly', () => {
+    expect(isMissingTableError(new Error('no such table: vote_casts'))).toBe(true);
+    expect(isMissingTableError(new Error('relation "members" does not exist'))).toBe(true);
+    expect(isMissingTableError(new Error('D1 REST 500'))).toBe(false);
+    expect(isMissingTableError(new Error('ECONNRESET'))).toBe(false);
+  });
+});
+
 describe('buildPublishPlan + diffPlan', () => {
   it('produces deterministic output across two runs (FR-51 AC-51.2)', () => {
     const inputs = {
@@ -417,9 +458,36 @@ describe('buildPublishPlan + diffPlan', () => {
       'audit-feed:v1:public',
       'bill:v1:117-HR-2471',
       'comment:v1:117-HR-2471',
+      'roll-call:v1:house:117:2:65',
       'social-post:v1:D000563',
       'stats:v1:summary',
     ]);
+  });
+
+  it('AC-32.40 — projects member/state/name-index/roster keys from members + vote_casts', () => {
+    const inputs = {
+      bills: [], votes: [], comments: [], posts: [], quotes: [], audits: [],
+      members: [
+        {
+          bioguide_id: 'D000563', first: 'Richard', last: 'Durbin', official_name: 'Richard J. Durbin',
+          state: 'IL', chamber: 'Senate', district: null, party: 'D',
+          photo_url: null, website: null, search_key: 'richard durbin', year_entered: 1997, is_non_voting: 0,
+          socials_json: null, sponsored_json: '[]', cosponsored_json: '[]',
+          congress_update_date: '2026-05-01', last_freshness_check_at: '2026-05-01',
+        },
+      ],
+      voteCasts: [
+        { chamber: 'House', congress: 117, session: 1, roll_call: 293, bioguide_id: 'S001150', last_name: null, first_name: null, state: null, party: null, cast: 'Yea' },
+      ],
+      generatedAt: ISO,
+    };
+    const plan = buildPublishPlan(inputs);
+    const keys = [...plan.writes.keys()];
+    expect(keys).toContain('member:v1:D000563');
+    expect(keys).toContain('state-members:v1:IL');
+    expect(keys).toContain('name-index:v1:meta');
+    expect(keys.some((k) => k.startsWith('name-index:v1:') && k !== 'name-index:v1:meta')).toBe(true);
+    expect(keys).toContain('roll-call-roster:v1:house:117:1:293');
   });
 
   it('diffPlan returns only changed keys when current matches plan exactly', () => {

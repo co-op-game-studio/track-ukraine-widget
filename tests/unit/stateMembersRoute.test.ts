@@ -33,12 +33,39 @@ function makeCache(): CacheLike {
   return { async match() { return undefined; }, async put() {} };
 }
 
-function makeEnv(store: Record<string, string>): ProxyEnv {
+function makeEnv(store: Record<string, string>, d1?: unknown): ProxyEnv {
   return {
     CONGRESS_API_KEY: 'TEST',
     ALLOWED_ORIGINS: 'https://trackukraine.com',
     ALLOW_LOCALHOST: undefined,
     KV_VOTER_INFO: makeKV(store),
+    D1_VOTER_INFO: d1,
+  } as unknown as ProxyEnv;
+}
+
+/** Fake D1 returning preset members rows for a SELECT … all(). */
+function makeMembersD1(rows: Array<Record<string, unknown>>) {
+  return {
+    prepare() {
+      const stmt = {
+        bind() { return stmt; },
+        async first() { return rows[0] ?? null; },
+        async all() { return { results: rows }; },
+        async run() { return { success: true }; },
+      };
+      return stmt;
+    },
+    async batch() { return []; },
+  };
+}
+
+function memberRow(o: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    bioguide_id: 'D000563', first: 'Richard', last: 'Durbin', official_name: 'Richard J. Durbin',
+    state: 'IL', chamber: 'Senate', district: null, party: 'D',
+    photo_url: null, website: null, search_key: 'richard durbin', year_entered: 1997, is_non_voting: 0,
+    socials_json: null, sponsored_json: '[]', cosponsored_json: '[]',
+    congress_update_date: '2026-05-01', last_freshness_check_at: '2026-05-01', ...o,
   };
 }
 
@@ -138,6 +165,36 @@ describe('AC-32.16 — /api/state-members/ route', () => {
     expect(r.status).toBe(404);
     const body = (await r.json()) as { error: string };
     expect(body.error).toBe('state_members_not_found');
+  });
+
+  it('AC-32.41 — KV miss + D1 members → assembles state record + caches to KV', async () => {
+    const store: Record<string, string> = {}; // KV empty
+    const d1 = makeMembersD1([
+      memberRow({ bioguide_id: 'D000563', last: 'Durbin', chamber: 'Senate' }),
+      memberRow({ bioguide_id: 'D000622', first: 'Tammy', last: 'Duckworth', chamber: 'Senate', search_key: 'tammy duckworth' }),
+      memberRow({ bioguide_id: 'J000309', first: 'Jonathan', last: 'Jackson', chamber: 'House', district: 1, search_key: 'jonathan jackson' }),
+    ]);
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/state-members/IL', { headers: ORIGIN }),
+      makeEnv(store, d1),
+      makeCache(),
+    );
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { stateCode: string; senators: unknown[]; house: unknown[] };
+    expect(body.stateCode).toBe('IL');
+    expect(body.senators).toHaveLength(2);
+    expect(body.house).toHaveLength(1);
+    // Write-through cached.
+    expect(store['state-members:v1:IL']).toBeTruthy();
+  });
+
+  it('AC-32.41 — 404 when KV and D1 are both empty', async () => {
+    const r = await handleFetch(
+      new Request('https://vote.cogs.it.com/api/state-members/WY', { headers: ORIGIN }),
+      makeEnv({}, makeMembersD1([])),
+      makeCache(),
+    );
+    expect(r.status).toBe(404);
   });
 
   it('AC-32.16 — 400 `invalid_state_code` on malformed stateCode', async () => {

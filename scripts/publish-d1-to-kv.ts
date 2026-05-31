@@ -25,6 +25,8 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { resolveRuntime } from './lib/runtime';
+import type { D1Like } from './lib/d1-client';
 
 // AC-52.51 — projection logic + types live in `proxy/services/kv-projector.ts`
 // so the read-through fallthrough on /api/bills (etc) and this manual warmer
@@ -59,6 +61,15 @@ export const projectBill = _projectBill;
 export const projectComments = _projectComments;
 export const projectSocialPosts = _projectSocialPosts;
 export const projectQuotes = _projectQuotes;
+
+import {
+  projectMemberProfile,
+  projectStateMembers,
+  projectNameIndex,
+  projectRosters,
+  type MemberRow,
+  type VoteCastRow,
+} from './lib/members/project';
 
 /* -------------------------------------------------------------------------- */
 /*                          D1 row + KV record types                          */
@@ -260,6 +271,11 @@ export interface PublishInputs {
   posts: D1SocialPost[];
   quotes: D1Quote[];
   audits: D1Audit[];
+  /** FR-32 AC-32.40 — durable member identity + casts, projected into
+   *  member:v1: / state-members:v1: / name-index:v1: / roll-call-roster:v1:.
+   *  Optional so existing callers/tests that don't pass them still work. */
+  members?: MemberRow[];
+  voteCasts?: VoteCastRow[];
   generatedAt: string;
 }
 
@@ -277,6 +293,25 @@ export function buildPublishPlan(inputs: PublishInputs): KvWritePlan {
   for (const b of bills) {
     const billVotes = votesByBill.get(b.bill_id) ?? [];
     writes.set(`bill:v1:${b.bill_id}`, canonicalJson(projectBill(b, billVotes, generatedAt)));
+    // roll-call:v1:{chamber}:{c}:{s}:{rc} — immutable per-roll-call metadata,
+    // read by /api/roll-calls + the rep bundle. Projected from D1 votes+bill.
+    for (const v of billVotes) {
+      const rollCallId = `${v.chamber.toLowerCase()}:${v.congress}:${v.session}:${v.roll_call}`;
+      writes.set(`roll-call:v1:${rollCallId}`, canonicalJson({
+        rollCallId,
+        chamber: v.chamber,
+        congress: v.congress,
+        session: v.session,
+        rollCall: v.roll_call,
+        date: v.date,
+        action: v.action ?? null,
+        weight: v.weight,
+        billId: b.bill_id,
+        billTitle: b.title,
+        generatedAt,
+        schemaVersion: 1,
+      }));
+    }
   }
 
   // Group comments by bill_id.
@@ -314,6 +349,26 @@ export function buildPublishPlan(inputs: PublishInputs): KvWritePlan {
   writes.set('audit-feed:v1:public', canonicalJson(projectAuditFeedPublic(audits, generatedAt)));
   writes.set('audit-feed:v1:full', canonicalJson(projectAuditFeedFull(audits, generatedAt)));
 
+  // FR-32 AC-32.40 — member-derived prefixes, projected from the durable
+  // `members` + `vote_casts` tables (no upstream fetch).
+  const members = inputs.members ?? [];
+  if (members.length > 0) {
+    for (const m of members) {
+      writes.set(`member:v1:${m.bioguide_id}`, canonicalJson(projectMemberProfile(m, generatedAt)));
+    }
+    for (const [state, rec] of projectStateMembers(members, generatedAt)) {
+      writes.set(`state-members:v1:${state}`, canonicalJson(rec));
+    }
+    const { shards, meta } = projectNameIndex(members, generatedAt);
+    for (const [letter, shard] of shards) {
+      writes.set(`name-index:v1:${letter}`, canonicalJson(shard));
+    }
+    writes.set('name-index:v1:meta', canonicalJson(meta));
+  }
+  for (const [key, rec] of projectRosters(inputs.voteCasts ?? [], generatedAt)) {
+    writes.set(key, canonicalJson(rec));
+  }
+
   return { writes };
 }
 
@@ -338,9 +393,6 @@ export function diffPlan(
 /*                              Wrangler shell-out                            */
 /* -------------------------------------------------------------------------- */
 
-interface WranglerD1JsonRow<T> {
-  results: T[];
-}
 
 function generateRunTraceId(): string {
   const hex = crypto.randomUUID().replace(/-/g, '').slice(0, 16);
@@ -353,18 +405,48 @@ function envFlag(env: string): string {
   return env === 'prod' ? '' : `--env ${env}`;
 }
 
-function d1Query<T>(env: string, sql: string): T[] {
-  const cmd = `npx wrangler d1 execute viw_researcher_${env} ${envFlag(env)} --remote --config ./wrangler.toml --json --command="${sql.replace(/"/g, '\\"')}"`;
-  const out = execSync(cmd, { encoding: 'utf8' });
-  // wrangler emits one or more JSON objects; pick the first object with `results`.
-  const parsed: unknown = JSON.parse(out);
-  const arr = Array.isArray(parsed) ? parsed : [parsed];
-  for (const item of arr) {
-    if (item && typeof item === 'object' && 'results' in item) {
-      return (item as WranglerD1JsonRow<T>).results ?? [];
+/**
+ * Read a table via the typed D1 REST client (no `wrangler` subprocess / stdout
+ * parsing). This replaced the prior execSync-based reader, which scraped CLI
+ * stdout and was capped by execSync's 1MB maxBuffer — a large `SELECT * FROM
+ * vote_casts` overflowed it and the failure was silently swallowed into an
+ * empty result, shipping a gutted KV (v4.1.2 incident). The REST client returns
+ * full result sets with structured errors. (KV writes still shell out to
+ * `wrangler kv bulk put` below — that path is unaffected by this read fix.)
+ */
+async function d1Query<T>(d1: D1Like, sql: string): Promise<T[]> {
+  const res = await d1.prepare(sql).all<T>();
+  return res.results ?? [];
+}
+
+/**
+ * True only for a "table does not exist" error (a pre-migration env where the
+ * table hasn't been created yet). Everything else — network failure, auth/5xx,
+ * malformed JSON — is a REAL failure that must not be swallowed. AC-32.44.
+ */
+export function isMissingTableError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  // SQLite/D1 phrasing: "no such table: members" / "table ... does not exist".
+  return /no such table/.test(msg) || /does not exist/.test(msg);
+}
+
+/**
+ * d1Query that tolerates ONLY a missing table (pre-migration env → []). Any
+ * other read error PROPAGATES so publish aborts loudly rather than projecting a
+ * hollow KV from an empty result set (AC-32.44).
+ */
+export async function safeD1Query<T>(d1: D1Like, sql: string): Promise<T[]> {
+  try {
+    return await d1Query<T>(d1, sql);
+  } catch (err) {
+    if (isMissingTableError(err)) {
+      console.warn(`[publish-d1] table missing, skipping (${sql}): ${err instanceof Error ? err.message : String(err)}`);
+      return [];
     }
+    // Real failure (network, auth, 5xx, parse) — do NOT swallow; a silent
+    // empty result would ship a gutted cache.
+    throw err;
   }
-  return [];
 }
 
 async function main() {
@@ -384,15 +466,23 @@ async function main() {
   console.log(`[publish-d1] env=${env} trace=${traceId}`);
 
   console.log('[publish-d1] reading D1…');
-  const bills = d1Query<D1Bill>(env, 'SELECT * FROM bills');
-  const votes = d1Query<D1Vote>(env, 'SELECT * FROM votes');
-  const comments = d1Query<D1Comment>(env, 'SELECT * FROM comments');
-  const posts = d1Query<D1SocialPost>(env, 'SELECT * FROM social_posts');
-  const quotes = d1Query<D1Quote>(env, 'SELECT * FROM quotes');
-  const audits = d1Query<D1Audit>(env, 'SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200');
+  // Typed REST D1 client (no wrangler subprocess / stdout scraping).
+  const { d1 } = resolveRuntime({ env });
+  const bills = await d1Query<D1Bill>(d1, 'SELECT * FROM bills');
+  const votes = await d1Query<D1Vote>(d1, 'SELECT * FROM votes');
+  const comments = await d1Query<D1Comment>(d1, 'SELECT * FROM comments');
+  const posts = await d1Query<D1SocialPost>(d1, 'SELECT * FROM social_posts');
+  const quotes = await d1Query<D1Quote>(d1, 'SELECT * FROM quotes');
+  const audits = await d1Query<D1Audit>(d1, 'SELECT * FROM audit_log ORDER BY created_at DESC LIMIT 200');
+  // FR-32 AC-32.40 — durable member identity + casts (tables may not exist on
+  // older envs pre-migration; tolerate a missing table as empty, fail loud on
+  // any other read error — AC-32.44).
+  const members = await safeD1Query<MemberRow>(d1, 'SELECT * FROM members');
+  const voteCasts = await safeD1Query<VoteCastRow>(d1, 'SELECT * FROM vote_casts');
   console.log(
     `[publish-d1] loaded bills=${bills.length} votes=${votes.length} ` +
-      `comments=${comments.length} posts=${posts.length} quotes=${quotes.length} audits=${audits.length}`,
+      `comments=${comments.length} posts=${posts.length} quotes=${quotes.length} audits=${audits.length} ` +
+      `members=${members.length} voteCasts=${voteCasts.length}`,
   );
 
   const plan = buildPublishPlan({
@@ -402,6 +492,8 @@ async function main() {
     posts,
     quotes,
     audits,
+    members,
+    voteCasts,
     generatedAt,
   });
   console.log(`[publish-d1] plan: ${plan.writes.size} keys`);

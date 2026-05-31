@@ -68,6 +68,24 @@ import { attach as attachKvPublish } from './kv/publish';
 attachKvPublish(kv);
 
 /* ------------------------------------------------------------------------ */
+/*                              rosters group                               */
+/* ------------------------------------------------------------------------ */
+
+const rosters = program.command('rosters').description('Roll-call member-cast ingest (FR-32)');
+
+import { attach as attachRostersSeed } from './rosters/seed';
+attachRostersSeed(rosters);
+
+/* ------------------------------------------------------------------------ */
+/*                              members group                               */
+/* ------------------------------------------------------------------------ */
+
+const members = program.command('members').description('Member identity ingest (FR-32)');
+
+import { attach as attachMembersSeed } from './members/seed';
+attachMembersSeed(members);
+
+/* ------------------------------------------------------------------------ */
 
 program.parseAsync(process.argv).catch((err) => {
   // eslint-disable-next-line no-console
