@@ -298,7 +298,7 @@ afterEach(() => {
 /* ====================================================================== */
 
 describe('PeopleTab — list view load', () => {
-  it('shows "Loading roster—¦" until the handles fetch resolves', async () => {
+  it('shows "Loading roster" until the handles fetch resolves', async () => {
     installFetch({ handles: [] });
     render(<PeopleTab />);
     expect(screen.getByText(/Loading roster/i)).toBeInTheDocument();
@@ -642,12 +642,16 @@ describe('PeopleTab — profile sections', () => {
     });
     render(<PeopleTab initialBioguide="B001" />);
     const toggle = await screen.findByRole('button', { name: /Social monitoring/i });
-    // Collapsed by default ←’ handle row NOT rendered—¦
+    // The FreshnessBadge only renders once the (async) handles fetch resolves —
+    // wait for the issue summary to appear before asserting on it. (Without this
+    // wait the assertion races the fetch: handles.length is briefly 0 and no
+    // badge is rendered — the CI flake on PeopleTab.test.tsx:650.)
+    await waitFor(() => expect(within(toggle).getByText(/\d+ failing/i)).toBeInTheDocument());
+    // Collapsed by default → the handle row is NOT rendered…
     expect(screen.queryByText('@jane.bsky.social')).not.toBeInTheDocument();
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    // —¦but the issue summary (failing / never-polled counts) is still on the
-    // header so monitoring problems stay visible while collapsed.
-    expect(within(toggle).getByText(/\d+ failing/i)).toBeInTheDocument();
+    // …but the issue summary (failing / never-polled counts) stays on the
+    // header so monitoring problems remain visible while collapsed.
     expect(within(toggle).getByText(/\d+ never polled/i)).toBeInTheDocument();
   });
 
