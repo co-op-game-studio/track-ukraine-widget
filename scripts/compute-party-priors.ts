@@ -47,6 +47,7 @@ import {
   type ScoreInput,
 } from '../src/services/ukraineScore';
 import type { Valence } from '../src/services/valence';
+import { rosterKey } from './lib/roster-key';
 
 /* ─── CLI ───────────────────────────────────────────────────────────────── */
 
@@ -135,10 +136,8 @@ function deriveValence(
   return (isYea === isPro) ? 'voted-pro' : 'voted-anti';
 }
 
-/** Roll-call key as produced by build-vote-rosters.ts — must match exactly. */
-function rosterKey(chamber: 'House' | 'Senate', c: number, s: number, rc: number): string {
-  return `${chamber === 'House' ? 'h' : 's'}/${c}/${s}/${rc}`;
-}
+/* Roll-call key shared with the producer (build-vote-rosters.ts) via
+ * scripts/lib/roster-key.ts so the two cannot drift — see AC-32.45. */
 
 /* ─── Main ──────────────────────────────────────────────────────────────── */
 
