@@ -29,6 +29,7 @@
  */
 import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { DOMParser } from 'linkedom';
+import { rosterKey } from './lib/roster-key';
 
 const KEY: string =
   process.env.CONGRESS_API_KEY ||
@@ -175,7 +176,7 @@ async function main(): Promise<void> {
   const workQueue: CuratedVote[] = [];
   for (const bill of bills) {
     for (const v of bill.votes) {
-      const key = `${v.chamber}|${v.congress}|${v.session}|${v.rollCall}`;
+      const key = rosterKey(v.chamber, v.congress, v.session, v.rollCall);
       if (seen.has(key)) continue;
       seen.add(key);
       workQueue.push(v);
@@ -202,7 +203,7 @@ async function main(): Promise<void> {
   let empty = 0;
   let failed = 0;
   for (const r of results) {
-    const key = `${r.vote.chamber}|${r.vote.congress}|${r.vote.session}|${r.vote.rollCall}`;
+    const key = rosterKey(r.vote.chamber, r.vote.congress, r.vote.session, r.vote.rollCall);
     if (r.error) {
       failed++;
       console.warn(`  FAIL ${key}: ${r.error}`);
