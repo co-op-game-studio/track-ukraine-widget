@@ -55,10 +55,9 @@ export function GettingStarted() {
 
       <H2>Who to contact</H2>
       <P>
-        {/* TODO(v4.3.0): replace with Kody's contact details (name / email /
-            preferred channel) once provided. Punchlist item "Add my details
-            to the who to contact." */}
-        For access requests, data questions, or bugs, reach out to the project lead.
+        For access requests, data questions, or bugs, reach out to{' '}
+        <strong>kaz.i.em</strong> on Discord, or post in the{' '}
+        <strong>#code-work</strong> channel on Discord.
         Every change you make is recorded with your account and a trace ID, so we can
         look up exactly what changed and when.
       </P>
