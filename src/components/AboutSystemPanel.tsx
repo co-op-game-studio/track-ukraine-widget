@@ -63,7 +63,7 @@ const WEIGHT_ROWS: Array<{ kind: string; weight: string; note: string }> = [
   { kind: 'Resolving differences / concur', weight: '0.90', note: 'Vote on the final cross-chamber compromise text.' },
   { kind: 'Cloture',                        weight: '0.45', note: 'Vote to end debate and allow passage (Senate 60-vote threshold).' },
   { kind: 'Motion to proceed',              weight: '0.30', note: 'Vote to start debate — directional but not dispositive.' },
-  { kind: 'Motion to recommit',             weight: '0.30', note: 'Directional procedural vote; direction may be inverted (Aye = against bill).' },
+  { kind: 'Motion to recommit',             weight: '0.30', note: 'A Yea here tries to kill a pro-Ukraine bill, so this vote is scored anti-Ukraine.' },
   { kind: 'Waive budget point of order',    weight: '0.30', note: 'Directional procedural on budget rules.' },
   { kind: 'Motion to table',                weight: '0.00', note: 'EXCLUDED — ambiguous direction (tabling can block either side).' },
   { kind: 'Motion to reconsider',           weight: '0.00', note: 'EXCLUDED — ambiguous direction.' },

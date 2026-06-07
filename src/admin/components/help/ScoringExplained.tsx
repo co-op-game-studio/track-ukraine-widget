@@ -33,33 +33,35 @@ export function ScoringExplained() {
 
       <H3>1. Roll-call votes</H3>
       <P>
-        Each vote on a Ukraine-tagged roll call contributes:
+        Each vote carries its OWN direction — <Code>pro</Code>, <Code>anti</Code>, or{' '}
+        <Code>neutral</Code> — meaning "a Yea on this vote is pro / anti / neutral toward Ukraine."
+        Scoring reads that directly; there is no "bill direction × multiplier" step.
       </P>
       <Ul>
-        <Li><strong>Yea</strong> on a pro-Ukraine bill → positive contribution.</Li>
-        <Li><strong>Nay</strong> on a pro-Ukraine bill → negative contribution.</Li>
-        <Li><strong>Yea</strong> on an anti-Ukraine bill → negative contribution (direction is inverted).</Li>
-        <Li><strong>Nay</strong> on an anti-Ukraine bill → positive contribution.</Li>
-        <Li><strong>Present / Not voting</strong> → zero contribution (abstention, no signal).</Li>
+        <Li><strong>Yea</strong> on a <Code>pro</Code> vote → positive contribution.</Li>
+        <Li><strong>Nay</strong> on a <Code>pro</Code> vote → negative contribution.</Li>
+        <Li><strong>Yea</strong> on an <Code>anti</Code> vote → negative contribution.</Li>
+        <Li><strong>Nay</strong> on an <Code>anti</Code> vote → positive contribution.</Li>
+        <Li><strong>Neutral votes, Present, or Not voting</strong> → zero contribution.</Li>
       </Ul>
       <P>
-        The magnitude of the contribution is the <strong>bill weight</strong> × the <strong>vote
-        direction multiplier</strong>. Most votes are multiplier <Code>+1</Code>; procedural votes
-        that invert the signal (motions to recommit) use <Code>−1</Code>.
+        The magnitude of the contribution is the vote's <strong>weight</strong>. A procedural vote
+        like a motion to recommit (where a Yea tries to kill a pro-Ukraine bill) is simply marked{' '}
+        <Code>anti</Code> — no sign-flipping to reason about.
       </P>
 
       <H3>2. Bill sponsorships and cosponsorships</H3>
       <Ul>
         <Li><strong>Primary sponsor</strong> of a pro-Ukraine bill → full bill-weight contribution.</Li>
         <Li><strong>Cosponsor</strong> of a pro-Ukraine bill → 0.5 × bill-weight contribution.</Li>
-        <Li>Same logic inverted for anti-Ukraine bills.</Li>
+        <Li>For an anti-Ukraine bill, sponsoring/cosponsoring contributes negatively instead.</Li>
       </Ul>
 
       <H3>3. Curated quotes</H3>
       <P>
         Each saved quote contributes <strong>direction × weight</strong> to the score. A
-        pro-Ukraine quote with weight 1.0 contributes the same as a yes vote on a weight-1.0 bill.
-        A dismissively anti-Ukraine floor speech scored at weight 2.0 and direction −1 contributes
+        pro-Ukraine quote with weight 1.0 contributes the same as a Yea vote on a weight-1.0 bill.
+        A dismissively anti-Ukraine floor speech scored anti-Ukraine at weight 2.0 contributes
         −2.0 — equivalent to two Nay votes on a standard bill.
       </P>
 
@@ -73,8 +75,8 @@ export function ScoringExplained() {
         <Li>Voting <strong>Yea</strong> on a motion to recommit a pro-Ukraine bill.</Li>
       </Ul>
       <P>
-        These are captured by setting the <strong>vote direction multiplier</strong> to <Code>−1</Code>
-        on the relevant roll-call record. The system then scores a Yea as anti-Ukraine.
+        These are captured simply by setting the vote's <strong>direction</strong> to{' '}
+        <Code>anti</Code> on the relevant roll call, so a Yea scores as anti-Ukraine.
       </P>
 
       <H2>Normalization</H2>

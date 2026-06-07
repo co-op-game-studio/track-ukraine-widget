@@ -58,20 +58,27 @@ export function BillsAndVotes() {
         <Li><strong>Roll call ID</strong> — the Congress.gov identifier (<Code>house-118-456</Code> or <Code>senate-118-123</Code>).</Li>
         <Li><strong>Vote date</strong> — when the vote was held.</Li>
         <Li><strong>Vote type</strong> — e.g. <Code>passage</Code>, <Code>cloture</Code>, <Code>amendment</Code>, <Code>motion-to-recommit</Code>.</Li>
-        <Li><strong>Direction multiplier</strong> — <Code>+1</Code> (normal), <Code>−1</Code> (inverted — a Yea vote is actually anti-Ukraine, e.g. a motion to recommit), or <Code>0</Code> (ambiguous; vote contributes nothing to score).</Li>
+        <Li><strong>Direction</strong> — each vote states its OWN direction: <Code>pro</Code> (a Yea on this vote counts as pro-Ukraine), <Code>anti</Code> (a Yea counts as anti-Ukraine), or <Code>neutral</Code> (the vote doesn't count toward the score). You set this directly per vote — there is no "multiply by the bill" step.</Li>
         <Li><strong>Details</strong> — optional context shown in the embed.</Li>
       </Ul>
 
-      <H3>Vote type and direction multiplier</H3>
+      <H3>Setting a vote's direction</H3>
       <P>
-        Most votes are straightforward: Yea = pro-Ukraine (if the bill is pro-Ukraine). But some
-        procedural votes are inverted. Use the direction multiplier to capture this:
+        Read each vote on its own terms: "if a member votes Yea here, is that good or bad for
+        Ukraine?" Set the direction to match. The bill's own direction is a separate field and does
+        not change how a vote is scored.
       </P>
       <Ul>
-        <Li><strong>Passage, cloture (invoke), motion-to-proceed</strong> — multiplier <Code>+1</Code>. A Yea advances the bill.</Li>
-        <Li><strong>Motion to recommit, tabling</strong> — multiplier <Code>−1</Code>. A Yea on a motion to recommit a pro-Ukraine bill kills it; the scorer inverts the direction.</Li>
-        <Li><strong>Truly ambiguous procedural votes</strong> — multiplier <Code>0</Code>. The vote doesn't cleanly signal Ukraine stance; use <Code>0</Code> to neutralize it from scoring.</Li>
+        <Li><strong>Passage, cloture (invoke), motion-to-proceed on a pro-Ukraine bill</strong> — <Code>pro</Code>. A Yea advances the bill.</Li>
+        <Li><strong>Motion to recommit a pro-Ukraine bill</strong> — <Code>anti</Code>. A Yea here tries to kill the bill, so a Yea is anti-Ukraine. (No inversion — you simply mark the vote <Code>anti</Code>.)</Li>
+        <Li><strong>A vote on an anti-Ukraine measure</strong> — <Code>anti</Code>. A Yea supports the anti-Ukraine measure.</Li>
+        <Li><strong>Truly ambiguous procedural votes</strong> — <Code>neutral</Code>. The vote doesn't cleanly signal a Ukraine stance, so it contributes nothing.</Li>
       </Ul>
+      <Callout kind="tip">
+        Use <strong>Admin › Vote review</strong> to walk through every vote and confirm its
+        direction. Votes that were historically scored by an "inversion" rule are flagged there for
+        a closer look.
+      </Callout>
 
       <H2>Cosponsors</H2>
       <P>

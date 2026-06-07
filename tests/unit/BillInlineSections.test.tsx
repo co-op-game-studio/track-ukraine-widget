@@ -277,35 +277,33 @@ describe('BillCommentsSection — Save flash (AC-52.68)', () => {
 /*                       AC-52.24 — bill direction header                     */
 /* -------------------------------------------------------------------------- */
 
-describe('BillVotesSection — bill direction context (AC-52.24)', () => {
-  it('pro-ukraine: renders strip explaining +1 = for Ukraine, -1 = against', async () => {
+describe('BillVotesSection — bill direction context (AC-63.7, was AC-52.24)', () => {
+  it('pro-ukraine: strip names the bill direction + per-vote model, no inversion language', async () => {
     installFetch({ votes: [] });
     render(<BillVotesSection billId="117-HR-2471" billDirection="pro-ukraine" />);
     const strip = await screen.findByTestId('bill-direction-strip');
     expect(strip.textContent).toMatch(/pro-ukraine/i);
-    expect(strip.textContent).toMatch(/\+1/);
-    expect(strip.textContent).toMatch(/for Ukraine/i);
-    expect(strip.textContent).toMatch(/−1|-1/);
-    expect(strip.textContent).toMatch(/against/i);
+    // FR-63: points to per-vote direction + Vote review, not +1/−1 inversion.
+    expect(strip.textContent).toMatch(/own direction/i);
+    expect(strip.textContent).toMatch(/Vote review/i);
+    expect(strip.textContent).not.toMatch(/inverted|multiplier/i);
   });
 
-  it('anti-ukraine: signs swapped (+1 = against, -1 = for)', async () => {
+  it('anti-ukraine: same per-vote framing (drives sponsorship scoring)', async () => {
     installFetch({ votes: [] });
     render(<BillVotesSection billId="118-HR-9999" billDirection="anti-ukraine" />);
     const strip = await screen.findByTestId('bill-direction-strip');
     expect(strip.textContent).toMatch(/anti-ukraine/i);
-    // +1 voting along an anti-ukraine bill = voting AGAINST Ukraine
-    expect(strip.textContent).toMatch(/\+1[^−\-]+against/i);
-    expect(strip.textContent).toMatch(/(−1|-1)[^+]+for/i);
+    expect(strip.textContent).toMatch(/sponsorship/i);
+    expect(strip.textContent).not.toMatch(/inverted|multiplier/i);
   });
 
-  it('ambiguous: no positional gloss', async () => {
+  it('ambiguous: no per-vote gloss', async () => {
     installFetch({ votes: [] });
     render(<BillVotesSection billId="118-HR-1" billDirection="ambiguous" />);
     const strip = await screen.findByTestId('bill-direction-strip');
     expect(strip.textContent).toMatch(/ambiguous/i);
-    expect(strip.textContent).not.toMatch(/for Ukraine/i);
-    expect(strip.textContent).not.toMatch(/against Ukraine/i);
+    expect(strip.textContent).not.toMatch(/own direction/i);
   });
 });
 
