@@ -11,8 +11,9 @@ import { PollStatusView } from './PollStatusView';
 import { AppConfigView } from './AppConfigView';
 import { CacheView } from './CacheView';
 import { DataFreshnessView } from './DataFreshnessView';
+import { ApiUsageView } from './ApiUsageView';
 
-export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config';
+export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config' | 'api-usage';
 
 interface ViewSpec {
   id: SettingsView;
@@ -29,6 +30,7 @@ const VIEWS: ViewSpec[] = [
   { id: 'keywords',    label: 'Keywords',     help: 'Match keywords for the social sync', editable: true },
   { id: 'tags',        label: 'Tags',         help: 'Color-coded labels applied to quotes', editable: true },
   { id: 'poll-status', label: 'Sync status',  help: 'Per-handle health (read-only)', editable: false },
+  { id: 'api-usage',   label: 'API quota',    help: 'Estimated upstream API headroom (read-only)', editable: false },
   { id: 'freshness',   label: 'Data freshness', help: 'Bill corpus state (read-only)', editable: false },
   { id: 'config',      label: 'App config',   help: 'Deployment-time settings (read-only)', editable: false },
 ];
@@ -63,6 +65,7 @@ export function SettingsTab() {
         {view === 'tags'        && <TagsView />}
         {view === 'cache'       && <CacheView />}
         {view === 'poll-status' && <ReadOnlyWrap reason="Sync status is read-only — failures persist for engineering visibility."><PollStatusView /></ReadOnlyWrap>}
+        {view === 'api-usage'   && <ReadOnlyWrap reason="Estimated from recent sync + seed activity. Not an exact quota counter."><ApiUsageView /></ReadOnlyWrap>}
         {view === 'freshness'   && <ReadOnlyWrap reason="Bill corpus state is updated by the `lw bills backfill` CLI in CI. This panel is read-only."><DataFreshnessView /></ReadOnlyWrap>}
         {view === 'config'      && <ReadOnlyWrap reason="Set per-env in wrangler.toml. Edit there and redeploy to change."><AppConfigView /></ReadOnlyWrap>}
       </div>

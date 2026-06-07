@@ -248,6 +248,21 @@ class FakeStmt implements D1PreparedStatementLike {
         .slice(0, limit);
       return { success: true, results: rows };
     }
+    // FR-62 api-usage: SELECT COUNT(*) AS n FROM <table> WHERE ...
+    const countQ = q.match(/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM\s+(\w+)/i);
+    if (countQ) {
+      const table = countQ[1]!;
+      // We don't replicate the WHERE filters here — the api-usage tests only
+      // assert shape with empty tables, so a count of the table length is fine.
+      const n = (this.d1.tables[table] ?? []).length;
+      return { success: true, results: [{ n }] };
+    }
+    // FR-62 api-usage: last rate-limit row from mocs_social_handles … LIMIT 1
+    const rateLimitQ = q.match(/FROM\s+mocs_social_handles[\s\S]*last_poll_status\s*=\s*'error'/i);
+    if (rateLimitQ) {
+      return { success: true, results: [] };
+    }
+
     const list = q.match(/^SELECT\s+\*\s+FROM\s+(\w+)/i);
     if (list) return { success: true, results: this.d1.tables[list[1]!] ?? [] };
     throw new Error(`unhandled: ${q}`);
@@ -316,6 +331,8 @@ interface MakeEnvOpts {
   pollConcurrency?: string;
   socialPollCron?: string;
   adminEmails?: string;
+  youtubeKey?: boolean;
+  congressKey?: boolean;
 }
 
 function makeEnv(d1: FakeD1, kv: FakeKV, opts: MakeEnvOpts = {}): ProxyEnv {
@@ -328,6 +345,8 @@ function makeEnv(d1: FakeD1, kv: FakeKV, opts: MakeEnvOpts = {}): ProxyEnv {
   if (opts.pollConcurrency !== undefined) env['POLL_CONCURRENCY'] = opts.pollConcurrency;
   if (opts.socialPollCron !== undefined) env['SOCIAL_POLL_CRON'] = opts.socialPollCron;
   if (opts.adminEmails !== undefined) env['ADMIN_EMAILS'] = opts.adminEmails;
+  if (opts.youtubeKey) env['YOUTUBE_API_KEY'] = 'yt-key';
+  if (opts.congressKey) env['CONGRESS_API_KEY'] = 'cg-key';
   return env as unknown as ProxyEnv;
 }
 
@@ -444,6 +463,47 @@ describe('api-admin: GET /config (env-derived runtime knobs)', () => {
     const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: '  ALICE@Example.com ,  bob@example.com ' });
     const r = await call(env, 'GET', 'config');
     expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                          api-usage (FR-62)                                 */
+/* -------------------------------------------------------------------------- */
+
+describe('api-admin: GET /api-usage (FR-62 quota gauge)', () => {
+  interface UsageResp {
+    asOf: string;
+    upstreams: Array<{
+      upstream: string;
+      configured: boolean;
+      dailyLimit: number | null;
+      estimate: boolean;
+    }>;
+  }
+
+  it('AC-62.1: returns youtube + congress upstreams, each estimate:true', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { youtubeKey: true, congressKey: true });
+    const r = await call(env, 'GET', 'api-usage');
+    expect(r.status).toBe(200);
+    const j = r.json as UsageResp;
+    expect(j.upstreams.map((u) => u.upstream)).toEqual(['youtube', 'congress']);
+    expect(j.upstreams.every((u) => u.estimate === true)).toBe(true);
+  });
+
+  it('AC-62.6: unconfigured keys → configured:false, dailyLimit:null', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV()); // no keys
+    const r = await call(env, 'GET', 'api-usage');
+    const j = r.json as UsageResp;
+    for (const u of j.upstreams) {
+      expect(u.configured).toBe(false);
+      expect(u.dailyLimit).toBeNull();
+    }
+  });
+
+  it('rejects non-GET methods', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { youtubeKey: true });
+    const r = await call(env, 'POST', 'api-usage', {});
+    expect(r.status).toBe(400);
   });
 });
 

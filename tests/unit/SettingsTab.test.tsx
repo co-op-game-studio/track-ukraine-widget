@@ -96,6 +96,7 @@ describe('SettingsTab', () => {
       ['Keywords', '/settings/keywords'],
       ['Tags', '/settings/tags'],
       ['Sync status', '/settings/poll-status'],
+      ['API quota', '/settings/api-usage'],
       ['App config', '/settings/config'],
     ];
     for (const [label, href] of expected) {

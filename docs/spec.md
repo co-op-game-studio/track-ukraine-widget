@@ -1718,6 +1718,21 @@ This deep link is **additive** and harness-only in spirit: it does not change th
 - AC-61.5: Deep-linking directly to a config route (e.g. `#/settings/cache`) SHALL still render for an admin. For a non-admin the route SHALL still resolve (no hard 404) but is simply unlinked from their menu — this matches the cosmetic-only posture (no client-side route guard that could be mistaken for enforcement).
 - AC-61.6: Tests SHALL cover: `isAdmin` true/false/loading toggles the Admin menu group; `ADMIN_EMAILS` empty → everyone admin; email match is case-insensitive and whitespace-trimmed; the config endpoint never rejects based on the list.
 
+### FR-62: Upstream API quota gauge (NEW v4.3.0)
+
+**Problem.** Sync (social) and bill seeding consume metered upstream APIs (YouTube Data API: 10,000 units/day; Congress.gov: a per-key request budget). When a job hits the cap it fails with a rate-limit error, but operators have no at-a-glance view of *how much headroom remains* before that happens. We want a read-only "API quota" panel under the Admin/Config group (admin-gated per FR-61) showing known limits, an **estimated** 24-hour burn, and the most recent rate-limit event.
+
+**Honesty constraint.** The Worker does NOT maintain a precise per-call quota counter (that would require instrumenting every upstream call path and a durable counter). The panel therefore presents **published limits** (constants) and an **estimate** of recent usage derived from data we already persist — clearly labeled as an estimate, never as an exact remaining-quota number. This avoids implying precision we don't have.
+
+**Acceptance criteria:**
+- AC-62.1: A new endpoint `GET /api/admin/api-usage` SHALL return, for each tracked upstream (`youtube`, `congress`), an object: `{ upstream, dailyLimit: number | null, limitUnit: 'units' | 'requests', estimatedUsed24h: number, estimate: true, lastRateLimitAt: string | null, lastRateLimitKind: 'quota' | 'transient' | null }`. `dailyLimit` is `null` when the upstream key is not configured (the upstream is then reported as `configured: false`).
+- AC-62.2: `estimatedUsed24h` for `youtube` SHALL be computed from the count of YouTube handle sync attempts in the last 24h (from `handle_status.last_poll_attempted_at` where `platform = 'youtube'`) multiplied by the per-sync unit-cost model (uploads-list = 1 unit + a configurable search-fallback factor). The value is an estimate (AC-62 honesty constraint); the response SHALL carry `estimate: true`.
+- AC-62.3: `estimatedUsed24h` for `congress` SHALL be computed from the count of `import_bill` audit_log rows in the last 24h (each bill import makes a bounded number of Congress.gov requests; the estimate multiplies the count by a fixed requests-per-import factor).
+- AC-62.4: `lastRateLimitAt` / `lastRateLimitKind` SHALL be sourced from the most recent persisted rate-limit signal (handle_status error rows whose error matches the rate-limit pattern, or an audit/event row), or `null` when none in the lookback window.
+- AC-62.5: The endpoint is admin-API-gated like every `/api/admin/*` route (FR-50). It is surfaced in the SPA under the Admin/Config menu group as **"API quota"** (FR-61 AC-61.3 — admin-only). The view SHALL render each upstream as a labeled gauge with the limit, the estimated used (marked "est."), and the last rate-limit time if any.
+- AC-62.6: When an upstream key is unconfigured, the panel SHALL show "not configured" for that upstream rather than a misleading zero-usage gauge.
+- AC-62.7: Tests SHALL cover: the endpoint shape; youtube/congress estimates from seeded handle_status + audit rows; the unconfigured-key path (`dailyLimit: null`, `configured: false`); and that the response always carries `estimate: true`.
+
 ### FR-9: Web Component Embedding
 The system SHALL be buildable as a self-contained Web Component using Shadow DOM for style isolation, distributable as a single IIFE JavaScript bundle.
 

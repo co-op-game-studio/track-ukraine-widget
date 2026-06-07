@@ -20,6 +20,7 @@ import { logEvent } from '../observability/log';
 import * as store from '../d1/admin-store';
 import { handleIngest } from './api-admin-ingest';
 import { getSocialPollStalenessMin } from '../services/cron-interval';
+import { buildApiUsageReport } from '../services/api-usage';
 import * as tagsStore from '../d1/tags-store';
 import { KV_PREFIXES } from '../kv/prefixes';
 
@@ -114,6 +115,7 @@ export async function handleAdmin(
     return await handleCache(id, action, request, env, adminCtx);
   }
 
+  if (resource === 'api-usage') return await handleApiUsage(request, env, adminCtx);
   if (resource === 'audit') return await handleAudit(request, env, adminCtx);
   if (resource === 'import-bill') return await handleImportBill(request, env, adminCtx);
   if (resource === 'data-freshness') return await handleDataFreshness(request, env, adminCtx);
@@ -1057,6 +1059,31 @@ async function handleImportBill(
 // handleBackfillBills + /api/admin/backfill-bills route removed in v4.1.0.
 // Ingest moved to scripts/bills/seed.ts (`lw bills seed`) running in CI.
 // See docs/spec.md FR-59 + memory feedback_seeding_is_buildops_not_runtime.
+
+/* -------------------------------------------------------------------------- */
+/*                         API quota gauge (FR-62)                             */
+/* -------------------------------------------------------------------------- */
+
+/** GET /api/admin/api-usage — honest estimate of upstream API quota burn.
+ *  See FR-62 + proxy/services/api-usage.ts. Read-only; admin-API-gated. */
+async function handleApiUsage(
+  request: Request,
+  env: ProxyEnv,
+  ctx: AdminCtx,
+): Promise<DispatchResult> {
+  if (request.method !== 'GET') {
+    return badRequest(ctx, 'method_not_allowed', 'GET only');
+  }
+  const report = await buildApiUsageReport(
+    env.D1_VOTER_INFO!,
+    {
+      youtube: Boolean(env.YOUTUBE_API_KEY),
+      congress: Boolean(env.CONGRESS_API_KEY),
+    },
+    Date.now(),
+  );
+  return ok(ctx, report);
+}
 
 /* -------------------------------------------------------------------------- */
 /*                         Data freshness (AC-59.8)                            */
