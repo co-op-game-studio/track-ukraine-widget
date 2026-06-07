@@ -58,9 +58,11 @@ function isLinkActive(pathname: string, to: string): boolean {
 interface MenuColumn {
   heading: string;
   links: MenuLink[];
+  /** FR-61 AC-61.3 — rendered only when the actor is an admin (isAdmin hint). */
+  adminOnly?: boolean;
 }
 
-const COLUMNS: MenuColumn[] = [
+export const COLUMNS: MenuColumn[] = [
   {
     heading: 'Workspace',
     links: [
@@ -82,11 +84,13 @@ const COLUMNS: MenuColumn[] = [
   },
   {
     heading: 'Admin',
+    adminOnly: true,
     links: [
       { label: 'Keywords',       to: '/settings/keywords' },
       { label: 'Tags',           to: '/settings/tags' },
       { label: 'Sync status',    to: '/settings/poll-status' },
       { label: 'Data freshness', to: '/settings/freshness' },
+      { label: 'Cache',          to: '/settings/cache' },
       { label: 'App config',     to: '/settings/config' },
     ],
   },
@@ -102,7 +106,16 @@ const COLUMNS: MenuColumn[] = [
   },
 ];
 
-function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElement {
+/**
+ * FR-61 AC-61.3 — columns visible for the current admin state. `adminOnly`
+ * columns appear only when `isAdmin === true`; while the hint is still loading
+ * (`null`) they stay hidden so researchers don't see a flash of operator nav.
+ */
+export function visibleColumns(isAdmin: boolean | null): MenuColumn[] {
+  return COLUMNS.filter((c) => !c.adminOnly || isAdmin === true);
+}
+
+function Megamenu({ onNavigate, isAdmin }: { onNavigate: () => void; isAdmin: boolean | null }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const { pathname } = useLocation();
@@ -142,7 +155,7 @@ function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElemen
       </button>
       {open && (
         <div style={menuStyles.panel} role="menu">
-          {COLUMNS.map((col) => (
+          {visibleColumns(isAdmin).map((col) => (
             <div key={col.heading} style={menuStyles.column}>
               <div style={menuStyles.columnHeading}>{col.heading}</div>
               {col.links.map((link) => {
@@ -177,6 +190,8 @@ export function App() {
   const [whoami, setWhoami] = useState<string | null>(null);
   const [whoamiError, setWhoamiError] = useState<string | null>(null);
   const [quotePrefill, setQuotePrefill] = useState<QuotePrefill | null>(null);
+  // FR-61 — null = still loading (Admin nav hidden until resolved).
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const navigate = useNavigate();
 
   useTheme();
@@ -189,6 +204,15 @@ export function App() {
       });
   }, []);
 
+  useEffect(() => {
+    // FR-61 AC-61.1 — fetch the admin hint. On any error, leave Admin hidden
+    // (treat as non-admin); the config endpoint never rejects, so an error here
+    // means a transport problem, and hiding operator nav is the safe default.
+    get<{ isAdmin?: boolean }>('/api/admin/config')
+      .then((r) => setIsAdmin(r.isAdmin === true))
+      .catch(() => setIsAdmin(false));
+  }, []);
+
   function curateAsQuote(data: QuotePrefill) {
     setQuotePrefill(data);
     navigate('/curation/add');
@@ -199,7 +223,7 @@ export function App() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <strong style={styles.title}>Track Ukraine — Admin</strong>
-          <Megamenu onNavigate={() => {}} />
+          <Megamenu onNavigate={() => {}} isAdmin={isAdmin} />
           {/* Quick-access copy of the Getting Started link, next to the menu, so
               new researchers always have a visible doorway to the docs without
               opening the megamenu. */}

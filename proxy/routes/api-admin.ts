@@ -177,7 +177,28 @@ function handleConfig(env: ProxyEnv, ctx: AdminCtx): DispatchResult {
     pollConcurrency: concurrency,
     socialPollCron: cron,
     socialPollStalenessMin: stalenessMin,
+    // FR-61 AC-61.1 — UI-only "is this actor an admin?" hint. NOT used to
+    // authorize anything (ADR-020). Empty/unset ADMIN_EMAILS ⇒ fail-open (true).
+    isAdmin: isAdminEmail(ctx.email, env.ADMIN_EMAILS),
   });
+}
+
+/**
+ * FR-61 AC-61.1/61.2 — cosmetic admin hint. Returns true when `email` is a
+ * case-insensitive, whitespace-trimmed member of the comma-separated
+ * `adminEmails` list, OR when that list is empty/unset (fail-open: with no
+ * list configured, everyone is an admin, preserving pre-v4.3.0 behavior).
+ *
+ * This is a presentation hint only. The Worker NEVER rejects a request based on
+ * it — CF Access is the authorization boundary (FR-50, ADR-020).
+ */
+function isAdminEmail(email: string, adminEmails: string | undefined): boolean {
+  const list = (adminEmails ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+  if (list.length === 0) return true; // fail-open
+  return list.includes(email.trim().toLowerCase());
 }
 
 /** Parse a string env var as a positive integer, falling back when missing/bad. */

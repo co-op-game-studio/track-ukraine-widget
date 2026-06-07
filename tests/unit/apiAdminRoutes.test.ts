@@ -315,6 +315,7 @@ class FakeKV implements KVLike {
 interface MakeEnvOpts {
   pollConcurrency?: string;
   socialPollCron?: string;
+  adminEmails?: string;
 }
 
 function makeEnv(d1: FakeD1, kv: FakeKV, opts: MakeEnvOpts = {}): ProxyEnv {
@@ -326,6 +327,7 @@ function makeEnv(d1: FakeD1, kv: FakeKV, opts: MakeEnvOpts = {}): ProxyEnv {
   };
   if (opts.pollConcurrency !== undefined) env['POLL_CONCURRENCY'] = opts.pollConcurrency;
   if (opts.socialPollCron !== undefined) env['SOCIAL_POLL_CRON'] = opts.socialPollCron;
+  if (opts.adminEmails !== undefined) env['ADMIN_EMAILS'] = opts.adminEmails;
   return env as unknown as ProxyEnv;
 }
 
@@ -408,6 +410,40 @@ describe('api-admin: GET /config (env-derived runtime knobs)', () => {
     const r = await call(env, 'GET', 'config');
     // 24*60 - 5 = 1435
     expect((r.json as { socialPollStalenessMin: number }).socialPollStalenessMin).toBe(1435);
+  });
+
+  // FR-61 AC-61.1/61.2 — isAdmin hint derived from ADMIN_EMAILS (UI gating only).
+  // The test actor is alice@example.com (see mintJwt at top of file).
+  it('AC-61.1: isAdmin=true when the actor email is in ADMIN_EMAILS', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: 'bob@example.com, alice@example.com' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+
+  it('AC-61.1: isAdmin=false when the actor email is NOT in a non-empty ADMIN_EMAILS', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: 'bob@example.com,carol@example.com' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(false);
+    // The endpoint must still succeed — the list never rejects a request.
+    expect(r.status).toBe(200);
+  });
+
+  it('AC-61.1: isAdmin=true (fail-open) when ADMIN_EMAILS is unset', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+
+  it('AC-61.2: isAdmin=true (fail-open) when ADMIN_EMAILS is empty/whitespace', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: '   ' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+
+  it('AC-61.2: email match is case-insensitive and whitespace-trimmed', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: '  ALICE@Example.com ,  bob@example.com ' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
   });
 });
 

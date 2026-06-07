@@ -114,6 +114,14 @@ export interface ProxyEnv {
    */
   SOCIAL_POLL_CRON?: string;
   /**
+   * Comma-separated list of admin emails (FR-61, ADR-020). UI-only hint:
+   * `/api/admin/config` returns `isAdmin` true when the verified actor email is
+   * in this list (case-insensitive, trimmed), or when the list is empty/unset
+   * (fail-open). NEVER used to authorize/reject a request — CF Access is the
+   * boundary. Set per-env in `wrangler.toml` `[vars]`.
+   */
+  ADMIN_EMAILS?: string;
+  /**
    * Cloudflare Access team subdomain (e.g. `cogs` for `cogs.cloudflareaccess.com`).
    * Used to build the JWKS URL and the expected `iss` claim during JWT
    * verification on admin routes. Per-env config in wrangler.toml.
