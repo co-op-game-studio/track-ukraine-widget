@@ -493,9 +493,9 @@ export async function importBillCore(
           .prepare(
             `INSERT INTO votes (
                id, bill_id, chamber, congress, session, roll_call, date,
-               url, action, action_date, weight, direction_multiplier, kind,
+               url, action, action_date, weight, direction, direction_multiplier, kind,
                weight_reason, congress_update_date, created_at, updated_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
           )
           .bind(
             newUlid(),
@@ -509,6 +509,9 @@ export async function importBillCore(
             rc.action,
             rc.action_date,
             1,
+            // FR-63 — freshly imported, not-yet-classified votes are 'neutral'
+            // (unreviewed) until a researcher reviews them via the review surface.
+            'neutral',
             1,
             'unknown',
             upstreamVoteUpdate,

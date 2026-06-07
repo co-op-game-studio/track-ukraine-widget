@@ -21,7 +21,15 @@ export interface VoteOverride {
   bill?: string;
   /** If set, overrides the classifier's weight. */
   weight?: number;
-  /** If set, overrides the classifier's directionMultiplier. */
+  /**
+   * FR-63 — if set, overrides the vote's explicit direction directly
+   * ('pro'|'anti'|'neutral'). Preferred over `directionMultiplier`.
+   */
+  direction?: 'pro' | 'anti' | 'neutral';
+  /**
+   * @deprecated FR-63 — legacy multiplier override. Still honored for the
+   * score-preserving conversion, but new overrides should use `direction`.
+   */
   directionMultiplier?: -1 | 0 | 1;
   /** If set, overrides the classifier's kind string. */
   kind?: string;

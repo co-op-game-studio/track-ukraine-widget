@@ -97,6 +97,12 @@ export interface VoteRow {
   action: string | null;
   action_date: string | null;
   weight: number;
+  /** FR-63 — the vote's own Ukraine direction ('pro'|'anti'|'neutral'). */
+  direction: string;
+  /** FR-63 — set when a researcher confirms the direction (review surface). */
+  direction_reviewed_at: string | null;
+  direction_reviewed_by: string | null;
+  /** @deprecated FR-63 — no longer drives scoring; kept one release. */
   direction_multiplier: number;
   kind: string;
   /** FR-54 AC-54.6 — standing rationale for current weight + multiplier. */
@@ -209,6 +215,8 @@ export class ValidationError extends Error {
 const VALID_PLATFORMS = new Set(['x', 'facebook', 'youtube', 'instagram', 'other']);
 const VALID_MEDIA_KINDS = new Set(['video', 'audio', 'text', 'image', 'social']);
 const VALID_DIRECTIONS = new Set(['pro-ukraine', 'anti-ukraine', 'ambiguous']);
+/** FR-63 — per-VOTE direction domain (distinct from bill direction). */
+const VALID_VOTE_DIRECTIONS = new Set(['pro', 'anti', 'neutral']);
 const VALID_CHAMBERS = new Set(['House', 'Senate']);
 
 /* -------------------------------------------------------------------------- */
@@ -574,10 +582,21 @@ export interface VoteCreateInput {
   action?: string | null;
   action_date?: string | null;
   weight: number;
+  /** FR-63 — explicit per-vote direction; defaults to 'neutral'. */
+  direction?: string;
   direction_multiplier?: number;
   kind: string;
   /** FR-54 AC-54.6 — optional standing rationale. */
   weight_reason?: string | null;
+}
+
+/** FR-63 — validate a per-vote direction, defaulting to 'neutral'. */
+function validateVoteDirection(d: string | undefined): string {
+  if (d === undefined) return 'neutral';
+  if (!VALID_VOTE_DIRECTIONS.has(d)) {
+    throw new ValidationError('invalid_direction', `vote direction must be one of ${[...VALID_VOTE_DIRECTIONS].join(', ')}`);
+  }
+  return d;
 }
 
 function validateVoteWeight(weight: number): number {
@@ -628,6 +647,9 @@ export async function createVote(
     action: input.action ?? null,
     action_date: input.action_date ?? null,
     weight: validateVoteWeight(input.weight),
+    direction: validateVoteDirection(input.direction),
+    direction_reviewed_at: null,
+    direction_reviewed_by: null,
     direction_multiplier: validateDirectionMultiplier(input.direction_multiplier),
     kind: input.kind,
     weight_reason: trimmedReason && trimmedReason.length > 0 ? trimmedReason : null,
@@ -638,13 +660,13 @@ export async function createVote(
     .prepare(
       `INSERT INTO votes (
          id, bill_id, chamber, congress, session, roll_call, date, url,
-         action, action_date, weight, direction_multiplier, kind,
+         action, action_date, weight, direction, direction_multiplier, kind,
          weight_reason, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id, row.bill_id, row.chamber, row.congress, row.session, row.roll_call,
-      row.date, row.url, row.action, row.action_date, row.weight,
+      row.date, row.url, row.action, row.action_date, row.weight, row.direction,
       row.direction_multiplier, row.kind, row.weight_reason, row.created_at, row.updated_at,
     );
   await runMutationWithAudit(d1, ctx, stmt, {
@@ -664,6 +686,9 @@ export async function getVote(d1: D1Like, id: string): Promise<VoteRow | null> {
 
 export interface VoteUpdate {
   weight?: number;
+  /** FR-63 — set the vote's explicit direction. Supplying it marks the vote as
+   *  reviewed (stamps direction_reviewed_at/by from the actor). */
+  direction?: string;
   direction_multiplier?: number;
   kind?: string;
   action?: string | null;
@@ -692,9 +717,18 @@ export async function updateVote(
       nextWeightReason = trimmed.length > 0 ? trimmed : null;
     }
   }
+  // FR-63 — supplying `direction` marks the vote reviewed: stamp who/when.
+  const directionProvided = patch.direction !== undefined;
+  const nextDirection = directionProvided
+    ? validateVoteDirection(patch.direction)
+    : before.direction;
+  const now = isoNow();
   const after: VoteRow = {
     ...before,
     weight: patch.weight === undefined ? before.weight : validateVoteWeight(patch.weight),
+    direction: nextDirection,
+    direction_reviewed_at: directionProvided ? now : before.direction_reviewed_at,
+    direction_reviewed_by: directionProvided ? ctx.actorEmail : before.direction_reviewed_by,
     direction_multiplier:
       patch.direction_multiplier === undefined
         ? before.direction_multiplier
@@ -705,18 +739,20 @@ export async function updateVote(
     url: patch.url === undefined ? before.url : patch.url,
     date: patch.date ?? before.date,
     weight_reason: nextWeightReason,
-    updated_at: isoNow(),
+    updated_at: now,
   };
   const stmt = d1
     .prepare(
-      `UPDATE votes SET weight = ?, direction_multiplier = ?, kind = ?,
+      `UPDATE votes SET weight = ?, direction = ?, direction_reviewed_at = ?,
+         direction_reviewed_by = ?, direction_multiplier = ?, kind = ?,
          action = ?, action_date = ?, url = ?, date = ?, weight_reason = ?,
          updated_at = ?
        WHERE id = ?`,
     )
     .bind(
-      after.weight, after.direction_multiplier, after.kind, after.action,
-      after.action_date, after.url, after.date, after.weight_reason,
+      after.weight, after.direction, after.direction_reviewed_at,
+      after.direction_reviewed_by, after.direction_multiplier, after.kind,
+      after.action, after.action_date, after.url, after.date, after.weight_reason,
       after.updated_at, id,
     );
   await runMutationWithAudit(d1, ctx, stmt, {

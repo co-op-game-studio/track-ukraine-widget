@@ -59,6 +59,8 @@ interface CuratedVoteJson {
   action?: string;
   actionDate?: string;
   weight: number;
+  /** FR-63 — explicit per-vote direction. */
+  direction?: 'pro' | 'anti' | 'neutral';
   directionMultiplier: number;
   kind: string;
 }
@@ -218,7 +220,7 @@ export function buildSeedSql(
       lines.push(
         `INSERT OR IGNORE INTO votes (
            id, bill_id, chamber, congress, session, roll_call, date, url,
-           action, action_date, weight, direction_multiplier, kind,
+           action, action_date, weight, direction, direction_multiplier, kind,
            created_at, updated_at
          ) VALUES (
            ${sqlString(voteRowId)},
@@ -232,6 +234,7 @@ export function buildSeedSql(
            ${sqlString(v.action ?? null)},
            ${sqlString(v.actionDate ?? null)},
            ${sqlNumber(v.weight)},
+           ${sqlString(v.direction ?? 'neutral')},
            ${sqlNumber(v.directionMultiplier)},
            ${sqlString(v.kind)},
            ${sqlString(opts.isoNow)},
