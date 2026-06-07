@@ -56,8 +56,9 @@ export function GettingStarted() {
       <H2>Who to contact</H2>
       <P>
         For access requests, data questions, or bugs, reach out to{' '}
-        <strong>kaz.i.em</strong> on Discord, or post in the{' '}
-        <strong>#code-work</strong> channel on Discord.
+        <strong>kaz.i.em</strong> on Discord, post in the{' '}
+        <strong>#code-work</strong> channel, or email{' '}
+        <a href="mailto:kody.manharth@gmail.com">kody.manharth@gmail.com</a>.
         Every change you make is recorded with your account and a trace ID, so we can
         look up exactly what changed and when.
       </P>
