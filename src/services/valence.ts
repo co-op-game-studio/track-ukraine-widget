@@ -70,6 +70,54 @@ export function computeValence(
   return 'unstated';
 }
 
+/* -------------------------------------------------------------------------- */
+/*            FR-63 — explicit per-vote direction (replaces inversion)         */
+/* -------------------------------------------------------------------------- */
+
+/** A vote's own Ukraine direction: "an Aye on this vote is …". */
+export type VoteDirection = 'pro' | 'anti' | 'neutral';
+
+/** Member's recorded position on a roll call, normalized to Aye/Nay. */
+export type VoteCast = 'voted-aye' | 'voted-nay' | 'voted-present' | 'not-voted';
+
+/**
+ * FR-63 AC-63.1 — score-preserving conversion from the legacy
+ * `(bill.direction, direction_multiplier)` model to an explicit per-vote
+ * direction. This reproduces the effective "what does an Aye mean" that
+ * `computeValence` used to derive, so backfilled scores are unchanged
+ * (proven by the AC-63.4 equivalence test).
+ */
+export function directionFromLegacy(
+  billDirection: BillDirection,
+  directionMultiplier: -1 | 0 | 1,
+): VoteDirection {
+  if (directionMultiplier === 0) return 'neutral';
+  // Legacy neutral bills only scored votes flagged dm=-1, treated as a flip of a
+  // pro reference → anti. dm=+1 on a neutral bill was a no-op (unstated) → neutral.
+  if (billDirection === 'neutral') return directionMultiplier === -1 ? 'anti' : 'neutral';
+  const billIsPro = billDirection === 'pro-ukraine';
+  const effectivePro = directionMultiplier === 1 ? billIsPro : !billIsPro;
+  return effectivePro ? 'pro' : 'anti';
+}
+
+/**
+ * FR-63 AC-63.3 — valence for a vote from its OWN explicit direction + the
+ * member's cast. No bill-direction, no multiplier. Sponsorship valence still
+ * uses `computeValence` (bills.direction); this is votes only.
+ *
+ *   pro  + Aye → voted-pro    pro  + Nay → voted-anti
+ *   anti + Aye → voted-anti   anti + Nay → voted-pro
+ *   neutral / present / not-voted → unstated
+ */
+export function valenceForVote(direction: VoteDirection, cast: VoteCast): Valence {
+  if (cast === 'voted-present' || cast === 'not-voted') return 'unstated';
+  if (direction === 'neutral') return 'unstated';
+  const proStance = direction === 'pro';
+  if (cast === 'voted-aye') return proStance ? 'voted-pro' : 'voted-anti';
+  // voted-nay
+  return proStance ? 'voted-anti' : 'voted-pro';
+}
+
 export const VALENCE_LABEL: Record<Valence, string> = {
   'sponsor-pro': 'Sponsored pro-Ukraine',
   'voted-pro': 'Voted pro-Ukraine',
