@@ -530,7 +530,7 @@ function Field<T>({ schema, value, onChange, readOnly = false }: FieldProps<T>) 
                   padding: '0 10px',
                   border: '1px solid var(--border)',
                   borderRadius: 3,
-                  color: 'var(--accent)',
+                  color: 'var(--tk-link)',
                   textDecoration: 'none',
                   fontSize: 12,
                   whiteSpace: 'nowrap',
@@ -618,7 +618,7 @@ function Field<T>({ schema, value, onChange, readOnly = false }: FieldProps<T>) 
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             style={{
-              color: 'var(--accent)',
+              color: 'var(--tk-link)',
               fontSize: 'var(--tk-fs-sm)',
               fontFamily: 'var(--tk-font)',
               textDecoration: 'none',

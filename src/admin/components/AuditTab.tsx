@@ -106,7 +106,7 @@ const styles: Record<string, React.CSSProperties> = {
     borderBottom: '1px solid var(--border)',
     marginBottom: 6,
   },
-  actor: { color: 'var(--accent)', fontWeight: 600 },
+  actor: { color: 'var(--tk-link)', fontWeight: 600 },
   action: {
     background: 'var(--bg)',
     border: '1px solid var(--border)',

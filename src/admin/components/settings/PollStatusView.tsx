@@ -180,7 +180,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   platform: { fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' },
   handle: { fontWeight: 700, fontSize: 'var(--tk-fs-sm)' },
-  bioguide: { fontFamily: 'var(--tk-font-mono)', fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-accent)', textDecoration: 'underline' },
+  bioguide: { fontFamily: 'var(--tk-font-mono)', fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-link)', textDecoration: 'underline' },
   timeMeta: { fontSize: 'var(--tk-fs-xs)', color: 'var(--tk-muted)' },
   errorBox: {
     display: 'flex',

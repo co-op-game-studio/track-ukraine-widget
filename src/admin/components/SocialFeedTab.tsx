@@ -1096,7 +1096,7 @@ export function QueueView({ onCurateAsQuote }: {
             {logTotals.skipped > 0 && <span style={{ color: 'var(--tk-muted)' }}>{logTotals.skipped} skipped (cached)</span>}
             {logTotals.newPosts > 0 && <span style={{ color: '#22c55e' }}>+{logTotals.newPosts} new posts</span>}
             {logTotals.dupes > 0 && <span style={{ color: 'var(--tk-muted)' }}>{logTotals.dupes} dupes</span>}
-            {logTotals.kwHits > 0 && <span style={{ color: 'var(--tk-accent)' }}>{logTotals.kwHits} keyword hits</span>}
+            {logTotals.kwHits > 0 && <span style={{ color: 'var(--tk-link)' }}>{logTotals.kwHits} keyword hits</span>}
             <button
               type="button"
               onClick={() => { setPollLog([]); setPollProgress(null); }}
@@ -1548,8 +1548,8 @@ export function KeywordsView() {
                   onClick={() => toggleActive(k.id, !k.active)}
                   style={{
                     ...styles.tinyBtn,
-                    color: k.active ? 'var(--tk-danger)' : 'var(--tk-accent)',
-                    borderColor: k.active ? 'var(--tk-danger)' : 'var(--tk-accent)',
+                    color: k.active ? 'var(--tk-danger)' : 'var(--tk-success)',
+                    borderColor: k.active ? 'var(--tk-danger)' : 'var(--tk-success)',
                   }}
                 >
                   {k.active ? 'Disable' : 'Enable'}

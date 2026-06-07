@@ -401,7 +401,7 @@ const S: Record<string, React.CSSProperties> = {
   },
   tagRow: { display: 'flex', flexWrap: 'wrap', gap: 4 },
   link: {
-    color: 'var(--tk-accent)',
+    color: 'var(--tk-link)',
     textDecoration: 'underline',
     fontSize: 'var(--tk-fs-xs)',
   },
