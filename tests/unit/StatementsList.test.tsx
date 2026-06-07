@@ -139,15 +139,15 @@ describe('StatementsList — contribution chip (AC-52.43 + AC-53.3)', () => {
   });
 });
 
-describe('StatementsList — researcher note (AC-53.3)', () => {
-  it('renders researcher comment block when set', () => {
+describe('StatementsList — details (AC-53.3)', () => {
+  it('renders details block when set', () => {
     render(<StatementsList posts={[POST_ANTI]} quotes={[]} />);
-    expect(screen.getByText(/Researcher note:/i)).toBeInTheDocument();
+    expect(screen.getByText(/Details:/i)).toBeInTheDocument();
     expect(screen.getByText(/Picked up from town hall livestream/i)).toBeInTheDocument();
   });
 
-  it('omits the researcher note block when comment is null', () => {
+  it('omits the details block when comment is null', () => {
     render(<StatementsList posts={[POST_PRO]} quotes={[]} />);
-    expect(screen.queryByText(/Researcher note:/i)).toBeNull();
+    expect(screen.queryByText(/Details:/i)).toBeNull();
   });
 });

@@ -9,30 +9,30 @@ export function CurationGuide() {
       <H1>Curation Guide</H1>
       <P>
         Curation is the core researcher workflow. You review statements made by legislators —
-        pulled automatically from the social-media poller or added manually — and assign them
+        collected automatically from their social accounts or added manually — and assign them
         a <strong>direction</strong> and a <strong>weight</strong> so they contribute to the
         legislator's Ukraine score.
       </P>
 
       <H2>The Inbox</H2>
       <P>
-        The Inbox (Curation › Inbox) surfaces posts the automated poller has flagged against your
+        The Inbox (Curation › Inbox) surfaces posts the automatic social sync has flagged against your
         keyword watches. Each card shows the platform, handle, post text, and detected keywords.
       </P>
       <Ul>
-        <Li><strong>Curate</strong> — opens the Add Quote form pre-filled with the post data. You add direction, weight, and an optional note, then save.</Li>
+        <Li><strong>Curate</strong> — opens the Add Quote form pre-filled with the post data. You add direction, weight, and optional details, then save.</Li>
         <Li><strong>Dismiss</strong> — removes the item from the inbox without creating a quote. Use this for false positives.</Li>
         <Li><strong>Open original</strong> — opens the source post URL in a new tab for verification.</Li>
       </Ul>
       <Callout kind="tip">
-        Always open the original before scoring. The poller captures post text at poll time; the
+        Always open the original before scoring. The sync captures post text at collection time; the
         author may have edited or deleted the post since.
       </Callout>
 
       <H2>Adding a quote manually</H2>
       <P>
-        Use <strong>Curation › Add quote</strong> for statements found outside the poller — press releases,
-        floor speeches, committee testimony, op-eds, or posts from platforms the poller doesn't cover.
+        Use <strong>Curation › Add quote</strong> for statements found outside the automatic sync — press releases,
+        floor speeches, committee testimony, op-eds, or posts from platforms the sync doesn't cover.
       </P>
       <Ul>
         <Li>Paste the source URL. The system will auto-detect the platform from the domain.</Li>
@@ -40,7 +40,7 @@ export function CurationGuide() {
         <Li>Set the <strong>Posted at</strong> date (ISO-8601: <code>2025-03-14</code> or <code>2025-03-14T15:30:00Z</code>).</Li>
         <Li>Paste the full statement text into <strong>Post text</strong>.</Li>
         <Li>Assign direction and weight (see below).</Li>
-        <Li>Optionally add a <strong>Researcher note</strong> — this is visible in the public embed.</Li>
+        <Li>Optionally add <strong>Details</strong> — free-text context that is visible in the public embed.</Li>
       </Ul>
 
       <H2>Add by URL</H2>
@@ -88,11 +88,11 @@ export function CurationGuide() {
         organization; they are not displayed in the public embed.
       </P>
 
-      <H2>Researcher notes</H2>
+      <H2>Details</H2>
       <P>
-        The <strong>Researcher note</strong> field is optional free text that appears in the public
+        The <strong>Details</strong> field is optional free text that appears in the public
         embed alongside the quote card. Use it to give voters context — e.g. "Said during markup of
-        H.R. 815, which provided $60B in Ukraine aid." Keep notes factual and brief.
+        H.R. 815, which provided $60B in Ukraine aid." Keep details factual and brief.
       </P>
 
       <Divider />

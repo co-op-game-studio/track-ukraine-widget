@@ -95,14 +95,15 @@ describe('SettingsTab', () => {
     const expected: Array<[string, string]> = [
       ['Keywords', '/settings/keywords'],
       ['Tags', '/settings/tags'],
-      ['Cache', '/settings/cache'],
-      ['Poll status', '/settings/poll-status'],
+      ['Sync status', '/settings/poll-status'],
       ['App config', '/settings/config'],
     ];
     for (const [label, href] of expected) {
       const link = screen.getByRole('link', { name: label });
       expect(link.getAttribute('href')).toBe(href);
     }
+    // v4.3.0: Cache is hidden from the sub-nav (operator-only) — no link.
+    expect(screen.queryByRole('link', { name: 'Cache' })).toBeNull();
   });
 
   it('exposes each NavLink help text via the title attribute', () => {
@@ -111,17 +112,14 @@ describe('SettingsTab', () => {
       screen.getByRole('link', { name: 'Tags' }).getAttribute('title'),
     ).toMatch(/Color-coded labels/i);
     expect(
-      screen.getByRole('link', { name: 'Cache' }).getAttribute('title'),
-    ).toMatch(/KV cache/i);
-    expect(
-      screen.getByRole('link', { name: 'Poll status' }).getAttribute('title'),
+      screen.getByRole('link', { name: 'Sync status' }).getAttribute('title'),
     ).toMatch(/read-only/i);
     expect(
       screen.getByRole('link', { name: 'App config' }).getAttribute('title'),
     ).toMatch(/Deployment-time/i);
     expect(
       screen.getByRole('link', { name: 'Keywords' }).getAttribute('title'),
-    ).toMatch(/social ingest pipeline/i);
+    ).toMatch(/social sync/i);
   });
 
   it('defaults to the Keywords sub-view when :view param is empty', async () => {
@@ -152,14 +150,14 @@ describe('SettingsTab', () => {
     );
   });
 
-  it('renders the Poll status sub-view wrapped in ReadOnlyWrap at /settings/poll-status', async () => {
+  it('renders the Sync status sub-view wrapped in ReadOnlyWrap at /settings/poll-status', async () => {
     renderAt('/settings/poll-status');
     // The ReadOnlyWrap banner has the lock copy.
     expect(screen.getByText(/Read-only\./i)).toBeDefined();
     expect(screen.getByText(/engineering visibility/i)).toBeDefined();
     // PollStatusView heading.
     await waitFor(
-      () => expect(screen.getByRole('heading', { name: /Poll status/i })).toBeDefined(),
+      () => expect(screen.getByRole('heading', { name: /Sync status/i })).toBeDefined(),
       { timeout: 3000 },
     );
   });
@@ -185,7 +183,7 @@ describe('SettingsTab', () => {
     expect(screen.getByRole('link', { name: 'Keywords' })).toBeDefined();
     // Other sub-view headings are absent.
     expect(screen.queryByRole('heading', { name: /^App config$/ })).toBeNull();
-    expect(screen.queryByRole('heading', { name: /^Poll status$/ })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /^Sync status$/ })).toBeNull();
   });
 
   it('marks the active NavLink with a non-transparent border color', () => {

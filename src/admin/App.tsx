@@ -9,7 +9,7 @@
  * CF Workers serves /admin/index.html and the SPA owns everything after #).
  */
 import { useEffect, useRef, useState } from 'react';
-import { Routes, Route, NavLink, useNavigate, useParams, Navigate } from 'react-router-dom';
+import { Routes, Route, NavLink, useNavigate, useParams, useLocation, Navigate } from 'react-router-dom';
 import { get } from './fetcher';
 import { BillsTab } from './components/BillsTab';
 import { PeopleTab } from './components/PeopleTab';
@@ -43,8 +43,16 @@ export interface QuotePrefill {
 interface MenuLink {
   label: string;
   to: string;
-  /** Whether this link should match the current path (exact or prefix). */
-  end?: boolean;
+}
+
+/**
+ * Section-aware active match for the megamenu. A link is "active" when the
+ * current path equals its target OR is a child of it (`/people/:bioguide`
+ * keeps the People link lit). Sibling leaves stay distinct because
+ * `/settings/cache` does not start with `/settings/keywords/`.
+ */
+function isLinkActive(pathname: string, to: string): boolean {
+  return pathname === to || pathname.startsWith(to + '/');
 }
 
 interface MenuColumn {
@@ -56,9 +64,9 @@ const COLUMNS: MenuColumn[] = [
   {
     heading: 'Workspace',
     links: [
-      { label: 'People',   to: '/people',   end: true },
-      { label: 'Bills',    to: '/bills',    end: true },
-      { label: 'Activity', to: '/activity', end: true },
+      { label: 'People',   to: '/people'   },
+      { label: 'Bills',    to: '/bills'    },
+      { label: 'Activity', to: '/activity' },
     ],
   },
   {
@@ -77,8 +85,7 @@ const COLUMNS: MenuColumn[] = [
     links: [
       { label: 'Keywords',       to: '/settings/keywords' },
       { label: 'Tags',           to: '/settings/tags' },
-      { label: 'Cache',          to: '/settings/cache' },
-      { label: 'Poll status',    to: '/settings/poll-status' },
+      { label: 'Sync status',    to: '/settings/poll-status' },
       { label: 'Data freshness', to: '/settings/freshness' },
       { label: 'App config',     to: '/settings/config' },
     ],
@@ -88,7 +95,7 @@ const COLUMNS: MenuColumn[] = [
     links: [
       { label: 'Getting started', to: '/help/getting-started' },
       { label: 'Curation guide',  to: '/help/curation' },
-      { label: 'People & polls',  to: '/help/people-polls' },
+      { label: 'People & sync',   to: '/help/people-polls' },
       { label: 'Bills & votes',   to: '/help/bills-votes' },
       { label: 'Scoring',         to: '/help/scoring' },
     ],
@@ -98,6 +105,7 @@ const COLUMNS: MenuColumn[] = [
 function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { pathname } = useLocation();
 
   // Close on outside click + Escape.
   useEffect(() => {
@@ -137,20 +145,22 @@ function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElemen
           {COLUMNS.map((col) => (
             <div key={col.heading} style={menuStyles.column}>
               <div style={menuStyles.columnHeading}>{col.heading}</div>
-              {col.links.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  end={link.end}
-                  onClick={() => { setOpen(false); onNavigate(); }}
-                  style={({ isActive }) => ({
-                    ...menuStyles.link,
-                    ...(isActive ? menuStyles.linkActive : {}),
-                  })}
-                >
-                  {link.label}
-                </NavLink>
-              ))}
+              {col.links.map((link) => {
+                const active = isLinkActive(pathname, link.to);
+                return (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    onClick={() => { setOpen(false); onNavigate(); }}
+                    style={{
+                      ...menuStyles.link,
+                      ...(active ? menuStyles.linkActive : {}),
+                    }}
+                  >
+                    {link.label}
+                  </NavLink>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -190,6 +200,20 @@ export function App() {
         <div style={styles.headerLeft}>
           <strong style={styles.title}>Track Ukraine — Admin</strong>
           <Megamenu onNavigate={() => {}} />
+          {/* Quick-access copy of the Getting Started link, next to the menu, so
+              new researchers always have a visible doorway to the docs without
+              opening the megamenu. */}
+          <NavLink
+            to="/help/getting-started"
+            style={({ isActive }) => ({
+              ...menuStyles.trigger,
+              ...(isActive ? menuStyles.triggerOpen : {}),
+              textDecoration: 'none',
+            })}
+          >
+            <span aria-hidden="true">ⓘ</span>
+            <span>Getting started</span>
+          </NavLink>
         </div>
         <div style={styles.headerRight}>
           <span style={styles.whoami}>

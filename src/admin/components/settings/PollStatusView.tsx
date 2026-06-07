@@ -30,9 +30,9 @@ export function PollStatusView() {
   return (
     <div style={S.root}>
       <div style={S.toolRow}>
-        <h2 style={S.heading}>Poll status</h2>
+        <h2 style={S.heading}>Sync status</h2>
         <span style={S.muted}>
-          Per-handle health. Failures persist across cron ticks. Trace IDs let engineering find the exact failed attempt in logs.
+          Per-handle health. Failures persist across runs. Trace IDs let engineering find the exact failed attempt in logs.
         </span>
         <span style={{ flex: 1 }} />
         <select value={filter} onChange={(e) => setFilter(e.target.value as Filter)} style={S.select}>

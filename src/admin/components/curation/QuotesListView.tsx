@@ -254,7 +254,7 @@ function InlineEditor({ quote, onSaved, onCancel }: { quote: QuoteRow; onSaved: 
   return (
     <div style={S.editor}>
       <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={4} style={{ ...S.input, resize: 'vertical' as never }} />
-      <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Researcher note..." style={S.input} />
+      <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Details..." style={S.input} />
 
       {/* Scoring */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>

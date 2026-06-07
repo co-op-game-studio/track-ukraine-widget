@@ -1481,7 +1481,7 @@ function HandleStatusRow({ handle, pollable, onRepoll }: { handle: HandleRow; po
             disabled={polling}
             style={rosterStyles.editBtn}
           >
-            {polling ? 'Polling…' : 'Re-poll'}
+            {polling ? 'Syncing…' : 'Sync now'}
           </button>
         ) : (
           <span
