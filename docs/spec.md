@@ -1765,6 +1765,20 @@ This conversion reproduces today's `computeValence` output exactly for every `(b
 - AC-63.7: All researcher-facing and voter-facing copy SHALL describe a vote's direction directly (e.g. "Aye on this vote counts as pro-Ukraine") and SHALL NOT mention "inversion", "direction multiplier", or `−1`. (Folds in the punchlist "no more inversion" copy that was deferred from FR-61's docs pass.)
 - AC-63.8: Tests SHALL cover: the conversion table (AC-63.4 equivalence); the new `computeValence` vote entry point; the migration backfill; the projector/build emitting `direction`; the review-surface confirm/correct write + audit; and that no scoring path reads `direction_multiplier` after this FR.
 
+### FR-64: Bulk weight tuner (NEW v4.3.0)
+
+**Problem.** Vote weights are edited one row at a time inside each bill. Calibrating weights across many votes (e.g. "nudge every cloture vote up 20%", "halve all motion-to-proceed weights") means opening dozens of bills. The user wants an FM-style surface: **search → editable results → apply a computed adjustment** (multiplicative `× k` or linear `+ d`) to the whole set, with a per-row preview before committing.
+
+**Scope.** Votes are the entity tuned (they carry `weight` and drive scoring). The tuner is admin-gated (FR-61), lives under the Config group, and is a thin client over the existing audited `PATCH /api/admin/votes/:id` write — every weight change is one audited mutation, so there is no new bulk-write endpoint to secure.
+
+**Acceptance criteria:**
+- AC-64.1: `GET /api/admin/vote-review` (FR-63) already returns votes with bill context; the tuner SHALL reuse it (state='all') and filter client-side by bill id substring, vote kind, and current-weight range. (No new read endpoint.)
+- AC-64.2: The tuner SHALL offer two adjustment modes: **multiply** (new = old × k, k > 0) and **linear** (new = old + d). The computed new weight SHALL be clamped to [0, 5] and rounded to 2 decimals, matching the vote weight domain (FR-54).
+- AC-64.3: Before applying, the UI SHALL show a per-row preview: current weight → computed weight, and a count of rows that would change. Rows whose computed weight equals the current (no-op) SHALL be visually de-emphasized and excluded from the write.
+- AC-64.4: Applying SHALL issue one `PATCH /api/admin/votes/:id { weight, _reason }` per changed row (the existing audited path; AC-50.8 reason required — the tuner collects one reason for the batch and sends it on each). A progress indicator SHALL show N/total applied; failures SHALL be surfaced per row without aborting the rest.
+- AC-64.5: The tuner SHALL NOT change vote `direction` or any field other than `weight`.
+- AC-64.6: Tests SHALL cover the pure adjustment math (multiply, linear, clamp low/high, round, no-op detection) and that the apply path issues one PATCH per changed row with the batch reason.
+
 ### FR-9: Web Component Embedding
 The system SHALL be buildable as a self-contained Web Component using Shadow DOM for style isolation, distributable as a single IIFE JavaScript bundle.
 

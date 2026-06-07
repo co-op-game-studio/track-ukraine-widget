@@ -96,6 +96,7 @@ describe('SettingsTab', () => {
       ['Keywords', '/settings/keywords'],
       ['Tags', '/settings/tags'],
       ['Vote review', '/settings/vote-review'],
+      ['Weight tuner', '/settings/weight-tuner'],
       ['Sync status', '/settings/poll-status'],
       ['API quota', '/settings/api-usage'],
       ['App config', '/settings/config'],

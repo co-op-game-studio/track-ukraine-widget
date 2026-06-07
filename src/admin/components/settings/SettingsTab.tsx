@@ -13,8 +13,9 @@ import { CacheView } from './CacheView';
 import { DataFreshnessView } from './DataFreshnessView';
 import { ApiUsageView } from './ApiUsageView';
 import { VoteReviewView } from './VoteReviewView';
+import { WeightTunerView } from './WeightTunerView';
 
-export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config' | 'api-usage' | 'vote-review';
+export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config' | 'api-usage' | 'vote-review' | 'weight-tuner';
 
 interface ViewSpec {
   id: SettingsView;
@@ -31,6 +32,7 @@ const VIEWS: ViewSpec[] = [
   { id: 'keywords',    label: 'Keywords',     help: 'Match keywords for the social sync', editable: true },
   { id: 'tags',        label: 'Tags',         help: 'Color-coded labels applied to quotes', editable: true },
   { id: 'vote-review', label: 'Vote review',  help: 'Confirm each vote\'s Ukraine direction', editable: true },
+  { id: 'weight-tuner', label: 'Weight tuner', help: 'Bulk-adjust vote weights', editable: true },
   { id: 'poll-status', label: 'Sync status',  help: 'Per-handle health (read-only)', editable: false },
   { id: 'api-usage',   label: 'API quota',    help: 'Estimated upstream API headroom (read-only)', editable: false },
   { id: 'freshness',   label: 'Data freshness', help: 'Bill corpus state (read-only)', editable: false },
@@ -66,6 +68,7 @@ export function SettingsTab() {
         {view === 'keywords'    && <KeywordsView />}
         {view === 'tags'        && <TagsView />}
         {view === 'vote-review' && <VoteReviewView />}
+        {view === 'weight-tuner' && <WeightTunerView />}
         {view === 'cache'       && <CacheView />}
         {view === 'poll-status' && <ReadOnlyWrap reason="Sync status is read-only — failures persist for engineering visibility."><PollStatusView /></ReadOnlyWrap>}
         {view === 'api-usage'   && <ReadOnlyWrap reason="Estimated from recent sync + seed activity. Not an exact quota counter."><ApiUsageView /></ReadOnlyWrap>}
