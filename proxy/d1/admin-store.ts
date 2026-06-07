@@ -440,6 +440,55 @@ export async function listVotesByBill(d1: D1Like, billId: string): Promise<VoteR
   return result.results ?? [];
 }
 
+/** FR-63 AC-63.6 — a vote joined with its bill context for the review surface. */
+export interface VoteReviewRow extends VoteRow {
+  bill_direction: string;
+  bill_label: string | null;
+  bill_title: string | null;
+  /** True when the legacy multiplier was −1 (an inverted vote) — flagged for
+   *  extra scrutiny in the review UI. */
+  previously_inverted: boolean;
+  /** True once a researcher has confirmed the direction. */
+  reviewed: boolean;
+}
+
+/**
+ * FR-63 AC-63.6 — list votes for the direction-review surface, joined with bill
+ * direction/label. `state`: 'unreviewed' (direction_reviewed_at IS NULL),
+ * 'reviewed', or 'all'. Ordered to surface previously-inverted + unreviewed
+ * votes first.
+ */
+export async function listVotesForReview(
+  d1: D1Like,
+  opts: { state?: 'unreviewed' | 'reviewed' | 'all'; limit?: number; offset?: number } = {},
+): Promise<VoteReviewRow[]> {
+  const state = opts.state ?? 'unreviewed';
+  const limit = Math.min(Math.max(opts.limit ?? 200, 1), 500);
+  const offset = Math.max(opts.offset ?? 0, 0);
+  const where =
+    state === 'unreviewed'
+      ? 'WHERE v.direction_reviewed_at IS NULL'
+      : state === 'reviewed'
+        ? 'WHERE v.direction_reviewed_at IS NOT NULL'
+        : '';
+  const result = await d1
+    .prepare(
+      `SELECT v.*, b.direction AS bill_direction, b.label AS bill_label, b.title AS bill_title
+         FROM votes v JOIN bills b ON b.bill_id = v.bill_id
+         ${where}
+         ORDER BY (CASE WHEN v.direction_multiplier = -1 THEN 0 ELSE 1 END),
+                  v.congress DESC, v.session DESC, v.roll_call ASC
+         LIMIT ? OFFSET ?`,
+    )
+    .bind(limit, offset)
+    .all<VoteRow & { bill_direction: string; bill_label: string | null; bill_title: string | null }>();
+  return (result.results ?? []).map((r) => ({
+    ...r,
+    previously_inverted: r.direction_multiplier === -1,
+    reviewed: r.direction_reviewed_at !== null,
+  }));
+}
+
 /** AC-52.58 — list cosponsors for a bill, ordered by sponsorship_date asc.
  *  Original cosponsors typically all share `is_original_cosponsor = 1` and the
  *  bill's introduced date; later cosponsors are listed in chronological order. */
@@ -660,13 +709,15 @@ export async function createVote(
     .prepare(
       `INSERT INTO votes (
          id, bill_id, chamber, congress, session, roll_call, date, url,
-         action, action_date, weight, direction, direction_multiplier, kind,
+         action, action_date, weight, direction, direction_reviewed_at,
+         direction_reviewed_by, direction_multiplier, kind,
          weight_reason, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id, row.bill_id, row.chamber, row.congress, row.session, row.roll_call,
       row.date, row.url, row.action, row.action_date, row.weight, row.direction,
+      row.direction_reviewed_at, row.direction_reviewed_by,
       row.direction_multiplier, row.kind, row.weight_reason, row.created_at, row.updated_at,
     );
   await runMutationWithAudit(d1, ctx, stmt, {

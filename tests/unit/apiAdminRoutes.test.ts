@@ -262,6 +262,11 @@ class FakeStmt implements D1PreparedStatementLike {
     if (rateLimitQ) {
       return { success: true, results: [] };
     }
+    // FR-63 vote-review: SELECT v.*, b... FROM votes v JOIN bills b ...
+    const voteReviewQ = q.match(/FROM\s+votes\s+v\s+JOIN\s+bills\s+b/i);
+    if (voteReviewQ) {
+      return { success: true, results: [] };
+    }
 
     const list = q.match(/^SELECT\s+\*\s+FROM\s+(\w+)/i);
     if (list) return { success: true, results: this.d1.tables[list[1]!] ?? [] };
@@ -503,6 +508,33 @@ describe('api-admin: GET /api-usage (FR-62 quota gauge)', () => {
   it('rejects non-GET methods', async () => {
     const env = makeEnv(new FakeD1(), new FakeKV(), { youtubeKey: true });
     const r = await call(env, 'POST', 'api-usage', {});
+    expect(r.status).toBe(400);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                       vote-review (FR-63 AC-63.6)                          */
+/* -------------------------------------------------------------------------- */
+
+describe('api-admin: GET /vote-review (FR-63 direction review)', () => {
+  it('AC-63.6: returns { items, state } defaulting to unreviewed', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'GET', 'vote-review');
+    expect(r.status).toBe(200);
+    const j = r.json as { items: unknown[]; state: string };
+    expect(Array.isArray(j.items)).toBe(true);
+    expect(j.state).toBe('unreviewed');
+  });
+
+  it('honors ?state=reviewed', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'GET', 'vote-review?state=reviewed');
+    expect((r.json as { state: string }).state).toBe('reviewed');
+  });
+
+  it('rejects non-GET (write is via PATCH /votes/:id)', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'POST', 'vote-review', {});
     expect(r.status).toBe(400);
   });
 });

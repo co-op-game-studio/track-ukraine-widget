@@ -95,6 +95,7 @@ describe('SettingsTab', () => {
     const expected: Array<[string, string]> = [
       ['Keywords', '/settings/keywords'],
       ['Tags', '/settings/tags'],
+      ['Vote review', '/settings/vote-review'],
       ['Sync status', '/settings/poll-status'],
       ['API quota', '/settings/api-usage'],
       ['App config', '/settings/config'],

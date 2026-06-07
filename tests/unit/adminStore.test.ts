@@ -449,6 +449,51 @@ describe('admin-store: votes CRUD (FR-54 AC-54.1)', () => {
   });
 });
 
+describe('admin-store: FR-63 vote direction review', () => {
+  async function seedVote(direction?: 'pro' | 'anti' | 'neutral') {
+    await seedBill();
+    return createVote(d1, ctx, {
+      bill_id: '117-HR-2471', chamber: 'House', congress: 117, session: 2,
+      roll_call: 65, date: '2022-03-10', weight: 1, kind: 'passage',
+      ...(direction ? { direction } : {}),
+    });
+  }
+
+  it('createVote defaults direction to neutral and leaves it unreviewed', async () => {
+    const row = await seedVote();
+    expect(row.direction).toBe('neutral');
+    expect(row.direction_reviewed_at).toBeNull();
+    expect(row.direction_reviewed_by).toBeNull();
+  });
+
+  it('createVote honors an explicit direction', async () => {
+    const row = await seedVote('pro');
+    expect(row.direction).toBe('pro');
+  });
+
+  it('AC-63.6: updateVote with direction stamps reviewed_at/by from the actor', async () => {
+    const row = await seedVote('neutral');
+    const after = await updateVote(d1, ctx, row.id, { direction: 'anti' });
+    expect(after.direction).toBe('anti');
+    expect(after.direction_reviewed_by).toBe('alice@example.com');
+    expect(after.direction_reviewed_at).not.toBeNull();
+  });
+
+  it('updateVote without direction does NOT stamp review fields', async () => {
+    const row = await seedVote('pro');
+    const after = await updateVote(d1, ctx, row.id, { weight: 0.5 });
+    expect(after.direction).toBe('pro');
+    expect(after.direction_reviewed_at).toBeNull();
+  });
+
+  it('rejects an invalid vote direction', async () => {
+    const row = await seedVote('pro');
+    await expect(
+      updateVote(d1, ctx, row.id, { direction: 'bogus' as 'pro' }),
+    ).rejects.toThrow(/direction/i);
+  });
+});
+
 /* -------------------------------------------------------------------------- */
 /*                              Atomicity (AC-50.3)                           */
 /* -------------------------------------------------------------------------- */

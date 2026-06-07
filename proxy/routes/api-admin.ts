@@ -116,6 +116,7 @@ export async function handleAdmin(
   }
 
   if (resource === 'api-usage') return await handleApiUsage(request, env, adminCtx);
+  if (resource === 'vote-review') return await handleVoteReview(request, env, adminCtx);
   if (resource === 'audit') return await handleAudit(request, env, adminCtx);
   if (resource === 'import-bill') return await handleImportBill(request, env, adminCtx);
   if (resource === 'data-freshness') return await handleDataFreshness(request, env, adminCtx);
@@ -1059,6 +1060,33 @@ async function handleImportBill(
 // handleBackfillBills + /api/admin/backfill-bills route removed in v4.1.0.
 // Ingest moved to scripts/bills/seed.ts (`lw bills seed`) running in CI.
 // See docs/spec.md FR-59 + memory feedback_seeding_is_buildops_not_runtime.
+
+/* -------------------------------------------------------------------------- */
+/*                      Vote direction review (FR-63 AC-63.6)                  */
+/* -------------------------------------------------------------------------- */
+
+/** GET /api/admin/vote-review?state=unreviewed|reviewed|all
+ *
+ *  Lists votes joined with bill context for the direction-review surface. The
+ *  WRITE side reuses PATCH /api/admin/votes/:id with `{ direction }` — that
+ *  stamps direction_reviewed_at/by and is audited like any vote update. */
+async function handleVoteReview(
+  request: Request,
+  env: ProxyEnv,
+  ctx: AdminCtx,
+): Promise<DispatchResult> {
+  if (request.method !== 'GET') {
+    return badRequest(ctx, 'method_not_allowed', 'GET only — write via PATCH /votes/:id');
+  }
+  const url = new URL(request.url);
+  const stateParam = url.searchParams.get('state');
+  const state =
+    stateParam === 'reviewed' || stateParam === 'all' ? stateParam : 'unreviewed';
+  const limit = Number(url.searchParams.get('limit') || 200);
+  const offset = Number(url.searchParams.get('offset') || 0);
+  const items = await store.listVotesForReview(env.D1_VOTER_INFO!, { state, limit, offset });
+  return ok(ctx, { items, state });
+}
 
 /* -------------------------------------------------------------------------- */
 /*                         API quota gauge (FR-62)                             */

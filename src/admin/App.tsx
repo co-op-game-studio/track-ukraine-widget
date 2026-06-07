@@ -88,6 +88,7 @@ export const COLUMNS: MenuColumn[] = [
     links: [
       { label: 'Keywords',       to: '/settings/keywords' },
       { label: 'Tags',           to: '/settings/tags' },
+      { label: 'Vote review',    to: '/settings/vote-review' },
       { label: 'Sync status',    to: '/settings/poll-status' },
       { label: 'API quota',      to: '/settings/api-usage' },
       { label: 'Data freshness', to: '/settings/freshness' },
