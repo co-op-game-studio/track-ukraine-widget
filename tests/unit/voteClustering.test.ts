@@ -29,6 +29,7 @@ function vote(chamber: 'House' | 'Senate', rollCall: number, weight: number, dat
   return {
     chamber, congress: 118, session: 2, rollCall, date, url: '', action, actionDate: date,
     weight,
+    direction: 'pro' as const,
     directionMultiplier: 1 as const,
     kind: 'passage' as const,
   };

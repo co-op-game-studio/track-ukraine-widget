@@ -29,6 +29,7 @@
         "action": "Resolving differences -- House actions: On motion to agree in Senate amendment with amendment (divisions B, C, F, X, Z, titles 2 and 3 of division N) Agreed to by the Yeas and Nays: 361 - 69 (Roll no. 65).",
         "actionDate": "2022-03-09",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -42,6 +43,7 @@
         "action": "Resolving differences -- House actions: On motion to agree in Senate amendment with amendment (remaining divisions) Agreed to by the Yeas and Nays: 260 - 171, 1 Present (Roll no. 66).",
         "actionDate": "2022-03-09",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -55,6 +57,7 @@
         "action": "Resolving differences -- Senate actions: Senate agreed to the House amendment to the Senate Amendment to H.R. 2471, under the order of 3/10/2022, having achieved 60 votes in the affirmative by Yea-Nay Vote. 68 - 31. Record Vote Number: 78.",
         "actionDate": "2022-03-10",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -68,6 +71,7 @@
         "action": "Table motion to reconsider first divided question Agreed to by the Yeas and Nays: 270 - 157 (Roll no. 67).",
         "actionDate": "2022-03-09",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-reconsider"
       },
@@ -81,6 +85,7 @@
         "action": "Table motion to reconsider second divided question Agreed to by the Yeas and Nays: 249 - 180 (Roll no. 68). (text: CR H1405-1407)",
         "actionDate": "2022-03-09",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-reconsider"
       }
@@ -116,6 +121,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 368 - 57 (Roll no. 145).(text: CR H4775-4778)",
         "actionDate": "2022-05-10",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -129,6 +135,7 @@
         "action": "Passed/agreed to in Senate: Passed Senate without amendment by Yea-Nay Vote. 86 - 11. Record Vote Number: 191.",
         "actionDate": "2022-05-19",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -142,6 +149,7 @@
         "action": "Cloture on the motion to proceed to the measure invoked in Senate by Yea-Nay Vote. 81 - 11. Record Vote Number: 177. (CR S2515)",
         "actionDate": "2022-05-16",
         "weight": 0.45,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture"
       },
@@ -155,6 +163,7 @@
         "action": "Cloture invoked in Senate by Yea-Nay Vote. 86 - 11. Record Vote Number: 190. (CR S2607)",
         "actionDate": "2022-05-19",
         "weight": 0.45,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture"
       },
@@ -168,6 +177,7 @@
         "action": "Motion to proceed to consideration of measure agreed to in Senate by Yea-Nay Vote. 88 - 11. Record Vote Number: 178.",
         "actionDate": "2022-05-17",
         "weight": 0.3,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "motion-to-proceed"
       }
@@ -203,6 +213,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 417 - 10 (Roll no. 141).",
         "actionDate": "2022-04-28",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -238,6 +249,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 311 - 112, 1 Present (Roll no. 151).",
         "actionDate": "2024-04-20",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -251,6 +263,7 @@
         "action": "On motion to recommit Failed by recorded vote: 88 - 336 (Roll no. 150).",
         "actionDate": "2024-04-20",
         "weight": 0.3,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "motion-to-recommit"
       },
@@ -264,6 +277,7 @@
         "action": "On Agreeing to the Greene (GA) Amendment (reduce all dollar amounts in bill to zero): Failed 71 - 351.",
         "actionDate": "2024-04-20",
         "weight": 0.5,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       },
@@ -277,6 +291,7 @@
         "action": "On Agreeing to the Cammack Amendment (strike non-military / economic & humanitarian aid to Ukraine): Failed 154 - 272.",
         "actionDate": "2024-04-20",
         "weight": 0.4,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       }
@@ -312,6 +327,7 @@
         "action": "Passed/agreed to in Senate: Passed Senate with an amendment by Yea-Nay Vote. 70 - 29. Record Vote Number: 48.",
         "actionDate": "2024-02-13",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -325,6 +341,7 @@
         "action": "Resolving differences -- Senate actions: Senate agreed to the House amendment to the Senate amendment to H.R. 815 by Yea-Nay Vote. 79 - 18. Record Vote Number: 154.",
         "actionDate": "2024-04-23",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -338,6 +355,7 @@
         "action": "Cloture invoked in Senate by Yea-Nay Vote. 66 - 33. Record Vote Number: 47. (CR S907)",
         "actionDate": "2024-02-12",
         "weight": 0.45,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture"
       },
@@ -351,6 +369,7 @@
         "action": "Cloture on the motion to concur in the House amendment to the Senate amendment to H.R. 815 invoked in Senate by Yea-Nay Vote. 80 - 19. Record Vote Number: 152. (CR S2960-2961)",
         "actionDate": "2024-04-23",
         "weight": 0.45,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture"
       },
@@ -364,6 +383,7 @@
         "action": "Motion to proceed to consideration of measure agreed to in Senate by Yea-Nay Vote. 64 - 19. Record Vote Number: 42.",
         "actionDate": "2024-02-09",
         "weight": 0.3,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "motion-to-proceed"
       },
@@ -377,6 +397,7 @@
         "action": "Motion to waive all applicable budgetary discipline with respect to the measure agreed to in Senate by Yea-Nay Vote. 66 - 33. Record Vote Number: 45. (CR S906-907)",
         "actionDate": "2024-02-12",
         "weight": 0.25,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "waive-budget"
       },
@@ -390,6 +411,7 @@
         "action": "Motion to waive all applicable budgetary discipline with respect to the measure (the motion to concur in the House amendment to the Senate amendment) agreed to in Senate by Yea-Nay Vote. 75 - 20. Record Vote Number: 153. (CR S2991)",
         "actionDate": "2024-04-23",
         "weight": 0.25,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "waive-budget"
       },
@@ -403,6 +425,7 @@
         "action": "Second cloture motion on the motion to proceed to the measure not invoked in Senate by Yea-Nay Vote. 49 - 51. Record Vote Number: 332. (CR S5793)",
         "actionDate": "2023-12-06",
         "weight": 0,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture",
         "overrideApplied": true,
@@ -418,6 +441,7 @@
         "action": "Third cloture motion on the motion to proceed to the measure not invoked in Senate by Yea-Nay Vote. 49 - 50. Record Vote Number: 39.",
         "actionDate": "2024-02-07",
         "weight": 0,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture",
         "overrideApplied": true,
@@ -433,6 +457,7 @@
         "action": "Upon reconsideration, third cloture motion on the motion to proceed to the measure invoked in Senate by Yea-Nay Vote. 67 - 32. Record Vote Number: 41.",
         "actionDate": "2024-02-08",
         "weight": 0,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture",
         "overrideApplied": true,
@@ -448,6 +473,7 @@
         "action": "Motion to table the motion by Senator Schumer to commit the bill (H.R. 815) to Senate Committee on Veterans' Affairs with instructions to report back forthwith with amendment SA 1581 rejected in Senate by Yea-Nay Vote. 40 - 53. Record Vote Number: 43.",
         "actionDate": "2024-02-11",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-table"
       },
@@ -461,6 +487,7 @@
         "action": "Motion to table the motion to refer the House message to accompany H.R. 815 to the Committee on Appropriations with instructions to report back forthwith with the following amendment (SA 1844) rejected in Senate by Yea-Nay Vote. 48 - 50. Record Vote Number: 151.",
         "actionDate": "2024-04-23",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-table"
       }
@@ -496,6 +523,7 @@
         "action": "Passed/agreed to in Senate: Passed Senate under the order of 9/29/2022, having achieved 60 votes in the affirmative with an amendment by Yea-Nay Vote. 72 - 25. Record Vote Number: 351.",
         "actionDate": "2022-09-29",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -509,6 +537,7 @@
         "action": "Resolving differences -- House actions: On motion that the House agree to the Senate amendment Agreed to by the Yeas and Nays: 230 - 201 (Roll no. 476).",
         "actionDate": "2022-09-30",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -522,6 +551,7 @@
         "action": "Cloture on the motion to proceed to the measure invoked in Senate by Yea-Nay Vote. 72 - 23. Record Vote Number: 349. (CR S5045-5046)",
         "actionDate": "2022-09-27",
         "weight": 0.45,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture"
       }
@@ -557,6 +587,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 414 - 17 (Roll no. 70).",
         "actionDate": "2022-03-09",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -570,6 +601,7 @@
         "action": "Passed/agreed to in Senate: Passed Senate with an amendment by Yea-Nay Vote. 100 - 0. Record Vote Number: 132.(text of amendment in the nature of a substitute: 04/06/2022 CR S2049-2050)",
         "actionDate": "2022-04-07",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -583,6 +615,7 @@
         "action": "Resolving differences -- House actions: On motion that the House suspend the rules and agree to the Senate amendment Agreed to by the Yeas and Nays: (2/3 required): 413 - 9 (Roll no. 125).(text: CR H4418)",
         "actionDate": "2022-04-07",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -596,6 +629,7 @@
         "action": "On motion to recommit Failed by the Yeas and Nays: 208 - 223 (Roll no. 69).",
         "actionDate": "2022-03-09",
         "weight": 0.3,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-recommit"
       }
@@ -631,6 +665,7 @@
         "action": "Passed/agreed to in House: On motion to suspend the rules and pass the bill Agreed to by the Yeas and Nays: (2/3 required): 424 - 8 (Roll no. 78).(text: CR H3802-3804)",
         "actionDate": "2022-03-17",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -644,6 +679,7 @@
         "action": "Passed/agreed to in Senate: Passed Senate with an amendment by Yea-Nay Vote. 100 - 0. Record Vote Number: 131.(text of amendment in the nature of a substitute: 04/06/2022 CR S2048-2049)",
         "actionDate": "2022-04-07",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -657,6 +693,7 @@
         "action": "Resolving differences -- House actions: On motion that the House suspend the rules and agree to the Senate amendment Agreed to by the Yeas and Nays: (2/3 required): 420 - 3 (Roll no. 124).(text: CR H4415-4416)",
         "actionDate": "2022-04-07",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       }
@@ -818,6 +855,7 @@
         "action": "Passed/agreed to in House: On motion to suspend the rules and agree to the resolution Agreed to by the Yeas and Nays: (2/3 required): 426 - 3 (Roll no. 51).(text: CR H1247)",
         "actionDate": "2022-03-02",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -853,6 +891,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 329 - 101 (Roll no. 350).",
         "actionDate": "2022-07-14",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -888,6 +927,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 316 - 113 (Roll no. 293).",
         "actionDate": "2021-09-23",
         "weight": 1,
+        "direction": "neutral",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -901,6 +941,7 @@
         "action": "Cloture on the motion to proceed to the measure invoked in Senate by Yea-Nay Vote. 84 - 15. Record Vote Number: 472. (CR S8340)",
         "actionDate": "2021-11-17",
         "weight": 0.45,
+        "direction": "neutral",
         "directionMultiplier": 1,
         "kind": "cloture"
       }
@@ -936,6 +977,7 @@
         "action": "Passed/agreed to in House: On motion to suspend the rules and pass the bill, as amended Agreed to by the Yeas and Nays: (2/3 required): 416 - 2 (Roll no. 161).",
         "actionDate": "2022-05-11",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -1034,6 +1076,7 @@
         "action": "Passed/agreed to in House: On motion to suspend the rules and pass the bill, as amended Agreed to by the Yeas and Nays: (2/3 required): 421 - 4 (Roll no. 129).",
         "actionDate": "2022-04-27",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -1111,6 +1154,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 311 - 117 (Roll no. 503).",
         "actionDate": "2023-09-28",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -1225,6 +1269,7 @@
         "action": "Passed/agreed to in House: On passage Passed by the Yeas and Nays: 219 - 210 (Roll no. 328).",
         "actionDate": "2023-07-14",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -1238,6 +1283,7 @@
         "action": "Resolving differences -- House actions: On motion that the House disagree to the Senate amendment, and request a conference Agreed to by the Yeas and Nays: 393 - 27 (Roll no. 395).",
         "actionDate": "2023-09-19",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -1251,6 +1297,7 @@
         "action": "Motion to waive the Rule XXVII point of order re: section 7902 with respect to the measure (conference report to accompany H.R. 2670) agreed to in Senate by Yea-Nay Vote. 65 - 35. Record Vote Number: 342.",
         "actionDate": "2023-12-13",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -1264,6 +1311,7 @@
         "action": "Conference report agreed to in Senate: Senate agreed to conference report by Yea-Nay Vote. 87 - 13. Record Vote Number: 343.",
         "actionDate": "2023-12-13",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -1277,6 +1325,7 @@
         "action": "Conference report agreed to in House: On motion to suspend the rules and agree to the conference report Agreed to by the Yeas and Nays: (2/3 required): 310 - 118 (Roll no. 723).",
         "actionDate": "2023-12-14",
         "weight": 0.9,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "concur"
       },
@@ -1290,6 +1339,7 @@
         "action": "Cloture on the conference report to accompany H.R. 2670 invoked in Senate by Yea-Nay Vote. 85 - 15. Record Vote Number: 341.",
         "actionDate": "2023-12-12",
         "weight": 0.45,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "cloture"
       },
@@ -1303,6 +1353,7 @@
         "action": "On motion to recommit Failed by the Yeas and Nays: 210 - 217 (Roll no. 327).",
         "actionDate": "2023-07-14",
         "weight": 0.3,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-recommit"
       },
@@ -1316,6 +1367,7 @@
         "action": "Motion to proceed to consideration of the conference report to accompany H.R. 2670, agreed to in Senate by Yea-Nay Vote. 82 - 15. Record Vote Number: 334.",
         "actionDate": "2023-12-07",
         "weight": 0.3,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "motion-to-proceed"
       },
@@ -1329,6 +1381,7 @@
         "action": "Resolving differences -- House actions: On motion to close portions of the conference Agreed to by the Yeas and Nays: 401 - 19 (Roll no. 396).",
         "actionDate": "2023-09-19",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "other-procedural"
       },
@@ -1342,6 +1395,7 @@
         "action": "Motion to insist on the amendment of the Senate to H.R. 2670, agree to the request for conference, and authorize the Presiding Officer to appoint conferees agreed to by Yea-Nay Vote. 90 - 8. Record Vote Number: 313.",
         "actionDate": "2023-11-15",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "other-procedural"
       },
@@ -1355,6 +1409,7 @@
         "action": "Motion to table the motion to recommit the conference report to accompany H.R. 2670 to the committee on conference with instructions rejected in Senate by Yea-Nay Vote. 26 - 73. Record Vote Number: 340.",
         "actionDate": "2023-12-12",
         "weight": 0,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-table"
       },
@@ -1368,6 +1423,7 @@
         "action": "On Agreeing to the Gaetz Amendment (prohibit security assistance to Ukraine): Failed by the Yeas and Nays: 70 - 358.",
         "actionDate": "2023-07-13",
         "weight": 0.5,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       }
@@ -1403,6 +1459,7 @@
         "action": "Passed/agreed to in House: On passage Passed by recorded vote: 217 - 199 (Roll no. 279).",
         "actionDate": "2024-06-14",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       },
@@ -1416,6 +1473,7 @@
         "action": "On motion to recommit Failed by the Yeas and Nays: 202 - 214 (Roll no. 278).",
         "actionDate": "2024-06-14",
         "weight": 0.3,
+        "direction": "neutral",
         "directionMultiplier": 0,
         "kind": "motion-to-recommit"
       },
@@ -1429,6 +1487,7 @@
         "action": "On Agreeing to the Gaetz Amendment (prohibit US military assistance to Ukraine): Failed 134 - 286.",
         "actionDate": "2024-06-13",
         "weight": 0.5,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       },
@@ -1442,6 +1501,7 @@
         "action": "On Agreeing to the Norman Amendment #42 (bar DoD funds to deploy US forces to Ukraine): Failed (tie) 212 - 212.",
         "actionDate": "2024-06-13",
         "weight": 0.3,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       },
@@ -1455,6 +1515,7 @@
         "action": "On Agreeing to the Higgins Amendment (bar DoD funds for cluster munitions transfers to Ukraine): Agreed 214 - 210.",
         "actionDate": "2024-06-13",
         "weight": 0.4,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       },
@@ -1468,6 +1529,7 @@
         "action": "On Agreeing to the Clyde Amendment (condition UA security assistance on southern border security): Failed 192 - 230.",
         "actionDate": "2024-06-13",
         "weight": 0.4,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       }
@@ -1519,6 +1581,7 @@
         "action": "Passed/agreed to in House: On motion to suspend the rules and agree to the resolution, as amended Agreed to by the Yeas and Nays: (2/3 required): 390 - 9 (Roll no. 88). (text: CR H1201-1202)",
         "actionDate": "2024-03-19",
         "weight": 1,
+        "direction": "pro",
         "directionMultiplier": 1,
         "kind": "passage"
       }
@@ -1670,6 +1733,7 @@
         "action": "Motion to proceed to consideration of measure rejected in Senate by Yea-Nay Vote. 37 - 61. Record Vote Number: 295.",
         "actionDate": "2024-11-20",
         "weight": 0.3,
+        "direction": "anti",
         "directionMultiplier": 1,
         "kind": "motion-to-proceed"
       }
@@ -2082,6 +2146,7 @@
         "action": "On Agreeing to the Gaetz Amendment No. 160 (prohibit all military assistance to Ukraine): Failed by the Yeas and Nays: 93 - 339.",
         "actionDate": "2023-09-28",
         "weight": 0.5,
+        "direction": "anti",
         "directionMultiplier": -1,
         "kind": "amendment"
       }

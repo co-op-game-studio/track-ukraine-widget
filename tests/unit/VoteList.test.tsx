@@ -22,7 +22,7 @@ function vote(rollCall: number, kind: VoteKind, weight: number): CuratedBillVote
   return {
     chamber: 'Senate', congress: 118, session: 2, rollCall,
     date: '2024-02-13', url: '', action: kind, actionDate: '2024-02-13',
-    weight, directionMultiplier: 1, kind,
+    weight, direction: 'pro', directionMultiplier: 1, kind,
   };
 }
 
@@ -32,7 +32,7 @@ function voteWithDates(date: string, actionDate: string): CuratedBillVote {
   return {
     chamber: 'House', congress: 117, session: 2, rollCall: 65,
     date, url: '', action: 'passage', actionDate,
-    weight: 1.0, directionMultiplier: 1, kind: 'passage',
+    weight: 1.0, direction: 'pro', directionMultiplier: 1, kind: 'passage',
   };
 }
 
