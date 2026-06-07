@@ -1733,6 +1733,38 @@ This deep link is **additive** and harness-only in spirit: it does not change th
 - AC-62.6: When an upstream key is unconfigured, the panel SHALL show "not configured" for that upstream rather than a misleading zero-usage gauge.
 - AC-62.7: Tests SHALL cover: the endpoint shape; youtube/congress estimates from seeded handle_status + audit rows; the unconfigured-key path (`dailyLimit: null`, `configured: false`); and that the response always carries `estimate: true`.
 
+### FR-63: Explicit per-vote direction (replaces inversion multiplier) (NEW v4.3.0)
+
+**Problem.** A roll-call vote's Ukraine direction is currently *derived* at scoring time from `bills.direction × votes.direction_multiplier`, where `direction_multiplier ∈ {−1, 0, +1}` and `−1` **inverts** the bill's direction (e.g. an Aye on a motion-to-recommit of a pro-Ukraine bill scores as anti-Ukraine). This indirection is hard for researchers and voters to reason about — a vote's meaning depends on two fields and a sign flip. The user directive: **separate roll-call votes from bills in terms of direction — no more inversion.** Each vote should state its own direction directly.
+
+**Decision.** Give each vote an explicit **`direction`** ∈ `{'pro', 'anti', 'neutral'}` meaning *"an Aye on this vote is pro / anti / neutral toward Ukraine."* Scoring reads the vote's own direction; it never consults `bills.direction` or a multiplier for votes. `bills.direction` continues to drive **sponsorship** valence (sponsoring a pro-Ukraine bill is pro), but no longer drives vote valence. See ADR-021.
+
+**Score-preserving mechanical conversion (migration step 1).** Derive each existing vote's explicit `direction` from its current `(bills.direction, direction_multiplier)` so that, immediately after migration, every member's score is unchanged:
+
+| bill.direction | direction_multiplier | → vote.direction |
+|----------------|----------------------|------------------|
+| pro-ukraine    | +1                   | pro              |
+| pro-ukraine    | −1                   | anti             |
+| anti-ukraine   | +1                   | anti             |
+| anti-ukraine   | −1                   | pro              |
+| neutral        | +1                   | neutral          |
+| neutral        | −1                   | anti  *(matches the legacy neutral+(−1)⇒pro-reference-then-flip special case in `computeValence`)* |
+| any            | 0                    | neutral          |
+
+This conversion reproduces today's `computeValence` output exactly for every `(billDir, dm, Aye/Nay)` combination (verified by an equivalence test, AC-63.4).
+
+**Multi-stage review (migration step 2).** After the score-preserving conversion, ALL votes SHALL be routed through a researcher review surface that re-confirms each vote's explicit direction (with special prominence for the previously-inverted `−1` votes). Scores MAY change as a result of this human review — that is expected and intended. The review is multi-stage: (a) a converted-but-unreviewed queue, (b) per-vote confirm/correct with the bill context shown, (c) an audited write of the confirmed direction. Until a vote is reviewed it keeps its mechanically-converted direction (no scoring gap).
+
+**Acceptance criteria:**
+- AC-63.1: The `votes` table SHALL gain a `direction TEXT NOT NULL DEFAULT 'neutral'` column constrained to `{'pro','anti','neutral'}`, plus a `direction_reviewed_at TEXT` (nullable; set when a researcher confirms the direction) and `direction_reviewed_by TEXT` (nullable actor email). A forward migration SHALL backfill `direction` from `(bills.direction, direction_multiplier)` per the conversion table above.
+- AC-63.2: `direction_multiplier` SHALL be retained on the table for one release as a deprecated, no-longer-read column (so rollback is possible), and SHALL be dropped in a later migration once the explicit-direction model is confirmed in prod. The scoring path SHALL NOT read it after this FR lands.
+- AC-63.3: `computeValence` SHALL gain a vote-scoring entry point that takes the vote's explicit `direction` and the member's cast (Aye/Nay/Present/Not-Voting) and returns the valence WITHOUT any bill-direction or multiplier argument: `pro+Aye→voted-pro`, `pro+Nay→voted-anti`, `anti+Aye→voted-anti`, `anti+Nay→voted-pro`, `neutral→unstated`, present/not-voting→`unstated`. Sponsorship valence (FR-15) still uses `bills.direction` and is unchanged.
+- AC-63.4: An equivalence test SHALL assert that for every `(billDirection ∈ {pro,anti,neutral}) × (dm ∈ {−1,0,+1}) × (cast ∈ {Aye,Nay,Present,Not-Voting})`, the new explicit-direction scoring produces the SAME valence as the legacy `computeValence(billDir, action, dm)` after applying the AC-63.1 conversion. This is the gate that proves the conversion is score-preserving.
+- AC-63.5: The embed data (`ukraineBills.json`) and the KV projection SHALL carry the explicit `direction` per vote. The build/seed/projector paths SHALL emit it. The classifier in `scripts/build-curated-bills.ts` SHALL assign an explicit `direction` per vote-kind instead of a `directionMultiplier` (mechanically: the kinds that were `−1` become `anti` on a pro bill etc., preserving today's output for the current corpus).
+- AC-63.6: The admin **vote-review surface** SHALL list votes by review state (unreviewed / reviewed), show each vote's bill, kind, current explicit direction, and the member-facing meaning ("Aye = pro-Ukraine"), and let a researcher confirm or change the direction. Each write SHALL be audited (actor + traceId + before/after) and set `direction_reviewed_at/by`. Previously-inverted votes SHALL be visually flagged for extra scrutiny.
+- AC-63.7: All researcher-facing and voter-facing copy SHALL describe a vote's direction directly (e.g. "Aye on this vote counts as pro-Ukraine") and SHALL NOT mention "inversion", "direction multiplier", or `−1`. (Folds in the punchlist "no more inversion" copy that was deferred from FR-61's docs pass.)
+- AC-63.8: Tests SHALL cover: the conversion table (AC-63.4 equivalence); the new `computeValence` vote entry point; the migration backfill; the projector/build emitting `direction`; the review-surface confirm/correct write + audit; and that no scoring path reads `direction_multiplier` after this FR.
+
 ### FR-9: Web Component Embedding
 The system SHALL be buildable as a self-contained Web Component using Shadow DOM for style isolation, distributable as a single IIFE JavaScript bundle.
 
