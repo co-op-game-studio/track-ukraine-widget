@@ -65,6 +65,12 @@ POLL_CONCURRENCY = "4"
 # is the single source of truth for the staleness window: handles polled
 # within (interval - 5min) are skipped to avoid double-pulls.
 SOCIAL_POLL_CRON = "0 6 * * *"
+# FR-61 / ADR-020 — UI-only admin shortlist. Comma-separated emails (case-
+# insensitive). /api/admin/config returns isAdmin=true for these users, and the
+# SPA shows the Admin/Config menu group only to them. NOT authorization — CF
+# Access is the boundary; every signed-in user is still fully authorized at the
+# API. Empty/unset ⇒ everyone is admin (fail-open, = pre-v4.3.0 behavior).
+ADMIN_EMAILS = ""
 
 [[kv_namespaces]]
 binding = "KV_VOTER_INFO"

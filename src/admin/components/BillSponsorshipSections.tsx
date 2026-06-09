@@ -302,7 +302,7 @@ const liStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--tk-border-soft)',
 };
 const originalMarker: React.CSSProperties = {
-  color: 'var(--tk-accent)',
+  color: 'var(--tk-link)',
   fontWeight: 700,
 };
 const actionsList: React.CSSProperties = {
@@ -339,7 +339,7 @@ const actionSrc: React.CSSProperties = {
   letterSpacing: '0.04em',
 };
 const actionVote: React.CSSProperties = {
-  color: 'var(--tk-accent)',
+  color: 'var(--tk-link)',
   fontWeight: 700,
 };
 const actionText: React.CSSProperties = {

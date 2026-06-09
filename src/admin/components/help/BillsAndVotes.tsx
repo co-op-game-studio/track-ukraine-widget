@@ -15,11 +15,11 @@ export function BillsAndVotes() {
 
       <H2>Where bill data comes from</H2>
       <P>
-        Bills are seeded and refreshed from the <strong>Congress.gov API v3</strong>. The publish
-        job fetches bill metadata, latest action, cosponsors, and summaries nightly and writes
-        them to the D1 database. Researchers can annotate bill records — but the upstream sync
-        will overwrite most fields on the next run, so curation lives in the separate fields
-        described below.
+        Bills are imported and refreshed automatically from the official Congress.gov record.
+        The system pulls bill metadata, the latest action, cosponsors, and summaries on a regular
+        schedule. Researchers can annotate bill records — but the automatic refresh will overwrite
+        most official fields on the next run, so your curation lives in the separate
+        researcher-editable fields described below.
       </P>
 
       <H2>Bill fields</H2>
@@ -44,9 +44,9 @@ export function BillsAndVotes() {
       </Ul>
 
       <Callout kind="warn">
-        Changing <strong>Ukraine direction</strong> on a bill immediately changes how every existing
-        vote and sponsorship on that bill is scored. This will shift legislator scores on the next
-        KV publish run. Double-check before saving.
+        Changing <strong>Ukraine direction</strong> on a bill changes how every sponsorship on that
+        bill is scored. This will shift legislator scores the next time scores are published.
+        Double-check before saving.
       </Callout>
 
       <H2>Votes (roll calls)</H2>
@@ -58,30 +58,37 @@ export function BillsAndVotes() {
         <Li><strong>Roll call ID</strong> — the Congress.gov identifier (<Code>house-118-456</Code> or <Code>senate-118-123</Code>).</Li>
         <Li><strong>Vote date</strong> — when the vote was held.</Li>
         <Li><strong>Vote type</strong> — e.g. <Code>passage</Code>, <Code>cloture</Code>, <Code>amendment</Code>, <Code>motion-to-recommit</Code>.</Li>
-        <Li><strong>Direction multiplier</strong> — <Code>+1</Code> (normal), <Code>−1</Code> (inverted — a Yea vote is actually anti-Ukraine, e.g. a motion to recommit), or <Code>0</Code> (ambiguous; vote contributes nothing to score).</Li>
-        <Li><strong>Researcher note</strong> — optional context shown in the embed.</Li>
+        <Li><strong>Direction</strong> — each vote states its OWN direction: <Code>pro</Code> (a Yea on this vote counts as pro-Ukraine), <Code>anti</Code> (a Yea counts as anti-Ukraine), or <Code>neutral</Code> (the vote doesn't count toward the score). You set this directly per vote — there is no "multiply by the bill" step.</Li>
+        <Li><strong>Details</strong> — optional context shown in the embed.</Li>
       </Ul>
 
-      <H3>Vote type and direction multiplier</H3>
+      <H3>Setting a vote's direction</H3>
       <P>
-        Most votes are straightforward: Yea = pro-Ukraine (if the bill is pro-Ukraine). But some
-        procedural votes are inverted. Use the direction multiplier to capture this:
+        Read each vote on its own terms: "if a member votes Yea here, is that good or bad for
+        Ukraine?" Set the direction to match. The bill's own direction is a separate field and does
+        not change how a vote is scored.
       </P>
       <Ul>
-        <Li><strong>Passage, cloture (invoke), motion-to-proceed</strong> — multiplier <Code>+1</Code>. A Yea advances the bill.</Li>
-        <Li><strong>Motion to recommit, tabling</strong> — multiplier <Code>−1</Code>. A Yea on a motion to recommit a pro-Ukraine bill kills it; the scorer inverts the direction.</Li>
-        <Li><strong>Truly ambiguous procedural votes</strong> — multiplier <Code>0</Code>. The vote doesn't cleanly signal Ukraine stance; use <Code>0</Code> to neutralize it from scoring.</Li>
+        <Li><strong>Passage, cloture (invoke), motion-to-proceed on a pro-Ukraine bill</strong> — <Code>pro</Code>. A Yea advances the bill.</Li>
+        <Li><strong>Motion to recommit a pro-Ukraine bill</strong> — <Code>anti</Code>. A Yea here tries to kill the bill, so a Yea is anti-Ukraine. (No inversion — you simply mark the vote <Code>anti</Code>.)</Li>
+        <Li><strong>A vote on an anti-Ukraine measure</strong> — <Code>anti</Code>. A Yea supports the anti-Ukraine measure.</Li>
+        <Li><strong>Truly ambiguous procedural votes</strong> — <Code>neutral</Code>. The vote doesn't cleanly signal a Ukraine stance, so it contributes nothing.</Li>
       </Ul>
+      <Callout kind="tip">
+        Use <strong>Admin › Vote review</strong> to walk through every vote and confirm its
+        direction. Votes that were historically scored by an "inversion" rule are flagged there for
+        a closer look.
+      </Callout>
 
       <H2>Cosponsors</H2>
       <P>
-        Cosponsors are synced automatically from Congress.gov. A cosponsor on a pro-Ukraine bill
+        Cosponsors are imported automatically from the official record. A cosponsor on a pro-Ukraine bill
         earns a positive score contribution (weight × 0.5 by default — half of a direct vote). A
         cosponsor on an anti-Ukraine bill earns a negative contribution.
       </P>
       <Callout kind="info">
         The sponsor of a bill earns a full 1× weight contribution, not 0.5×. The system
-        distinguishes between primary sponsor and cosponsor automatically via the Congress.gov data.
+        distinguishes between primary sponsor and cosponsor automatically from the official record.
       </Callout>
 
       <Divider />
@@ -91,14 +98,14 @@ export function BillsAndVotes() {
         <Li>Click <strong>+ New bill</strong> in Workspace › Bills.</Li>
         <Li>Enter the Bill ID in the format <Code>hr815-118</Code> (type + number + dash + congress).</Li>
         <Li>Set the Ukraine direction immediately — you cannot set it after the fact without changing scores.</Li>
-        <Li>The upstream sync will populate metadata fields (title, dates, etc.) on the next nightly run.</Li>
+        <Li>The automatic refresh will fill in the official fields (title, dates, etc.) on its next run.</Li>
       </Ul>
 
-      <H2>The publish job</H2>
+      <H2>When your edits go live</H2>
       <P>
-        The KV publish job reads from D1 and writes structured JSON to Cloudflare KV — the fast
-        read path the public widget uses. It runs after each deploy and can be triggered manually.
-        Score changes from your edits are not visible to widget users until the next publish run.
+        Your edits are saved immediately, but the public widget reads from a published copy of the
+        data that is refreshed periodically. Score changes from your edits become visible to the
+        public the next time scores are published — not instantly.
       </P>
     </HelpArticle>
   );

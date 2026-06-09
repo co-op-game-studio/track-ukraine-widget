@@ -9,7 +9,7 @@
  * CF Workers serves /admin/index.html and the SPA owns everything after #).
  */
 import { useEffect, useRef, useState } from 'react';
-import { Routes, Route, NavLink, useNavigate, useParams, Navigate } from 'react-router-dom';
+import { Routes, Route, NavLink, useNavigate, useParams, useLocation, Navigate } from 'react-router-dom';
 import { get } from './fetcher';
 import { BillsTab } from './components/BillsTab';
 import { PeopleTab } from './components/PeopleTab';
@@ -43,22 +43,32 @@ export interface QuotePrefill {
 interface MenuLink {
   label: string;
   to: string;
-  /** Whether this link should match the current path (exact or prefix). */
-  end?: boolean;
+}
+
+/**
+ * Section-aware active match for the megamenu. A link is "active" when the
+ * current path equals its target OR is a child of it (`/people/:bioguide`
+ * keeps the People link lit). Sibling leaves stay distinct because
+ * `/settings/cache` does not start with `/settings/keywords/`.
+ */
+function isLinkActive(pathname: string, to: string): boolean {
+  return pathname === to || pathname.startsWith(to + '/');
 }
 
 interface MenuColumn {
   heading: string;
   links: MenuLink[];
+  /** FR-61 AC-61.3 — rendered only when the actor is an admin (isAdmin hint). */
+  adminOnly?: boolean;
 }
 
-const COLUMNS: MenuColumn[] = [
+export const COLUMNS: MenuColumn[] = [
   {
     heading: 'Workspace',
     links: [
-      { label: 'People',   to: '/people',   end: true },
-      { label: 'Bills',    to: '/bills',    end: true },
-      { label: 'Activity', to: '/activity', end: true },
+      { label: 'People',   to: '/people'   },
+      { label: 'Bills',    to: '/bills'    },
+      { label: 'Activity', to: '/activity' },
     ],
   },
   {
@@ -74,12 +84,16 @@ const COLUMNS: MenuColumn[] = [
   },
   {
     heading: 'Admin',
+    adminOnly: true,
     links: [
       { label: 'Keywords',       to: '/settings/keywords' },
       { label: 'Tags',           to: '/settings/tags' },
-      { label: 'Cache',          to: '/settings/cache' },
-      { label: 'Poll status',    to: '/settings/poll-status' },
+      { label: 'Vote review',    to: '/settings/vote-review' },
+      { label: 'Weight tuner',   to: '/settings/weight-tuner' },
+      { label: 'Sync status',    to: '/settings/poll-status' },
+      { label: 'API quota',      to: '/settings/api-usage' },
       { label: 'Data freshness', to: '/settings/freshness' },
+      { label: 'Cache',          to: '/settings/cache' },
       { label: 'App config',     to: '/settings/config' },
     ],
   },
@@ -88,16 +102,26 @@ const COLUMNS: MenuColumn[] = [
     links: [
       { label: 'Getting started', to: '/help/getting-started' },
       { label: 'Curation guide',  to: '/help/curation' },
-      { label: 'People & polls',  to: '/help/people-polls' },
+      { label: 'People & sync',   to: '/help/people-polls' },
       { label: 'Bills & votes',   to: '/help/bills-votes' },
       { label: 'Scoring',         to: '/help/scoring' },
     ],
   },
 ];
 
-function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElement {
+/**
+ * FR-61 AC-61.3 — columns visible for the current admin state. `adminOnly`
+ * columns appear only when `isAdmin === true`; while the hint is still loading
+ * (`null`) they stay hidden so researchers don't see a flash of operator nav.
+ */
+export function visibleColumns(isAdmin: boolean | null): MenuColumn[] {
+  return COLUMNS.filter((c) => !c.adminOnly || isAdmin === true);
+}
+
+function Megamenu({ onNavigate, isAdmin }: { onNavigate: () => void; isAdmin: boolean | null }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const { pathname } = useLocation();
 
   // Close on outside click + Escape.
   useEffect(() => {
@@ -134,23 +158,25 @@ function Megamenu({ onNavigate }: { onNavigate: () => void }): React.ReactElemen
       </button>
       {open && (
         <div style={menuStyles.panel} role="menu">
-          {COLUMNS.map((col) => (
+          {visibleColumns(isAdmin).map((col) => (
             <div key={col.heading} style={menuStyles.column}>
               <div style={menuStyles.columnHeading}>{col.heading}</div>
-              {col.links.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  end={link.end}
-                  onClick={() => { setOpen(false); onNavigate(); }}
-                  style={({ isActive }) => ({
-                    ...menuStyles.link,
-                    ...(isActive ? menuStyles.linkActive : {}),
-                  })}
-                >
-                  {link.label}
-                </NavLink>
-              ))}
+              {col.links.map((link) => {
+                const active = isLinkActive(pathname, link.to);
+                return (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    onClick={() => { setOpen(false); onNavigate(); }}
+                    style={{
+                      ...menuStyles.link,
+                      ...(active ? menuStyles.linkActive : {}),
+                    }}
+                  >
+                    {link.label}
+                  </NavLink>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -167,6 +193,8 @@ export function App() {
   const [whoami, setWhoami] = useState<string | null>(null);
   const [whoamiError, setWhoamiError] = useState<string | null>(null);
   const [quotePrefill, setQuotePrefill] = useState<QuotePrefill | null>(null);
+  // FR-61 — null = still loading (Admin nav hidden until resolved).
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const navigate = useNavigate();
 
   useTheme();
@@ -179,6 +207,15 @@ export function App() {
       });
   }, []);
 
+  useEffect(() => {
+    // FR-61 AC-61.1 — fetch the admin hint. On any error, leave Admin hidden
+    // (treat as non-admin); the config endpoint never rejects, so an error here
+    // means a transport problem, and hiding operator nav is the safe default.
+    get<{ isAdmin?: boolean }>('/api/admin/config')
+      .then((r) => setIsAdmin(r.isAdmin === true))
+      .catch(() => setIsAdmin(false));
+  }, []);
+
   function curateAsQuote(data: QuotePrefill) {
     setQuotePrefill(data);
     navigate('/curation/add');
@@ -189,7 +226,21 @@ export function App() {
       <header style={styles.header}>
         <div style={styles.headerLeft}>
           <strong style={styles.title}>Track Ukraine — Admin</strong>
-          <Megamenu onNavigate={() => {}} />
+          <Megamenu onNavigate={() => {}} isAdmin={isAdmin} />
+          {/* Quick-access copy of the Getting Started link, next to the menu, so
+              new researchers always have a visible doorway to the docs without
+              opening the megamenu. */}
+          <NavLink
+            to="/help/getting-started"
+            style={({ isActive }) => ({
+              ...menuStyles.trigger,
+              ...(isActive ? menuStyles.triggerOpen : {}),
+              textDecoration: 'none',
+            })}
+          >
+            <span aria-hidden="true">ⓘ</span>
+            <span>Getting started</span>
+          </NavLink>
         </div>
         <div style={styles.headerRight}>
           <span style={styles.whoami}>

@@ -9,6 +9,7 @@
  */
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { loadVoteOverrides, lookupOverride, type Chamber } from './load-vote-overrides';
+import { directionFromLegacy } from '../src/services/valence';
 
 // ─── API key ────────────────────────────────────────────────────────────────
 
@@ -384,6 +385,8 @@ interface CuratedVote {
   action: string;
   actionDate: string;
   weight: number;
+  /** FR-63 — assigned after bill direction is classified (see enrichBill). */
+  direction?: 'pro' | 'anti' | 'neutral';
   directionMultiplier: -1 | 0 | 1;
   kind: VoteKind;
   overrideApplied?: true;
@@ -489,6 +492,15 @@ async function enrichBill(entry: CuratedSeed): Promise<CuratedBill> {
     ? { direction: entry.direction, reason: 'manual override' }
     : classifyDirection(bill, bill.latestAction?.text);
 
+  // FR-63 — now that the bill's direction is known, give each vote its OWN
+  // explicit direction (score-preserving conversion from the multiplier). A
+  // YAML override's explicit `direction` wins over the converted value.
+  const votesWithDirection = dedupedVotes.map((v) => {
+    const ov = lookupOverride(OVERRIDES, v.chamber, v.congress, v.session, v.rollCall);
+    const direction = ov?.direction ?? directionFromLegacy(classification.direction, v.directionMultiplier);
+    return { ...v, direction };
+  });
+
   return {
     congress,
     type: type.toUpperCase(),
@@ -510,7 +522,7 @@ async function enrichBill(entry: CuratedSeed): Promise<CuratedBill> {
           updateDate: latestSummary.updateDate ?? null,
         }
       : null,
-    votes: dedupedVotes,
+    votes: votesWithDirection,
   };
 }
 

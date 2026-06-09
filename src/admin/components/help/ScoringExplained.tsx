@@ -21,8 +21,8 @@ export function ScoringExplained() {
 
       <H2>Score range and interpretation</H2>
       <Ul>
-        <Li><Badge color="#1a7f3c">+50 to +100</Badge> — Strongly supportive. Consistent pro-Ukraine votes, sponsorships, and statements.</Li>
-        <Li><Badge color="#2b7a2b">+10 to +49</Badge> — Generally supportive with occasional abstentions or mixed signals.</Li>
+        <Li><Badge color="#1a7f3c">+50 to +100</Badge> — Strong support. Consistent pro-Ukraine votes, sponsorships, and statements.</Li>
+        <Li><Badge color="#2b7a2b">+10 to +49</Badge> — General support with occasional abstentions or mixed signals.</Li>
         <Li><Badge color="#888">−10 to +10</Badge> — Ambiguous or very limited record. Do not read this as "neutral" — it may simply mean the legislator has avoided taking a public position.</Li>
         <Li><Badge color="#b45309">−49 to −11</Badge> — Generally opposing, with some supportive votes or statements.</Li>
         <Li><Badge color="#b91c1c">−100 to −50</Badge> — Strongly opposing. Consistent anti-Ukraine votes, obstruction, or statements.</Li>
@@ -33,33 +33,35 @@ export function ScoringExplained() {
 
       <H3>1. Roll-call votes</H3>
       <P>
-        Each vote on a Ukraine-tagged roll call contributes:
+        Each vote carries its OWN direction — <Code>pro</Code>, <Code>anti</Code>, or{' '}
+        <Code>neutral</Code> — meaning "a Yea on this vote is pro / anti / neutral toward Ukraine."
+        Scoring reads that directly; there is no "bill direction × multiplier" step.
       </P>
       <Ul>
-        <Li><strong>Yea</strong> on a pro-Ukraine bill → positive contribution.</Li>
-        <Li><strong>Nay</strong> on a pro-Ukraine bill → negative contribution.</Li>
-        <Li><strong>Yea</strong> on an anti-Ukraine bill → negative contribution (direction is inverted).</Li>
-        <Li><strong>Nay</strong> on an anti-Ukraine bill → positive contribution.</Li>
-        <Li><strong>Present / Not voting</strong> → zero contribution (abstention, no signal).</Li>
+        <Li><strong>Yea</strong> on a <Code>pro</Code> vote → positive contribution.</Li>
+        <Li><strong>Nay</strong> on a <Code>pro</Code> vote → negative contribution.</Li>
+        <Li><strong>Yea</strong> on an <Code>anti</Code> vote → negative contribution.</Li>
+        <Li><strong>Nay</strong> on an <Code>anti</Code> vote → positive contribution.</Li>
+        <Li><strong>Neutral votes, Present, or Not voting</strong> → zero contribution.</Li>
       </Ul>
       <P>
-        The magnitude of the contribution is the <strong>bill weight</strong> × the <strong>vote
-        direction multiplier</strong>. Most votes are multiplier <Code>+1</Code>; procedural votes
-        that invert the signal (motions to recommit) use <Code>−1</Code>.
+        The magnitude of the contribution is the vote's <strong>weight</strong>. A procedural vote
+        like a motion to recommit (where a Yea tries to kill a pro-Ukraine bill) is simply marked{' '}
+        <Code>anti</Code> — no sign-flipping to reason about.
       </P>
 
       <H3>2. Bill sponsorships and cosponsorships</H3>
       <Ul>
         <Li><strong>Primary sponsor</strong> of a pro-Ukraine bill → full bill-weight contribution.</Li>
         <Li><strong>Cosponsor</strong> of a pro-Ukraine bill → 0.5 × bill-weight contribution.</Li>
-        <Li>Same logic inverted for anti-Ukraine bills.</Li>
+        <Li>For an anti-Ukraine bill, sponsoring/cosponsoring contributes negatively instead.</Li>
       </Ul>
 
       <H3>3. Curated quotes</H3>
       <P>
         Each saved quote contributes <strong>direction × weight</strong> to the score. A
-        pro-Ukraine quote with weight 1.0 contributes the same as a yes vote on a weight-1.0 bill.
-        A dismissively anti-Ukraine floor speech scored at weight 2.0 and direction −1 contributes
+        pro-Ukraine quote with weight 1.0 contributes the same as a Yea vote on a weight-1.0 bill.
+        A dismissively anti-Ukraine floor speech scored anti-Ukraine at weight 2.0 contributes
         −2.0 — equivalent to two Nay votes on a standard bill.
       </P>
 
@@ -73,8 +75,8 @@ export function ScoringExplained() {
         <Li>Voting <strong>Yea</strong> on a motion to recommit a pro-Ukraine bill.</Li>
       </Ul>
       <P>
-        These are captured by setting the <strong>vote direction multiplier</strong> to <Code>−1</Code>
-        on the relevant roll-call record. The system then scores a Yea as anti-Ukraine.
+        These are captured simply by setting the vote's <strong>direction</strong> to{' '}
+        <Code>anti</Code> on the relevant roll call, so a Yea scores as anti-Ukraine.
       </P>
 
       <H2>Normalization</H2>
@@ -91,9 +93,9 @@ export function ScoringExplained() {
         <Li>If raw score &lt; party median: normalize to −100 to +10 proportionally.</Li>
       </Ul>
       <Callout kind="info">
-        Party priors are computed at publish time and stamped on each member's KV record. If the
-        member roster changes significantly (many new scores, a wave election), re-running the
-        publish job will re-normalize all scores automatically.
+        Party priors are computed when scores are published and stored on each member's record. If the
+        member roster changes significantly (many new scores, a wave election), the next publish
+        re-normalizes all scores automatically.
       </Callout>
 
       <Divider />
@@ -111,15 +113,15 @@ export function ScoringExplained() {
 
       <H2>When scores change</H2>
       <Ul>
-        <Li>Editing a quote's direction or weight → score changes after the next KV publish run.</Li>
+        <Li>Editing a quote's direction or weight → score changes the next time scores are published.</Li>
         <Li>Adding a new bill and setting its direction → all existing votes on that bill are now scored.</Li>
         <Li>Changing a bill's Ukraine direction → all existing votes and sponsorships on that bill flip.</Li>
         <Li>Deleting a quote → score decreases (or increases) by that quote's contribution.</Li>
       </Ul>
       <Callout kind="warn">
-        Score changes are not immediate to public widget users. The KV publish job runs
-        after each deploy and can be triggered manually via the CI/CD pipeline. Plan accordingly
-        if a score correction needs to go live quickly.
+        Score changes are not immediate for public widget users. Scores are published on a regular
+        schedule (and can be published manually). Plan accordingly if a score correction needs to
+        go live quickly.
       </Callout>
     </HelpArticle>
   );

@@ -1326,14 +1326,6 @@
   max-width: 100%;
   margin-top: 0.15rem;
 }
-/* FR-43 AC-43.16: continuous red→amber→green confidence indicator on
-   the "N actions (M exc)" line. Overrides the muted grey default so the
-   signal is legible at a glance. Color comes from inline style; the
-   class just owns the weight + size bump. */
-.viw-score-justification-confidence {
-  font-weight: 800;
-  letter-spacing: 0.01em;
-}
 /* Short/full justification swap — by default show the full sentence and
    hide the short one. Narrow viewports (<900px) swap them to save space. */
 .viw-justification-short { display: none; }

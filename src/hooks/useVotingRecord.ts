@@ -19,7 +19,7 @@ import { useCallback, useRef, useState } from 'react';
 import {
   type CuratedBill,
 } from '../services/ukraineFilter';
-import { computeValence, type Valence } from '../services/valence';
+import { valenceForVote, type Valence } from '../services/valence';
 import { computeUkraineScore, type UkraineScore } from '../services/ukraineScore';
 import { isObstructionVote } from '../services/obstruction';
 import { fetchRollCallRoster } from '../services/rollCallRosters';
@@ -122,11 +122,8 @@ function actionFromVote(cast: VoteForMember['memberVote']): 'voted-aye' | 'voted
 }
 
 function toMemberVoteRow(row: VoteForMember): MemberVoteRow {
-  const valence = computeValence(
-    row.bill.direction,
-    actionFromVote(row.memberVote),
-    row.vote.directionMultiplier,
-  );
+  // FR-63 — score from the vote's own explicit direction.
+  const valence = valenceForVote(row.vote.direction, actionFromVote(row.memberVote));
   const isObstruction = isObstructionVote(row.bill, row.vote, row.memberVote, valence);
   return { ...row, valence, isObstruction };
 }

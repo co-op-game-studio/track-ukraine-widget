@@ -118,7 +118,7 @@ describe('SocialFeedTab — sub-nav', () => {
     render(<SocialFeedTab />);
     fireEvent.click(screen.getByRole('button', { name: /Feed Queue/ }));
     await waitFor(() => expect(screen.queryByText(/Loading queue/i)).not.toBeInTheDocument(), { timeout: 3000 });
-    expect(screen.getByText(/Poll Social Feeds/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sync Social Feeds/i)).toBeInTheDocument();
     expect(screen.getByText(/0 items total/i)).toBeInTheDocument();
   });
 
@@ -591,7 +591,7 @@ describe('QueueView — poll controls', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: /Bluesky/ })).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByRole('button', { name: /Mastodon/ })).toBeInTheDocument();
     // Auto-defaults to all bulk-eligible platforms enabled → "Poll all".
-    await waitFor(() => expect(screen.getByRole('button', { name: /Poll all/i })).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByRole('button', { name: /Sync all/i })).toBeInTheDocument(), { timeout: 3000 });
   });
 
   it('disables non-bulk-eligible platforms with a 🔒 marker', async () => {
@@ -638,9 +638,9 @@ describe('QueueView — poll controls', () => {
     // init effect has fired and enabledPlatforms is populated.
     const mastodonBtn = await screen.findByRole('button', { name: /^Mastodon$/i }, { timeout: 3000 });
     // Initially everything bulk-eligible is enabled → "Poll all platforms".
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Poll all platforms$/i })).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Sync all platforms$/i })).toBeInTheDocument(), { timeout: 3000 });
     fireEvent.click(mastodonBtn);
-    await waitFor(() => expect(screen.getByRole('button', { name: /^Poll 1 platform$/i })).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Sync 1 platform$/i })).toBeInTheDocument(), { timeout: 3000 });
   });
 
   it('runs the poll loop end-to-end with a single OK handle and shows the summary', async () => {
@@ -674,12 +674,12 @@ describe('QueueView — poll controls', () => {
     // bulkEligibleSet useEffect has fired and the Poll button is enabled.
     await screen.findByRole('button', { name: /^Bluesky$/i }, { timeout: 3000 });
     const pollBtn = await waitFor(
-      () => screen.getByRole('button', { name: /^Poll all platform$/i }),
+      () => screen.getByRole('button', { name: /^Sync all platform$/i }),
       { timeout: 3000 },
     );
     fireEvent.click(pollBtn);
     // Summary line appears once polling finishes ("1 polled" / "1 ok").
-    await waitFor(() => expect(screen.getByText(/1 polled/)).toBeInTheDocument(), { timeout: 5000 });
+    await waitFor(() => expect(screen.getByText(/1 synced/)).toBeInTheDocument(), { timeout: 5000 });
     expect(screen.getByText(/1 ok/)).toBeInTheDocument();
   });
 
@@ -700,7 +700,7 @@ describe('QueueView — poll controls', () => {
     render(<QueueView />);
     await screen.findByRole('button', { name: /^Bluesky$/i }, { timeout: 3000 });
     const pollBtn = await waitFor(
-      () => screen.getByRole('button', { name: /^Poll all platform$/i }),
+      () => screen.getByRole('button', { name: /^Sync all platform$/i }),
       { timeout: 3000 },
     );
     fireEvent.click(pollBtn);
@@ -736,7 +736,7 @@ describe('QueueView — poll controls', () => {
     render(<QueueView />);
     await screen.findByRole('button', { name: /^Bluesky$/i }, { timeout: 3000 });
     const pollBtn = await waitFor(
-      () => screen.getByRole('button', { name: /^Poll all platform$/i }),
+      () => screen.getByRole('button', { name: /^Sync all platform$/i }),
       { timeout: 3000 },
     );
     fireEvent.click(pollBtn);
@@ -774,7 +774,7 @@ describe('QueueView — poll controls', () => {
     render(<QueueView />);
     await screen.findByRole('button', { name: /^Bluesky$/i }, { timeout: 3000 });
     const pollBtn = await waitFor(
-      () => screen.getByRole('button', { name: /^Poll all platform$/i }),
+      () => screen.getByRole('button', { name: /^Sync all platform$/i }),
       { timeout: 3000 },
     );
     fireEvent.click(pollBtn);
@@ -800,7 +800,7 @@ describe('QueueView — poll controls', () => {
     render(<QueueView />);
     await screen.findByRole('button', { name: /^Bluesky$/i }, { timeout: 3000 });
     const pollBtn = await waitFor(
-      () => screen.getByRole('button', { name: /^Poll all platform$/i }),
+      () => screen.getByRole('button', { name: /^Sync all platform$/i }),
       { timeout: 3000 },
     );
     fireEvent.click(pollBtn);

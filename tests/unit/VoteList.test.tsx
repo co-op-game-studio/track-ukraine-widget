@@ -22,7 +22,17 @@ function vote(rollCall: number, kind: VoteKind, weight: number): CuratedBillVote
   return {
     chamber: 'Senate', congress: 118, session: 2, rollCall,
     date: '2024-02-13', url: '', action: kind, actionDate: '2024-02-13',
-    weight, directionMultiplier: 1, kind,
+    weight, direction: 'pro', directionMultiplier: 1, kind,
+  };
+}
+
+/** Like vote(), but lets a test set the raw `date` (UTC timestamp) and the
+ *  legislative `actionDate` independently — used for AC-21.6. */
+function voteWithDates(date: string, actionDate: string): CuratedBillVote {
+  return {
+    chamber: 'House', congress: 117, session: 2, rollCall: 65,
+    date, url: '', action: 'passage', actionDate,
+    weight: 1.0, direction: 'pro', directionMultiplier: 1, kind: 'passage',
   };
 }
 
@@ -92,6 +102,32 @@ describe('VoteList states', () => {
   it('renders an empty-state message when no clusters and no error', () => {
     render(<VoteList clusters={[]} />);
     expect(screen.getByText(/No Ukraine-related votes/i)).toBeInTheDocument();
+  });
+});
+
+describe('VoteList — vote date (AC-21.6)', () => {
+  it('shows the legislative actionDate, not the UTC-day slice of `date`', () => {
+    // 2022-03-10T02:49:07Z is the evening of March 9 in Washington (EST).
+    // actionDate carries the correct legislative date: 2022-03-09.
+    const cluster: ClusteredMemberVoteWithValence = {
+      primary: row(voteWithDates('2022-03-10T02:49:07Z', '2022-03-09'), 'Aye', 'voted-pro', false),
+      procedural: [],
+    };
+    const { container } = render(<VoteList clusters={[cluster]} />);
+    const cell = container.querySelector('.viw-votelist-date')!;
+    // Must render Mar 9, 2022 — NOT Mar 10.
+    expect(cell.textContent).toMatch(/Mar 9, 2022/);
+    expect(cell.textContent).not.toMatch(/Mar 10/);
+  });
+
+  it('falls back to the date slice when actionDate is empty', () => {
+    const cluster: ClusteredMemberVoteWithValence = {
+      primary: row(voteWithDates('2024-04-20T17:52:33Z', ''), 'Aye', 'voted-pro', false),
+      procedural: [],
+    };
+    const { container } = render(<VoteList clusters={[cluster]} />);
+    const cell = container.querySelector('.viw-votelist-date')!;
+    expect(cell.textContent).toMatch(/Apr 20, 2024/);
   });
 });
 

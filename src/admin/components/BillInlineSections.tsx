@@ -71,25 +71,18 @@ function blankVoteDraft(): VoteDraft {
   };
 }
 
-/** AC-52.24 — explain what `+1` / `−1` direction multiplier means for THIS bill. */
+/** AC-63.7 — bill direction context. Per FR-63 each vote now carries its OWN
+ *  direction (pro/anti/neutral); the bill's direction only drives sponsorship
+ *  scoring. No inversion language. Set a vote's direction in Admin › Vote review. */
 function DirectionStrip({ direction }: { direction?: string }) {
   if (!direction) return null;
   let gloss: React.ReactNode = null;
-  if (direction === 'pro-ukraine') {
+  if (direction === 'pro-ukraine' || direction === 'anti-ukraine') {
     gloss = (
       <>
-        {' — '}
-        <code>+1</code> means voting <strong>for Ukraine</strong>,{' '}
-        <code>−1</code> means voting <strong>against</strong>.
-      </>
-    );
-  } else if (direction === 'anti-ukraine') {
-    gloss = (
-      <>
-        {' — '}
-        <code>+1</code> means voting <strong>against Ukraine</strong> (the
-        bill's intent),{' '}
-        <code>−1</code> means voting <strong>for</strong>.
+        {' — '}drives <strong>sponsorship</strong> scoring. Each roll-call vote sets its{' '}
+        <strong>own direction</strong> (pro / anti / neutral) in{' '}
+        <strong>Vote review</strong>.
       </>
     );
   }

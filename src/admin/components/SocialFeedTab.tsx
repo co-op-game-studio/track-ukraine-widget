@@ -924,7 +924,7 @@ export function QueueView({ onCurateAsQuote }: {
         gap: 8,
       }}>
         <div style={{ fontSize: 'var(--tk-fs-xs)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--tk-muted)' }}>
-          Poll Social Feeds
+          Sync Social Feeds
         </div>
         <div style={styles.toolRow}>
           {availablePlatforms.map((p) => {
@@ -933,7 +933,7 @@ export function QueueView({ onCurateAsQuote }: {
             const reasonNotClickable = !p.available
               ? `${PLATFORM_LABELS[slug] ?? slug} not available: ${p.error ?? 'health check failed'}`
               : !p.bulkEligible
-                ? `${PLATFORM_LABELS[slug] ?? slug} is excluded from bulk polling (quota-bound). Re-poll individuals from their profile.`
+                ? `${PLATFORM_LABELS[slug] ?? slug} is excluded from bulk sync (quota-bound). Sync individuals from their profile.`
                 : '';
             return (
               <button
@@ -941,7 +941,7 @@ export function QueueView({ onCurateAsQuote }: {
                 type="button"
                 onClick={() => clickable && togglePollPlatform(slug)}
                 disabled={polling || !clickable}
-                title={clickable ? `Toggle ${PLATFORM_LABELS[slug] ?? slug} for bulk poll` : reasonNotClickable}
+                title={clickable ? `Toggle ${PLATFORM_LABELS[slug] ?? slug} for bulk sync` : reasonNotClickable}
                 style={{
                   ...styles.platformToggle,
                   ...(enabledPlatforms.has(slug) ? styles.platformToggleActive : {}),
@@ -965,7 +965,7 @@ export function QueueView({ onCurateAsQuote }: {
                 opacity: enabledPlatforms.size === 0 ? 0.5 : 1,
               }}
             >
-              Poll {enabledPlatforms.size === bulkEligibleSet.size ? 'all' : enabledPlatforms.size} platform{enabledPlatforms.size !== 1 ? 's' : ''}
+              Sync {enabledPlatforms.size === bulkEligibleSet.size ? 'all' : enabledPlatforms.size} platform{enabledPlatforms.size !== 1 ? 's' : ''}
             </button>
           ) : (
             <button
@@ -1090,13 +1090,13 @@ export function QueueView({ onCurateAsQuote }: {
         {/* Final summary */}
         {!polling && pollLog.length > 0 && (
           <div style={{ fontSize: 'var(--tk-fs-sm)', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <span>{logTotals.ok + logTotals.errors} polled</span>
+            <span>{logTotals.ok + logTotals.errors} synced</span>
             <span style={{ color: '#22c55e', fontWeight: 700 }}>{logTotals.ok} ok</span>
             {logTotals.errors > 0 && <span style={{ color: 'var(--tk-danger)', fontWeight: 700 }}>{logTotals.errors} failed</span>}
             {logTotals.skipped > 0 && <span style={{ color: 'var(--tk-muted)' }}>{logTotals.skipped} skipped (cached)</span>}
             {logTotals.newPosts > 0 && <span style={{ color: '#22c55e' }}>+{logTotals.newPosts} new posts</span>}
             {logTotals.dupes > 0 && <span style={{ color: 'var(--tk-muted)' }}>{logTotals.dupes} dupes</span>}
-            {logTotals.kwHits > 0 && <span style={{ color: 'var(--tk-accent)' }}>{logTotals.kwHits} keyword hits</span>}
+            {logTotals.kwHits > 0 && <span style={{ color: 'var(--tk-link)' }}>{logTotals.kwHits} keyword hits</span>}
             <button
               type="button"
               onClick={() => { setPollLog([]); setPollProgress(null); }}
@@ -1548,8 +1548,8 @@ export function KeywordsView() {
                   onClick={() => toggleActive(k.id, !k.active)}
                   style={{
                     ...styles.tinyBtn,
-                    color: k.active ? 'var(--tk-danger)' : 'var(--tk-accent)',
-                    borderColor: k.active ? 'var(--tk-danger)' : 'var(--tk-accent)',
+                    color: k.active ? 'var(--tk-danger)' : 'var(--tk-success)',
+                    borderColor: k.active ? 'var(--tk-danger)' : 'var(--tk-success)',
                   }}
                 >
                   {k.active ? 'Disable' : 'Enable'}

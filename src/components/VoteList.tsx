@@ -192,7 +192,7 @@ function VoteRow({
         )}
         {comments.length > 0 && <CommentExpand comments={comments} />}
       </td>
-      <td className="viw-votelist-date" data-label="Date">{safeDate(row.vote.date)}</td>
+      <td className="viw-votelist-date" data-label="Date">{voteDateLabel(row.vote)}</td>
       <td data-label="Position">
         <span
           className={`viw-vote ${positionPillClass(row)}`}
@@ -238,6 +238,21 @@ function displayPosition(row: MemberVoteRow): string {
 function safeDate(s: string): string {
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return formatDate(s.slice(0, 10));
   return s;
+}
+
+/**
+ * AC-21.6 — display the legislative calendar date of a roll-call vote.
+ *
+ * `vote.date` is a UTC timestamp from Congress.gov; slicing its `YYYY-MM-DD`
+ * shifts evening-in-Washington votes onto the next UTC day (e.g.
+ * `2022-03-10T02:49:07Z` was the night of March 9 EST). `vote.actionDate` is
+ * the date-only legislative date and is correct, so prefer it. Fall back to the
+ * `date` slice when `actionDate` is missing.
+ */
+function voteDateLabel(vote: { date: string; actionDate?: string | null }): string {
+  const action = vote.actionDate?.trim();
+  if (action && /^\d{4}-\d{2}-\d{2}/.test(action)) return formatDate(action.slice(0, 10));
+  return safeDate(vote.date);
 }
 
 function shortenAction(t: string): string {

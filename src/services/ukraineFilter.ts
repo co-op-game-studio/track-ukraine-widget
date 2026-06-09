@@ -10,6 +10,7 @@
  * Traces to: FR-11, FR-12, design.md §4.4b
  */
 import ukraineBills from '../data/ukraineBills.json';
+import type { VoteDirection } from './valence';
 
 export type VoteKind =
   | 'passage'
@@ -36,10 +37,15 @@ export interface CuratedBillVote {
   /** Weight in [0, 1] — see design.md §4.7. 0 = excluded from scoring. */
   weight: number;
   /**
-   * Direction multiplier applied to the valence sign when scoring.
-   * +1 = vote direction aligns with bill direction (normal case).
-   * -1 = vote direction is inverted (motion-to-recommit: Aye = against).
-   *  0 = ambiguous; skip for scoring (motion-to-table, motion-to-reconsider).
+   * FR-63 — the vote's OWN Ukraine direction: "an Aye on this vote is
+   * pro / anti / neutral toward Ukraine." Scoring reads this directly
+   * (valenceForVote); it no longer derives valence from the bill direction.
+   */
+  direction: VoteDirection;
+  /**
+   * @deprecated FR-63 — legacy inversion multiplier, no longer read by scoring.
+   * Retained for one release for rollback + so older tooling doesn't break.
+   * +1 = aligned with bill, −1 = inverted, 0 = ambiguous. Use `direction`.
    */
   directionMultiplier: -1 | 0 | 1;
   kind: VoteKind;

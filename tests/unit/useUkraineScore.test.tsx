@@ -22,7 +22,7 @@ function voteRow(valence: MemberVoteRow['valence'], weight: number): MemberVoteR
     vote: {
       chamber: 'Senate', congress: 118, session: 2, rollCall: 154,
       date: '2024', url: '', action: 'Passed', actionDate: '2024',
-      weight, directionMultiplier: 1, kind: 'passage',
+      weight, direction: 'pro', directionMultiplier: 1, kind: 'passage',
     },
     memberVote: 'Aye',
     valence,

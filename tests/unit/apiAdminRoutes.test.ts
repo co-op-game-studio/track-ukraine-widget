@@ -248,6 +248,26 @@ class FakeStmt implements D1PreparedStatementLike {
         .slice(0, limit);
       return { success: true, results: rows };
     }
+    // FR-62 api-usage: SELECT COUNT(*) AS n FROM <table> WHERE ...
+    const countQ = q.match(/^SELECT\s+COUNT\(\*\)\s+AS\s+n\s+FROM\s+(\w+)/i);
+    if (countQ) {
+      const table = countQ[1]!;
+      // We don't replicate the WHERE filters here — the api-usage tests only
+      // assert shape with empty tables, so a count of the table length is fine.
+      const n = (this.d1.tables[table] ?? []).length;
+      return { success: true, results: [{ n }] };
+    }
+    // FR-62 api-usage: last rate-limit row from mocs_social_handles … LIMIT 1
+    const rateLimitQ = q.match(/FROM\s+mocs_social_handles[\s\S]*last_poll_status\s*=\s*'error'/i);
+    if (rateLimitQ) {
+      return { success: true, results: [] };
+    }
+    // FR-63 vote-review: SELECT v.*, b... FROM votes v JOIN bills b ...
+    const voteReviewQ = q.match(/FROM\s+votes\s+v\s+JOIN\s+bills\s+b/i);
+    if (voteReviewQ) {
+      return { success: true, results: [] };
+    }
+
     const list = q.match(/^SELECT\s+\*\s+FROM\s+(\w+)/i);
     if (list) return { success: true, results: this.d1.tables[list[1]!] ?? [] };
     throw new Error(`unhandled: ${q}`);
@@ -315,6 +335,9 @@ class FakeKV implements KVLike {
 interface MakeEnvOpts {
   pollConcurrency?: string;
   socialPollCron?: string;
+  adminEmails?: string;
+  youtubeKey?: boolean;
+  congressKey?: boolean;
 }
 
 function makeEnv(d1: FakeD1, kv: FakeKV, opts: MakeEnvOpts = {}): ProxyEnv {
@@ -326,6 +349,9 @@ function makeEnv(d1: FakeD1, kv: FakeKV, opts: MakeEnvOpts = {}): ProxyEnv {
   };
   if (opts.pollConcurrency !== undefined) env['POLL_CONCURRENCY'] = opts.pollConcurrency;
   if (opts.socialPollCron !== undefined) env['SOCIAL_POLL_CRON'] = opts.socialPollCron;
+  if (opts.adminEmails !== undefined) env['ADMIN_EMAILS'] = opts.adminEmails;
+  if (opts.youtubeKey) env['YOUTUBE_API_KEY'] = 'yt-key';
+  if (opts.congressKey) env['CONGRESS_API_KEY'] = 'cg-key';
   return env as unknown as ProxyEnv;
 }
 
@@ -408,6 +434,108 @@ describe('api-admin: GET /config (env-derived runtime knobs)', () => {
     const r = await call(env, 'GET', 'config');
     // 24*60 - 5 = 1435
     expect((r.json as { socialPollStalenessMin: number }).socialPollStalenessMin).toBe(1435);
+  });
+
+  // FR-61 AC-61.1/61.2 — isAdmin hint derived from ADMIN_EMAILS (UI gating only).
+  // The test actor is alice@example.com (see mintJwt at top of file).
+  it('AC-61.1: isAdmin=true when the actor email is in ADMIN_EMAILS', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: 'bob@example.com, alice@example.com' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+
+  it('AC-61.1: isAdmin=false when the actor email is NOT in a non-empty ADMIN_EMAILS', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: 'bob@example.com,carol@example.com' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(false);
+    // The endpoint must still succeed — the list never rejects a request.
+    expect(r.status).toBe(200);
+  });
+
+  it('AC-61.1: isAdmin=true (fail-open) when ADMIN_EMAILS is unset', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+
+  it('AC-61.2: isAdmin=true (fail-open) when ADMIN_EMAILS is empty/whitespace', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: '   ' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+
+  it('AC-61.2: email match is case-insensitive and whitespace-trimmed', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { adminEmails: '  ALICE@Example.com ,  bob@example.com ' });
+    const r = await call(env, 'GET', 'config');
+    expect((r.json as { isAdmin: boolean }).isAdmin).toBe(true);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                          api-usage (FR-62)                                 */
+/* -------------------------------------------------------------------------- */
+
+describe('api-admin: GET /api-usage (FR-62 quota gauge)', () => {
+  interface UsageResp {
+    asOf: string;
+    upstreams: Array<{
+      upstream: string;
+      configured: boolean;
+      dailyLimit: number | null;
+      estimate: boolean;
+    }>;
+  }
+
+  it('AC-62.1: returns youtube + congress upstreams, each estimate:true', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { youtubeKey: true, congressKey: true });
+    const r = await call(env, 'GET', 'api-usage');
+    expect(r.status).toBe(200);
+    const j = r.json as UsageResp;
+    expect(j.upstreams.map((u) => u.upstream)).toEqual(['youtube', 'congress']);
+    expect(j.upstreams.every((u) => u.estimate === true)).toBe(true);
+  });
+
+  it('AC-62.6: unconfigured keys → configured:false, dailyLimit:null', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV()); // no keys
+    const r = await call(env, 'GET', 'api-usage');
+    const j = r.json as UsageResp;
+    for (const u of j.upstreams) {
+      expect(u.configured).toBe(false);
+      expect(u.dailyLimit).toBeNull();
+    }
+  });
+
+  it('rejects non-GET methods', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV(), { youtubeKey: true });
+    const r = await call(env, 'POST', 'api-usage', {});
+    expect(r.status).toBe(400);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*                       vote-review (FR-63 AC-63.6)                          */
+/* -------------------------------------------------------------------------- */
+
+describe('api-admin: GET /vote-review (FR-63 direction review)', () => {
+  it('AC-63.6: returns { items, state } defaulting to unreviewed', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'GET', 'vote-review');
+    expect(r.status).toBe(200);
+    const j = r.json as { items: unknown[]; state: string };
+    expect(Array.isArray(j.items)).toBe(true);
+    expect(j.state).toBe('unreviewed');
+  });
+
+  it('honors ?state=reviewed', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'GET', 'vote-review?state=reviewed');
+    expect((r.json as { state: string }).state).toBe('reviewed');
+  });
+
+  it('rejects non-GET (write is via PATCH /votes/:id)', async () => {
+    const env = makeEnv(new FakeD1(), new FakeKV());
+    const r = await call(env, 'POST', 'vote-review', {});
+    expect(r.status).toBe(400);
   });
 });
 
