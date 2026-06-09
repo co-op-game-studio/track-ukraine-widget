@@ -19,7 +19,7 @@ import {
   type CuratedBillVote,
 } from './ukraineFilter';
 import { mapWithConcurrency } from '../utils/limitConcurrency';
-import { computeValence, type Valence } from './valence';
+import { valenceForVote, type Valence } from './valence';
 import {
   normalizeVoteCast,
   type HouseRollCallRoster,
@@ -125,7 +125,8 @@ export async function resolveMemberVotes(
       // Transient roster failure → leave as Did Not Serve; never fail the batch.
     }
 
-    const valence = computeValence(bill.direction, actionFromCast(cast), vote.directionMultiplier);
+    // FR-63 — score from the vote's OWN direction, not bill.direction × multiplier.
+    const valence = valenceForVote(vote.direction, actionFromCast(cast));
     return {
       bill,
       vote,

@@ -65,12 +65,20 @@
   --tk-bg: #ffffff;
   --tk-surface: #f5f5f5;
   --tk-fg: #000000;
-  --tk-muted: #555555;
-  --tk-subtle: #777777;
+  --tk-muted: #4a4a4a;
+  /* Was #777777 — that's only ~4.0:1 on white and read as "too light" for
+     small text. #616161 is ~5.7:1, comfortably AA for body + small text. */
+  --tk-subtle: #616161;
   --tk-border: #000000;
   --tk-border-soft: #d4d4d4;
   --tk-accent: #fff100;
   --tk-accent-fg: #000000;
+  /* Link / accent-as-TEXT color. Pure brand yellow (#fff100) is unreadable as
+     text on white (~1.1:1 contrast), so links/inline accents use a readable
+     color per theme. --tk-accent stays yellow for BACKGROUNDS (active menu
+     trigger etc.) where black-on-yellow is fine. Light: a strong blue that
+     passes WCAG AA on white. Dark: brand yellow reads fine on the dark bg. */
+  --tk-link: #1d4ed8;
   --tk-danger: #b91c1c;
   --tk-danger-fg: #ffffff;
   --tk-success: #146c2e;
@@ -130,6 +138,8 @@
   --tk-border-soft: #2a2f38;
   --tk-accent: #fff100;
   --tk-accent-fg: #000000;
+  /* On the dark bg, brand yellow reads fine as link text. */
+  --tk-link: #ffe600;
   --tk-danger: #fa5252;
   --tk-danger-fg: #000000;
   --tk-success: #37b24d;

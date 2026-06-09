@@ -13,8 +13,21 @@ import {
   type MemberBillPosition,
 } from '../../services/memberVotes';
 import { fetchRollCallRoster } from '../../services/rollCallRosters';
+import { formatDate } from '../../utils/formatters';
 
 type Status = 'idle' | 'loading' | 'success' | 'error' | 'notfound';
+
+/**
+ * AC-21.6 — show the legislative calendar date of a roll-call vote. Prefer the
+ * date-only `actionDate`; `date` is a UTC timestamp whose local/UTC day can be
+ * one off for evening votes. Falls back to the `date` slice, then to "—".
+ */
+function voteDateLabel(vote: { date: string; actionDate?: string | null }): string {
+  const action = vote.actionDate?.trim();
+  if (action && /^\d{4}-\d{2}-\d{2}/.test(action)) return formatDate(action.slice(0, 10));
+  if (vote.date && /^\d{4}-\d{2}-\d{2}/.test(vote.date)) return formatDate(vote.date.slice(0, 10));
+  return '—';
+}
 
 /** Compose member identity (useMemberById normalizes chamber/state) → resolver. */
 function useMemberVotes(bioguideId: string): { status: Status; rows: MemberBillPosition[] } {
@@ -96,7 +109,7 @@ export function MemberVotesMatrix({ bioguideId }: { bioguideId: string }) {
                     </span>
                   )}
                 </td>
-                <td style={tdStyle}>{r.vote.date ? new Date(r.vote.date).toLocaleDateString() : '—'}</td>
+                <td style={tdStyle}>{voteDateLabel(r.vote)}</td>
                 <td style={{ ...tdStyle, color: POS_COLOR[r.cast] ?? 'var(--tk-fg)', fontWeight: 700, fontStyle: r.cast === 'Did Not Serve' ? 'italic' : 'normal' }}>
                   {r.cast}
                 </td>

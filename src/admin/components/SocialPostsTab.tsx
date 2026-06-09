@@ -48,7 +48,7 @@ const schema: FieldSchema<SocialPostRow>[] = [
       { value: -1, label: '-1 anti-Ukraine' },
     ],
   },
-  { group: 'Content', key: 'comment', label: 'Researcher note (visible in embed)', kind: 'textarea', width: 'long' },
+  { group: 'Content', key: 'comment', label: 'Details (visible in embed)', kind: 'textarea', width: 'long' },
 ];
 
 export function SocialPostsTab() {

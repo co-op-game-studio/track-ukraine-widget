@@ -52,6 +52,10 @@ export interface D1Vote {
   action: string | null;
   action_date: string | null;
   weight: number;
+  /** FR-63 — explicit per-vote direction. Optional on the type for back-compat
+   *  with any pre-migration row read; projector falls back to 'neutral'. */
+  direction?: string | null;
+  /** @deprecated FR-63 — kept for one release; no longer drives scoring. */
   direction_multiplier: number;
   kind: string;
   weight_reason?: string | null;
@@ -127,6 +131,9 @@ export interface BillKvRecord {
     rollCall: number;
     date: string;
     weight: number;
+    /** FR-63 — the vote's own Ukraine direction ('pro'|'anti'|'neutral'). */
+    direction: string;
+    /** @deprecated FR-63 — retained for one release. */
     directionMultiplier: number;
     kind: string;
   }>;
@@ -223,6 +230,7 @@ export function projectBill(
       rollCall: v.roll_call,
       date: v.date,
       weight: v.weight,
+      direction: v.direction ?? 'neutral',
       directionMultiplier: v.direction_multiplier,
       kind: v.kind,
     })),

@@ -14,7 +14,7 @@ export type HelpView = 'getting-started' | 'curation' | 'people-polls' | 'bills-
 const VIEWS: Array<{ id: HelpView; label: string; help: string }> = [
   { id: 'getting-started', label: 'Getting started', help: 'Orientation for new researchers' },
   { id: 'curation',        label: 'Curation guide',  help: 'How to score statements and manage the inbox' },
-  { id: 'people-polls',    label: 'People & polls',  help: 'Handles, polling, and rep profiles' },
+  { id: 'people-polls',    label: 'People & sync',   help: 'Handles, social sync, and rep profiles' },
   { id: 'bills-votes',     label: 'Bills & votes',   help: 'How bill data flows and what you can edit' },
   { id: 'scoring',         label: 'Scoring',         help: 'How the Ukraine score is computed' },
 ];

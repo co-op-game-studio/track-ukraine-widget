@@ -40,13 +40,13 @@ describe('CommentExpand', () => {
     const btn = screen.getByRole('button');
     expect(btn).toHaveAttribute('aria-expanded', 'false');
     expect(btn.textContent).toContain('▸ Show');
-    expect(btn.textContent).toContain('1 researcher comment');
-    expect(btn.textContent).not.toContain('comments');
+    expect(btn.textContent).toContain('1 detail');
+    expect(btn.textContent).not.toContain('details');
   });
 
   it('uses plural noun for count > 1', () => {
     render(<CommentExpand comments={[comment(), comment({ id: 'c2' })]} />);
-    expect(screen.getByRole('button').textContent).toContain('2 researcher comments');
+    expect(screen.getByRole('button').textContent).toContain('2 details');
   });
 
   it('clicking the toggle expands and collapses the list', () => {

@@ -609,7 +609,7 @@ describe('PeopleTab — profile sections', () => {
     const toggle = await screen.findByRole('button', { name: /Social monitoring/i });
     fireEvent.click(toggle);
     await waitFor(() => expect(screen.getByText('@jane.bsky.social')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: /Re-poll/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Sync now/ })).toBeInTheDocument();
   });
 
   it('shows "No social handles linked" when there are none', async () => {
@@ -788,7 +788,7 @@ describe('PeopleTab — re-poll handle', () => {
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
     fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
-    const repollBtn = await screen.findByRole('button', { name: /Re-poll/ });
+    const repollBtn = await screen.findByRole('button', { name: /Sync now/ });
     fireEvent.click(repollBtn);
     await waitFor(
       () => expect(stub.calls.some((c) => c.url.includes('/poll-handle'))).toBe(true),
@@ -817,7 +817,7 @@ describe('PeopleTab — re-poll handle', () => {
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
     fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /Re-poll/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Sync now/ }));
     // The newly-ingested post appears because the queue effect refetches when
     // the reload trigger bumps after the poll's onDone/onRepoll. View it in the
     // Social Feed tab (AC-60.14).
@@ -840,7 +840,7 @@ describe('PeopleTab — re-poll handle', () => {
     render(<PeopleTab initialBioguide="B001" />);
     await screen.findByRole('button', { name: /← Back to People/ });
     fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
-    const repollBtn = await screen.findByRole('button', { name: /Re-poll/ });
+    const repollBtn = await screen.findByRole('button', { name: /Sync now/ });
     fireEvent.click(repollBtn);
     await waitFor(() => expect(screen.getByText(/rate_limited/)).toBeInTheDocument(), { timeout: 3000 });
   });
@@ -881,7 +881,7 @@ describe('PeopleTab — re-poll handle', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Social monitoring/i }));
     await waitFor(() => expect(screen.getByText(/display only/i)).toBeInTheDocument(), { timeout: 3000 });
     // No re-poll button for unsupported platforms.
-    expect(screen.queryByRole('button', { name: /Re-poll/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sync now/ })).not.toBeInTheDocument();
   });
 });
 

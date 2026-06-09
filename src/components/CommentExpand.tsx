@@ -30,7 +30,7 @@ export function CommentExpand({ comments }: CommentExpandProps) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        {open ? '▾ Hide' : '▸ Show'} {count} researcher comment
+        {open ? '▾ Hide' : '▸ Show'} {count} detail
         {count === 1 ? '' : 's'}
       </button>
       {open && (

@@ -107,5 +107,5 @@ const S: Record<string, React.CSSProperties> = {
   tdName: { padding: '8px 10px', fontFamily: 'var(--tk-font-mono)', fontSize: 'var(--tk-fs-sm)', borderBottom: '1px solid var(--tk-border-soft)', whiteSpace: 'nowrap' },
   tdValue: { padding: '8px 10px', fontWeight: 700, borderBottom: '1px solid var(--tk-border-soft)' },
   tdHelp: { padding: '8px 10px', color: 'var(--tk-muted)', fontSize: 'var(--tk-fs-sm)', borderBottom: '1px solid var(--tk-border-soft)' },
-  link: { color: 'var(--tk-accent)', textDecoration: 'underline' },
+  link: { color: 'var(--tk-link)', textDecoration: 'underline' },
 };

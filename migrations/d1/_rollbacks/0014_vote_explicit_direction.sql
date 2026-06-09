@@ -1,0 +1,11 @@
+-- Rollback for 0014_vote_explicit_direction.
+--
+-- SQLite/D1 can't DROP COLUMN on older engines reliably; the safe rollback is
+-- to leave the columns in place (they're additive + default 'neutral') and rely
+-- on the scoring path having been reverted to read direction_multiplier again.
+-- direction_multiplier is retained by 0014 precisely so this rollback is a no-op
+-- at the data layer. If a hard column drop is required on a supporting engine:
+--
+-- ALTER TABLE votes DROP COLUMN direction;
+-- ALTER TABLE votes DROP COLUMN direction_reviewed_at;
+-- ALTER TABLE votes DROP COLUMN direction_reviewed_by;

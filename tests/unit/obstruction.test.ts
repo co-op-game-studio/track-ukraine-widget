@@ -15,10 +15,14 @@ function bill(dir: CuratedBill['direction']): CuratedBill {
 }
 
 function vote(kind: VoteKind, weight = 0.45, dirMult: -1 | 0 | 1 = 1): CuratedBillVote {
+  // FR-63: `direction` mirrors the legacy multiplier for these pro-bill
+  // scenarios (dm=1→pro, −1→anti, 0→neutral). isObstructionVote is bill+valence
+  // driven and doesn't read vote.direction, so this is just for the type.
+  const direction = dirMult === 0 ? 'neutral' : dirMult === -1 ? 'anti' : 'pro';
   return {
     chamber: 'Senate', congress: 118, session: 2, rollCall: 1,
     date: '2024-01-01', url: '', action: 'x', actionDate: '2024-01-01',
-    weight, directionMultiplier: dirMult, kind,
+    weight, direction, directionMultiplier: dirMult, kind,
   };
 }
 

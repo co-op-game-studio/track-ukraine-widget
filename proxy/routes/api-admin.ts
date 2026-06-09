@@ -20,6 +20,7 @@ import { logEvent } from '../observability/log';
 import * as store from '../d1/admin-store';
 import { handleIngest } from './api-admin-ingest';
 import { getSocialPollStalenessMin } from '../services/cron-interval';
+import { buildApiUsageReport } from '../services/api-usage';
 import * as tagsStore from '../d1/tags-store';
 import { KV_PREFIXES } from '../kv/prefixes';
 
@@ -114,6 +115,8 @@ export async function handleAdmin(
     return await handleCache(id, action, request, env, adminCtx);
   }
 
+  if (resource === 'api-usage') return await handleApiUsage(request, env, adminCtx);
+  if (resource === 'vote-review') return await handleVoteReview(request, env, adminCtx);
   if (resource === 'audit') return await handleAudit(request, env, adminCtx);
   if (resource === 'import-bill') return await handleImportBill(request, env, adminCtx);
   if (resource === 'data-freshness') return await handleDataFreshness(request, env, adminCtx);
@@ -177,7 +180,28 @@ function handleConfig(env: ProxyEnv, ctx: AdminCtx): DispatchResult {
     pollConcurrency: concurrency,
     socialPollCron: cron,
     socialPollStalenessMin: stalenessMin,
+    // FR-61 AC-61.1 — UI-only "is this actor an admin?" hint. NOT used to
+    // authorize anything (ADR-020). Empty/unset ADMIN_EMAILS ⇒ fail-open (true).
+    isAdmin: isAdminEmail(ctx.email, env.ADMIN_EMAILS),
   });
+}
+
+/**
+ * FR-61 AC-61.1/61.2 — cosmetic admin hint. Returns true when `email` is a
+ * case-insensitive, whitespace-trimmed member of the comma-separated
+ * `adminEmails` list, OR when that list is empty/unset (fail-open: with no
+ * list configured, everyone is an admin, preserving pre-v4.3.0 behavior).
+ *
+ * This is a presentation hint only. The Worker NEVER rejects a request based on
+ * it — CF Access is the authorization boundary (FR-50, ADR-020).
+ */
+function isAdminEmail(email: string, adminEmails: string | undefined): boolean {
+  const list = (adminEmails ?? '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+  if (list.length === 0) return true; // fail-open
+  return list.includes(email.trim().toLowerCase());
 }
 
 /** Parse a string env var as a positive integer, falling back when missing/bad. */
@@ -1036,6 +1060,58 @@ async function handleImportBill(
 // handleBackfillBills + /api/admin/backfill-bills route removed in v4.1.0.
 // Ingest moved to scripts/bills/seed.ts (`lw bills seed`) running in CI.
 // See docs/spec.md FR-59 + memory feedback_seeding_is_buildops_not_runtime.
+
+/* -------------------------------------------------------------------------- */
+/*                      Vote direction review (FR-63 AC-63.6)                  */
+/* -------------------------------------------------------------------------- */
+
+/** GET /api/admin/vote-review?state=unreviewed|reviewed|all
+ *
+ *  Lists votes joined with bill context for the direction-review surface. The
+ *  WRITE side reuses PATCH /api/admin/votes/:id with `{ direction }` — that
+ *  stamps direction_reviewed_at/by and is audited like any vote update. */
+async function handleVoteReview(
+  request: Request,
+  env: ProxyEnv,
+  ctx: AdminCtx,
+): Promise<DispatchResult> {
+  if (request.method !== 'GET') {
+    return badRequest(ctx, 'method_not_allowed', 'GET only — write via PATCH /votes/:id');
+  }
+  const url = new URL(request.url);
+  const stateParam = url.searchParams.get('state');
+  const state =
+    stateParam === 'reviewed' || stateParam === 'all' ? stateParam : 'unreviewed';
+  const limit = Number(url.searchParams.get('limit') || 200);
+  const offset = Number(url.searchParams.get('offset') || 0);
+  const items = await store.listVotesForReview(env.D1_VOTER_INFO!, { state, limit, offset });
+  return ok(ctx, { items, state });
+}
+
+/* -------------------------------------------------------------------------- */
+/*                         API quota gauge (FR-62)                             */
+/* -------------------------------------------------------------------------- */
+
+/** GET /api/admin/api-usage — honest estimate of upstream API quota burn.
+ *  See FR-62 + proxy/services/api-usage.ts. Read-only; admin-API-gated. */
+async function handleApiUsage(
+  request: Request,
+  env: ProxyEnv,
+  ctx: AdminCtx,
+): Promise<DispatchResult> {
+  if (request.method !== 'GET') {
+    return badRequest(ctx, 'method_not_allowed', 'GET only');
+  }
+  const report = await buildApiUsageReport(
+    env.D1_VOTER_INFO!,
+    {
+      youtube: Boolean(env.YOUTUBE_API_KEY),
+      congress: Boolean(env.CONGRESS_API_KEY),
+    },
+    Date.now(),
+  );
+  return ok(ctx, report);
+}
 
 /* -------------------------------------------------------------------------- */
 /*                         Data freshness (AC-59.8)                            */

@@ -63,7 +63,7 @@ const WEIGHT_ROWS: Array<{ kind: string; weight: string; note: string }> = [
   { kind: 'Resolving differences / concur', weight: '0.90', note: 'Vote on the final cross-chamber compromise text.' },
   { kind: 'Cloture',                        weight: '0.45', note: 'Vote to end debate and allow passage (Senate 60-vote threshold).' },
   { kind: 'Motion to proceed',              weight: '0.30', note: 'Vote to start debate — directional but not dispositive.' },
-  { kind: 'Motion to recommit',             weight: '0.30', note: 'Directional procedural vote; direction may be inverted (Aye = against bill).' },
+  { kind: 'Motion to recommit',             weight: '0.30', note: 'A Yea here tries to kill a pro-Ukraine bill, so this vote is scored anti-Ukraine.' },
   { kind: 'Waive budget point of order',    weight: '0.30', note: 'Directional procedural on budget rules.' },
   { kind: 'Motion to table',                weight: '0.00', note: 'EXCLUDED — ambiguous direction (tabling can block either side).' },
   { kind: 'Motion to reconsider',           weight: '0.00', note: 'EXCLUDED — ambiguous direction.' },
@@ -297,7 +297,7 @@ function ResearcherUpdatesFeed({ items }: { items: AuditPublicItem[] }) {
       <h3 className="viw-about-subheading">Recent researcher updates</h3>
       <p>
         The latest changes researchers have made to bill curation, vote
-        weights, comments, statements, and quotes.
+        weights, details, statements, and quotes.
       </p>
       <ul className="viw-about-updates-list" role="list">
         {items.map((it) => (
@@ -384,7 +384,7 @@ export function AboutSystemPanel({ apiBase = '' }: AboutSystemPanelProps = {}) {
           <h2 className="viw-about-heading">How the Ukraine Support Score works</h2>
           <p>
             Every member's score is a single number between <strong>−1</strong>{' '}
-            (strongly opposed) and <strong>+1</strong> (strongly supportive),
+            (strong opposition) and <strong>+1</strong> (strong support),
             computed only from their public record on curated Ukraine-related
             bills.
           </p>
@@ -402,8 +402,8 @@ export function AboutSystemPanel({ apiBase = '' }: AboutSystemPanelProps = {}) {
             (sign +1, amp 1.5, weight 1.0 → contribution +1.50) and votes Aye
             on cloture for another (sign +1, amp 1.0, weight 0.45 →
             contribution +0.45) scores{' '}
-            <code>(+1.50 + +0.45) ÷ (1.50 + 0.45) = +1.00</code> — a full
-            supporter.
+            <code>(+1.50 + +0.45) ÷ (1.50 + 0.45) = +1.00</code> — full
+            support.
           </p>
 
           <h3 className="viw-about-subheading">Valence (sign × amplifier)</h3>
@@ -452,7 +452,7 @@ export function AboutSystemPanel({ apiBase = '' }: AboutSystemPanelProps = {}) {
           <p>
             Members with fewer than <strong>3</strong> counted actions are
             labeled <em>"Limited record"</em> and cannot reach the "Strong
-            supporter" or "Strongly opposed" bands. The badge's color
+            support" or "Strong opposition" bands. The badge's color
             saturation grows from ~20% (one action) to 100% (eight or more),
             so a first-term member and a long-serving one look visually
             distinct even at the same score.

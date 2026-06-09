@@ -2,7 +2,14 @@
  * Valence tests (FR-15, design.md §4.9)
  */
 import { describe, it, expect } from 'vitest';
-import { computeValence } from '../../src/services/valence';
+import {
+  computeValence,
+  directionFromLegacy,
+  valenceForVote,
+  type BillDirection,
+  type MemberAction,
+  type VoteCast,
+} from '../../src/services/valence';
 
 describe('computeValence', () => {
   describe('pro-ukraine bill', () => {
@@ -66,5 +73,53 @@ describe('computeValence', () => {
     it('behaves normally when multiplier = +1 (default)', () => {
       expect(computeValence('pro-ukraine', 'voted-aye', +1)).toBe('voted-pro');
     });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/*       FR-63 — explicit per-vote direction: score-preserving equivalence     */
+/* -------------------------------------------------------------------------- */
+
+describe('FR-63 explicit per-vote direction', () => {
+  const billDirs: BillDirection[] = ['pro-ukraine', 'anti-ukraine', 'neutral'];
+  const dms: Array<-1 | 0 | 1> = [-1, 0, 1];
+  const casts: VoteCast[] = ['voted-aye', 'voted-nay', 'voted-present', 'not-voted'];
+
+  // VoteCast and MemberAction overlap on the vote values used here.
+  const castToAction = (c: VoteCast): MemberAction => c as unknown as MemberAction;
+
+  it('AC-63.4: valenceForVote(directionFromLegacy(...)) equals legacy computeValence for ALL combinations', () => {
+    for (const billDir of billDirs) {
+      for (const dm of dms) {
+        for (const cast of casts) {
+          const legacy = computeValence(billDir, castToAction(cast), dm);
+          const explicit = valenceForVote(directionFromLegacy(billDir, dm), cast);
+          expect(
+            explicit,
+            `mismatch for billDir=${billDir} dm=${dm} cast=${cast}: legacy=${legacy} explicit=${explicit}`,
+          ).toBe(legacy);
+        }
+      }
+    }
+  });
+
+  it('AC-63.3: explicit scoring needs no bill direction or multiplier', () => {
+    expect(valenceForVote('pro', 'voted-aye')).toBe('voted-pro');
+    expect(valenceForVote('pro', 'voted-nay')).toBe('voted-anti');
+    expect(valenceForVote('anti', 'voted-aye')).toBe('voted-anti');
+    expect(valenceForVote('anti', 'voted-nay')).toBe('voted-pro');
+    expect(valenceForVote('neutral', 'voted-aye')).toBe('unstated');
+    expect(valenceForVote('pro', 'voted-present')).toBe('unstated');
+    expect(valenceForVote('pro', 'not-voted')).toBe('unstated');
+  });
+
+  it('AC-63.1: conversion table — the previously-inverted cases flip direction', () => {
+    expect(directionFromLegacy('pro-ukraine', 1)).toBe('pro');
+    expect(directionFromLegacy('pro-ukraine', -1)).toBe('anti');
+    expect(directionFromLegacy('anti-ukraine', 1)).toBe('anti');
+    expect(directionFromLegacy('anti-ukraine', -1)).toBe('pro');
+    expect(directionFromLegacy('neutral', 1)).toBe('neutral');
+    expect(directionFromLegacy('neutral', -1)).toBe('anti');
+    expect(directionFromLegacy('pro-ukraine', 0)).toBe('neutral');
   });
 });

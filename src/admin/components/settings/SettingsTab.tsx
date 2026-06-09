@@ -11,8 +11,11 @@ import { PollStatusView } from './PollStatusView';
 import { AppConfigView } from './AppConfigView';
 import { CacheView } from './CacheView';
 import { DataFreshnessView } from './DataFreshnessView';
+import { ApiUsageView } from './ApiUsageView';
+import { VoteReviewView } from './VoteReviewView';
+import { WeightTunerView } from './WeightTunerView';
 
-export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config';
+export type SettingsView = 'keywords' | 'tags' | 'cache' | 'poll-status' | 'freshness' | 'config' | 'api-usage' | 'vote-review' | 'weight-tuner';
 
 interface ViewSpec {
   id: SettingsView;
@@ -21,16 +24,24 @@ interface ViewSpec {
   editable: boolean;
 }
 
+// Note: the Cache view is intentionally NOT listed here (hidden from the
+// sub-nav in v4.3.0 — it's operator-only and confusing to non-technical
+// researchers). Its route still resolves below so deep-links and the Config
+// section can reach it. See punchlist v4.3.0 "Remove cache page from display".
 const VIEWS: ViewSpec[] = [
-  { id: 'keywords',    label: 'Keywords',     help: 'Match keywords for the social ingest pipeline', editable: true },
+  { id: 'keywords',    label: 'Keywords',     help: 'Match keywords for the social sync', editable: true },
   { id: 'tags',        label: 'Tags',         help: 'Color-coded labels applied to quotes', editable: true },
-  { id: 'cache',       label: 'Cache',        help: 'Inspect + purge KV cache records', editable: true },
-  { id: 'poll-status', label: 'Poll status',  help: 'Per-handle health (read-only)', editable: false },
+  { id: 'vote-review', label: 'Vote review',  help: 'Confirm each vote\'s Ukraine direction', editable: true },
+  { id: 'weight-tuner', label: 'Weight tuner', help: 'Bulk-adjust vote weights', editable: true },
+  { id: 'poll-status', label: 'Sync status',  help: 'Per-handle health (read-only)', editable: false },
+  { id: 'api-usage',   label: 'API quota',    help: 'Estimated upstream API headroom (read-only)', editable: false },
   { id: 'freshness',   label: 'Data freshness', help: 'Bill corpus state (read-only)', editable: false },
   { id: 'config',      label: 'App config',   help: 'Deployment-time settings (read-only)', editable: false },
 ];
 
-const VALID: Set<string> = new Set(VIEWS.map((v) => v.id));
+// `cache` is a valid route (so deep-links + the Config section resolve) even
+// though it's hidden from the sub-nav above.
+const VALID: Set<string> = new Set([...VIEWS.map((v) => v.id), 'cache']);
 
 export function SettingsTab() {
   const { view = 'keywords' } = useParams<{ view: string }>();
@@ -56,8 +67,11 @@ export function SettingsTab() {
       <div style={styles.body}>
         {view === 'keywords'    && <KeywordsView />}
         {view === 'tags'        && <TagsView />}
+        {view === 'vote-review' && <VoteReviewView />}
+        {view === 'weight-tuner' && <WeightTunerView />}
         {view === 'cache'       && <CacheView />}
-        {view === 'poll-status' && <ReadOnlyWrap reason="Poll status is read-only — failures persist for engineering visibility."><PollStatusView /></ReadOnlyWrap>}
+        {view === 'poll-status' && <ReadOnlyWrap reason="Sync status is read-only — failures persist for engineering visibility."><PollStatusView /></ReadOnlyWrap>}
+        {view === 'api-usage'   && <ReadOnlyWrap reason="Estimated from recent sync + seed activity. Not an exact quota counter."><ApiUsageView /></ReadOnlyWrap>}
         {view === 'freshness'   && <ReadOnlyWrap reason="Bill corpus state is updated by the `lw bills backfill` CLI in CI. This panel is read-only."><DataFreshnessView /></ReadOnlyWrap>}
         {view === 'config'      && <ReadOnlyWrap reason="Set per-env in wrangler.toml. Edit there and redeploy to change."><AppConfigView /></ReadOnlyWrap>}
       </div>

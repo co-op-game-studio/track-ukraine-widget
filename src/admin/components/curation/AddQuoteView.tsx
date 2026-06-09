@@ -443,8 +443,8 @@ export function AddQuoteView({
             onTagCreated={(t) => setAllTags((prev) => [...prev, t])}
           />
 
-          {/* Researcher note */}
-          <Field label="Researcher note (optional — visible in embed)">
+          {/* Details — curator free-text shown in the embed */}
+          <Field label="Details (optional — visible in embed)">
             <input
               type="text"
               value={comment}

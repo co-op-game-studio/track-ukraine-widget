@@ -117,7 +117,7 @@ export function StatementsList({ posts, quotes, loading = false }: StatementsLis
             )}
             {it.comment && (
               <div className="viw-statement-curator-comment">
-                <span className="viw-statement-curator-label">Researcher note:</span>{' '}
+                <span className="viw-statement-curator-label">Details:</span>{' '}
                 {it.comment}
               </div>
             )}

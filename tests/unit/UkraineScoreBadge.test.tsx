@@ -45,13 +45,13 @@ describe('UkraineScoreBadge', () => {
 
   describe('scoreLabel thresholds (FR-16)', () => {
     const cases: Array<[number, string, string]> = [
-      [0.85, 'Strong supporter', '+0.85'],
-      [0.5, 'Supporter', '+0.50'],
-      [0.2, 'Leaning supportive', '+0.20'],
+      [0.85, 'Strong support', '+0.85'],
+      [0.5, 'Support', '+0.50'],
+      [0.2, 'Some support', '+0.20'],
       [0.0, 'Mixed', '+0.00'],
-      [-0.2, 'Leaning opposed', '-0.20'],
+      [-0.2, 'Some opposition', '-0.20'],
       [-0.5, 'Opposed', '-0.50'],
-      [-0.85, 'Strongly opposed', '-0.85'],
+      [-0.85, 'Strong opposition', '-0.85'],
     ];
     for (const [value, label, display] of cases) {
       it(`renders "${label}" at value=${value}`, () => {
@@ -67,11 +67,11 @@ describe('UkraineScoreBadge', () => {
   it('low-confidence scores SHALL render "Limited record" variants regardless of magnitude', () => {
     const { container, rerender } = render(<UkraineScoreBadge score={score(0.95, 2, 2, true)} />);
     expect(container.querySelector('.viw-score-label')?.textContent)
-      .toMatch(/Limited record — leans supportive/i);
+      .toMatch(/Limited record — some support/i);
 
     rerender(<UkraineScoreBadge score={score(-0.9, 2, 2, true)} />);
     expect(container.querySelector('.viw-score-label')?.textContent)
-      .toMatch(/Limited record — leans opposed/i);
+      .toMatch(/Limited record — some opposition/i);
 
     rerender(<UkraineScoreBadge score={score(0.05, 2, 2, true)} />);
     expect(container.querySelector('.viw-score-label')?.textContent).toBe('Limited record');
@@ -185,7 +185,7 @@ describe('UkraineScoreBadge', () => {
         .toMatch(/Limited record/);
       // 4 contributing → moderate tier → normal label again.
       rerender(<UkraineScoreBadge score={score(0.5, 4, 4)} />);
-      expect(container.querySelector('.viw-score-label')?.textContent).toBe('Supporter');
+      expect(container.querySelector('.viw-score-label')?.textContent).toBe('Support');
     });
   });
 
