@@ -142,6 +142,10 @@ ALLOWED_ORIGINS = "https://trackukraine.com,https://www.trackukraine.com"
 ALLOW_LOCALHOST = "true"
 PREVIEW_MODE = "true"
 ENV_NAME = "dev"
+# FR-61 / ADR-020 — dev admin shortlist (UI-only; CF Access is the auth boundary).
+# These users see the Admin/Config menu group; everyone else sees only the
+# researcher workflow. Overrides the empty base [vars] ADMIN_EMAILS for dev.
+ADMIN_EMAILS = "jeiisonline@gmail.com,drdarko.live@gmail.com,haze.lucy.business@gmail.com,lawarchlawarch@gmail.com,notsixpaths@gmail.com,worksofalice@gmail.com,tallotallotallo1776@gmail.com"
 CF_ACCESS_TEAM = "coopgames"
 CF_ACCESS_AUD = "ed8776c235a184c9548d99ca685f0fc40f4599f3fc46971426dd96cdc24700ed"
 # Dev: conservative fan-out so testing doesn't burn through YouTube
